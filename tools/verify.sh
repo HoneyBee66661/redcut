@@ -6,9 +6,10 @@
 # same thing:
 #
 #   1. tools/check-architecture.sh   no JDK, no network, fails in seconds
-#   2. ktlint + detekt               style and code smells, no Android SDK needed
-#   3. the pure-JVM test tier        :domain:* — the fast tier of spec §12.1
-#   4. the fast-tier budget          the tier is only useful while it stays FAST
+#   2. tools/check-app-imports.sh    the Android-only compile errors that are a grep
+#   3. ktlint + detekt               style and code smells, no Android SDK needed
+#   4. the pure-JVM test tier        :domain:* — the fast tier of spec §12.1
+#   5. the fast-tier budget          the tier is only useful while it stays FAST
 #
 # Usage:
 #   ./tools/verify.sh                             # warnings are warnings
@@ -36,6 +37,9 @@
 #   * ktlint and detekt ran only in CI, so the first person to see a style finding
 #     was CI — on a push, minutes after the code was written. Both are pure JVM, so
 #     there is no reason to make the local loop wait for a network round trip.
+#   * Phase 0.5 broke `:app` on a missing `import com.redcut.app.BuildConfig` — a
+#     compile error that is invisible on a host with no Android SDK, and which cost a
+#     full CI round trip. Step 2 is the cheap half of that lesson.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -63,6 +67,12 @@ fi
 
 echo "== Architecture boundaries ==========================================="
 bash tools/check-architecture.sh
+
+echo
+echo "== App-tier import check ============================================="
+# The Android-only half of the local loop: `:app` and `:feature:*` are never compiled
+# on this host, so a missing generated-symbol import is green here and red in CI.
+bash tools/check-app-imports.sh && echo "  no unqualified generated symbols"
 
 echo
 echo "== Static analysis: ${QUALITY_TASKS[*]} =============================="

@@ -26,9 +26,14 @@ internal fun Project.versionInt(alias: String): Int =
  * Warnings-as-errors is opt-in via `-Predcut.warningsAsErrors`, not the default.
  * On a greenfield project a hard -Werror during scaffolding is hostile; in CI it
  * is exactly what you want. Controlled by a property so both are true.
+ *
+ * The `.orElse(false)` is load-bearing: without it the property is *absent* when
+ * the flag is not passed, and `allWarningsAsErrors.set(absent)` leaves the
+ * KotlinCompile task input unset — which Gradle rejects at configuration time
+ * because the property is not optional.
  */
 internal fun Project.warningsAsErrors(): Provider<Boolean> =
-    providers.gradleProperty("redcut.warningsAsErrors").map { it.toBoolean() }
+    providers.gradleProperty("redcut.warningsAsErrors").map { it.toBoolean() }.orElse(false)
 
 /** Kotlin configuration shared by every Android module. */
 internal fun Project.configureKotlinAndroid() {

@@ -50,6 +50,11 @@ android {
         // catch before a tester finds it.
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+            // Must track AndroidApplicationConventionPlugin's set: an ABI the APP declares
+            // but this module does not build is an APK with no .so for it, which is the
+            // "missing .so" defect this job already exists to catch. Only the
+            // `baseline-profile` workflow passes this property (its emulator is x86_64).
+            providers.gradleProperty("redcut.profileAbi").orNull?.let { abiFilters += it }
         }
     }
 

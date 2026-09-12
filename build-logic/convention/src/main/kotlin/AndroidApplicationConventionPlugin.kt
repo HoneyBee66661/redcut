@@ -28,8 +28,20 @@ class AndroidApplicationConventionPlugin : Plugin<Project> {
 
                 // Ship only the ABIs we support. A universal APK is how you blow
                 // the 25 MB budget (NFR-7).
+                //
+                // `-Predcut.profileAbi=<abi>` appends ONE more ABI, and exists for exactly
+                // one caller: the `baseline-profile` workflow, whose emulator is x86_64
+                // while the product ships arm64-v8a/armeabi-v7a, so an app built for the
+                // shipped set cannot even be installed there. Without the override the
+                // generation job fails at install, which reads as a broken profile pipeline
+                // rather than as the ABI mismatch it is.
+                //
+                // A property rather than an unconditional x86_64: adding an ABI to the
+                // shipped set for the sake of a CI job would put every user's download at
+                // risk of the size budget for a case no user has.
                 ndk {
                     abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+                    providers.gradleProperty("redcut.profileAbi").orNull?.let { abiFilters += it }
                 }
             }
 

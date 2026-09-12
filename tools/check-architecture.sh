@@ -157,6 +157,14 @@ done
 
 # :app is the composition root: it is depended UPON by nothing. An edge into it
 # means some module is reaching past its own layer for the whole graph.
+#
+# :benchmark is the one module that points at :app, and it does so as
+# `targetProjectPath = ":app"` — a string AGP reads, not a Gradle project edge. That
+# distinction is deliberately left to this scan: if someone ever writes
+# `project(":app")` in :benchmark, it becomes a dependency of a test module on the
+# product graph for no reason, and it should fail here like anywhere else. The profile
+# generator's instrumentation edge is test-only and packaged into nothing, which is why
+# the form that exists is not this one.
 echo "  Rule 4: nothing depends on :app"
 while IFS= read -r build_file; do
     rel="${build_file#./}"

@@ -47,6 +47,13 @@ include(":domain:render")
 include(":engine:media3")
 include(":engine:native")
 
+// --- Benchmark (test-only, never shipped) ----------------------------------
+// The baseline profile generator (spec §11 "Baseline Profiles", §13 task 0.6): a
+// `com.android.test` module that instruments a device to produce the profile shipped in
+// the APK. It depends on :app; :app never depends on it, so it cannot leak into the
+// product — which is the whole reason it is a module and not a test source set.
+include(":benchmark")
+
 // --- Core ------------------------------------------------------------------
 include(":core:common")   // PURE JVM
 include(":core:media")

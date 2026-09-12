@@ -1,0 +1,139 @@
+name: Baseline profile
+
+# WHY THIS IS A SEPARATE WORKFLOW, AND WHY IT IS NOT IN ci.yml
+#
+# Generating a baseline profile needs a booted Android device and several minutes of it.
+# ci.yml is the gate every PR passes, and it passes without a device on purpose: a gate
+# that needs an emulator is a gate that is slow, flaky, and skipped. So the profile lives
+# here — generated on demand, weekly, and whenever the generator or the shipped profile
+# changes — and ci.yml merely COMPILES the generator (the quality + build jobs) without
+# running it.
+#
+# This is the same split the spec draws for the test tiers (§12.1): the fast tier runs
+# everywhere, the instrumented tier runs where a device exists.
+#
+# The device is an emulator, and a profile generated on one is valid: ART profiles record
+# dex paths, not timings. Timings are the thing an emulator cannot be trusted for, which is
+# why no benchmark lives in :benchmark — see the note in benchmark/build.gradle.kts.
+
+on:
+  # Manual, for the case that matters in practice: a UI change landed and someone wants
+  # the profile refreshed without waiting for Monday.
+  workflow_dispatch:
+  # Weekly. A profile is regenerated from the app as it exists NOW; the weekly diff is the
+  # signal that a screen moved, a path was added, or the profile has gone stale.
+  schedule:
+    - cron: "0 4 * * 1"   # Mondays, 04:00 UTC
+  # On PRs that change the generator or the profile itself. Those are the changes that can
+  # break generation, and they are rare — which is what makes an emulator acceptable here.
+  pull_request:
+    paths:
+      - "benchmark/**"
+      - "app/src/main/baselineProfiles/**"
+      - "app/src/main/baseline-prof.txt"
+      - ".github/workflows/baseline-profile.yml"
+
+concurrency:
+  group: baseline-profile-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # `-Predcut.profileAbi=x86_64` is what makes the app installable on this emulator: the
+  # product ships arm64-v8a/armeabi-v7a only (NFR-7), so without it the generation fails at
+  # install and reads as a broken profile pipeline rather than as an ABI mismatch.
+  GRADLE_FLAGS: >-
+    -Predcut.warningsAsErrors=true
+    -Predcut.profileAbi=x86_64
+    -Pandroid.testInstrumentationRunnerArguments.androidx.benchmark.suppressErrors=EMULATOR
+    --stacktrace
+
+jobs:
+  generate:
+    name: Generate the profile on an emulator
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+
+      # KVM is what makes an x86_64 emulator usable in a job rather than a time-out. The
+      # udev rule is the documented way to make /dev/kvm accessible to the runner user.
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # `aosp_atd` is the "automated test device" image: no Play services, no UI chrome,
+      # booting in well under a minute. `-no-snapshot` keeps runs comparable, and
+      # `-gpu swiftshader_indirect` is the only GPU a hosted runner has.
+      - name: Generate the baseline profile
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 31
+          target: aosp_atd
+          arch: x86_64
+          profile: pixel_5
+          disable-animations: true
+          emulator-options: >-
+            -no-snapshot -noaudio -no-boot-anim -no-window
+            -gpu swiftshader_indirect
+          script: ./gradlew :app:generateBaselineProfile $GRADLE_FLAGS
+
+      # An empty profile is worse than none: it ships, it looks like a profile, and every
+      # later reader assumes the code paths were covered. So the job fails on one, and on a
+      # profile with no `.txt` rules at all.
+      - name: Fail on an empty profile
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(app/src/main/baselineProfiles/*.txt)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "::error::No profile was written to app/src/main/baselineProfiles."
+            echo "Check that :benchmark:collect*BaselineProfile ran on the emulator."
+            exit 1
+          fi
+          for f in "${files[@]}"; do
+            bytes=$(wc -c < "$f")
+            rules=$(grep -c '^HSPL\|^Lcom\|^H' "$f" || true)
+            echo "$f: ${bytes} bytes, ${rules} rules"
+            if [ "$bytes" -eq 0 ]; then
+              echo "::error::$f is empty."
+              exit 1
+            fi
+          done
+
+      # The profile is a checked-in input, so the interesting output of this job is the
+      # DIFF: what the app's code paths look like today versus what was committed. Printed
+      # rather than auto-committed — a generated file that commits itself is a file nobody
+      # reviews, and this one is reviewed by design (see the note in app/build.gradle.kts).
+      - name: Summarise the change
+        run: |
+          echo "### Baseline profile" >> "$GITHUB_STEP_SUMMARY"
+          echo '' >> "$GITHUB_STEP_SUMMARY"
+          git diff --stat -- app/src/main/baselineProfiles app/src/main/baseline-prof.txt \
+            >> "$GITHUB_STEP_SUMMARY" || true
+          git status --porcelain -- app/src/main/baselineProfiles \
+            >> "$GITHUB_STEP_SUMMARY" || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: baseline-profile
+          path: |
+            app/src/main/baselineProfiles
+            app/src/main/baseline-prof.txt
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: baseline-profile-reports
+          path: |
+            benchmark/build/reports/**
+            benchmark/build/outputs/**
+            app/build/reports/**

@@ -12,11 +12,24 @@ plugins {
     // (they take their collaborators as constructor parameters), which is what keeps
     // the fast tier free of annotation processing.
     id("redcut.android.hilt")
+    // Baseline profiles (spec §11, NFR-1). Applied HERE and not on the modules that are
+    // profiled: the profile is a property of the SHIPPED APK, so the module that produces
+    // the APK is the one that owns it. The extension is configured below the `android`
+    // block — `mergeIntoMain` puts the generated rules in `src/main/baselineProfiles`,
+    // where they are a reviewed, checked-in build input rather than a build artifact.
+    alias(libs.plugins.androidx.baselineprofile)
 }
 
 android {
     namespace = "com.redcut.app"
 }
+
+// Single-line on purpose: a multi-line top-level lambda in a `.kts` file is what ktlint's
+// indent rule rewrites — it re-indented this entire file (dependencies block included) to
+// one space and called that the correct style. The rule is right about Kotlin sources and
+// wrong about Gradle scripts whose bodies are DSL lambdas; the workaround is to not give it
+// a multi-line top-level block, and to keep the explanation in the comment above instead.
+baselineProfile { mergeIntoMain = true }
 
 dependencies {
     // --- Features: the four stages of the product ---------------------------
@@ -60,4 +73,11 @@ dependencies {
 
     // --- Logging (spec §3.1: "Timber + a release-mode no-op tree") ----------
     implementation(libs.timber)
+
+    // --- Baseline profile (spec §11, NFR-1) ---------------------------------
+    // The generator. :benchmark instruments this app; nothing is packaged from it.
+    baselineProfile(project(":benchmark"))
+    // Installs the profile on API 26..30. From API 31 the platform does it; below that it
+    // does not, and a profile that is never installed is a file in an APK and nothing more.
+    implementation(libs.androidx.profileinstaller)
 }

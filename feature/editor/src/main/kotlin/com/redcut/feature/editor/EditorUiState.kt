@@ -37,6 +37,14 @@ data class EditorUiState(
     /** What the user has selected (§7.2). */
     val selection: Selection = Selection.None,
     /**
+     * What the user is doing right now (§7.2): idle, or a trim in flight.
+     *
+     * Not view state like the timeline's zoom: a trim in flight has ALREADY changed the document as
+     * a preview, so the screen that showed the document without this could not explain why a clip is
+     * shorter than it was a moment ago.
+     */
+    val tool: ToolState = ToolState.Idle,
+    /**
      * What the last import did, or null when nothing has been imported yet (FR-1.4).
      *
      * Part of the ONE state object rather than a second `StateFlow`, for the reason §7.2
@@ -83,6 +91,7 @@ internal fun UndoStack.toUiState(
     stage: Stage,
     playheadUs: Long = 0L,
     selection: Selection = Selection.None,
+    tool: ToolState = ToolState.Idle,
     import: ImportReport? = null,
 ): EditorUiState = EditorUiState(
     document = current,
@@ -94,8 +103,19 @@ internal fun UndoStack.toUiState(
     stage = stage,
     playheadUs = playheadUs,
     selection = selection,
+    tool = tool,
     import = import,
 )
+
+/**
+ * A trim in flight for a clip that no longer exists is not a tool state; it is a lost gesture.
+ *
+ * Same rule as [Selection.reconciledWith], and it matters more here: a stale [ToolState.Trimming]
+ * would keep the stage body showing a frame at an edge that is not on screen, and the next
+ * [EditorIntent.UpdateTrim] would preview a command against a clip the document does not have.
+ */
+internal fun ToolState.reconciledWith(clipIds: List<String>): ToolState =
+    if (this is ToolState.Trimming && clipId !in clipIds) ToolState.Idle else this
 
 /**
  * Switches stages.

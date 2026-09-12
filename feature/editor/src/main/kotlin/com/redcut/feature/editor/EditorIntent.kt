@@ -1,5 +1,7 @@
 package com.redcut.feature.editor
 
+import com.redcut.domain.document.ClipEdge
+
 /**
  * Everything the UI can ask the editor to do (spec §7.2).
  *
@@ -50,6 +52,27 @@ sealed interface EditorIntent {
 
     /** Clear the selection (a tap on empty timeline space). */
     data object ClearSelection : EditorIntent
+
+    /**
+     * Start a trim gesture on [edge] of [clipId] (FR-2.1).
+     *
+     * The command is applied as a PREVIEW, not pushed: the whole drag is one undo entry, and §7.3's
+     * "Undo Trim" is what the user expects to see once, not once per frame of the gesture.
+     */
+    data class BeginTrim(
+        val clipId: String,
+        val edge: ClipEdge,
+        val sourceTimeUs: Long,
+    ) : EditorIntent
+
+    /** The drag moved: the edge is now at [sourceTimeUs]. */
+    data class UpdateTrim(val sourceTimeUs: Long) : EditorIntent
+
+    /** The finger lifted: the preview becomes one history entry. */
+    data object EndTrim : EditorIntent
+
+    /** The gesture was abandoned (a second finger, a system interruption): the preview is rolled back. */
+    data object CancelTrim : EditorIntent
 
     /**
      * Dismiss the import report (FR-1.4).

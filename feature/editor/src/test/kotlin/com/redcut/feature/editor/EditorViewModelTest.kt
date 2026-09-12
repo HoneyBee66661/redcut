@@ -8,6 +8,7 @@ import com.redcut.core.media.MediaSourceReader
 import com.redcut.core.media.SourceReadResult
 import com.redcut.core.media.ThumbnailSource
 import com.redcut.core.media.ThumbnailStore
+import com.redcut.domain.document.ClipEdge
 import com.redcut.domain.document.ImportRejection
 import com.redcut.domain.document.ProbedSource
 import com.redcut.domain.document.SourceProbe
@@ -15,6 +16,7 @@ import com.redcut.feature.editor.timeline.TimelineThumbnails
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
@@ -431,5 +433,113 @@ class EditorViewModelTest {
         assertThat(model.state.value.document.clips).isEmpty()
         assertThat(model.state.value.playheadUs).isEqualTo(0L)
         assertThat(model.state.value.selection).isEqualTo(Selection.None)
+    }
+
+    // --- Trim (FR-2.1) ------------------------------------------------------
+
+    /** Imports one 4-second clip and returns the model plus its clip id. */
+    private fun TestScope.importedClip(): Pair<EditorViewModel, String> {
+        val model = viewModel(RecordingReader(listOf(video(durationUs = 4_000_000L))))
+        model.onIntent(EditorIntent.ImportMedia(listOf("content://media/1")))
+        advanceUntilIdle()
+        return model to model.state.value.document.clips.single().id
+    }
+
+    @Test
+    fun `a whole trim drag is one undo entry labelled Trim`() = runTest(dispatcher) {
+        val (model, clipId) = importedClip()
+
+        model.onIntent(EditorIntent.BeginTrim(clipId, ClipEdge.IN, 1_000_000L))
+        model.onIntent(EditorIntent.UpdateTrim(1_400_000L))
+        model.onIntent(EditorIntent.UpdateTrim(1_800_000L))
+        model.onIntent(EditorIntent.EndTrim)
+
+        // The drag moved the in-point, and the history has ONE entry for the gesture: an undo per
+        // frame would make the user press undo twenty times to give back one second of footage.
+        assertThat(model.state.value.document.clips.single().sourceInUs).isEqualTo(1_800_000L)
+        assertThat(model.state.value.history)
+            .isEqualTo(HistoryState.Ready(canUndo = true, canRedo = false, topLabel = "Trim"))
+        assertThat(model.state.value.tool).isEqualTo(ToolState.Idle)
+
+        model.onIntent(EditorIntent.Undo)
+        assertThat(model.state.value.document.clips.single().sourceInUs).isEqualTo(0L)
+    }
+
+    @Test
+    fun `trimming the in-point leaves the out-point alone`() = runTest(dispatcher) {
+        val (model, clipId) = importedClip()
+
+        model.onIntent(EditorIntent.BeginTrim(clipId, ClipEdge.IN, 1_000_000L))
+        model.onIntent(EditorIntent.UpdateTrim(1_200_000L))
+        model.onIntent(EditorIntent.EndTrim)
+
+        val clip = model.state.value.document.clips.single()
+        assertThat(clip.sourceInUs).isEqualTo(1_200_000L)
+        assertThat(clip.sourceOutUs).isEqualTo(4_000_000L)
+    }
+
+    @Test
+    fun `a drag past the end of the source clamps to it`() = runTest(dispatcher) {
+        val (model, clipId) = importedClip()
+
+        // The command owns the limit (FR-2.1 is non-destructive): the drag reports 9 s of a 4 s
+        // source, and the document gets 4 s rather than rejecting the gesture or reading past the file.
+        model.onIntent(EditorIntent.BeginTrim(clipId, ClipEdge.OUT, 9_000_000L))
+        model.onIntent(EditorIntent.EndTrim)
+
+        assertThat(model.state.value.document.clips.single().sourceOutUs).isEqualTo(4_000_000L)
+    }
+
+    @Test
+    fun `a trim in flight reports where the edge is`() = runTest(dispatcher) {
+        val (model, clipId) = importedClip()
+
+        model.onIntent(EditorIntent.BeginTrim(clipId, ClipEdge.OUT, 3_000_000L))
+        model.onIntent(EditorIntent.UpdateTrim(2_500_000L))
+
+        // The tool carries the source time the edge has reached, which is what the stage body needs
+        // to show the frame being trimmed to (FR-2.1's live edge preview).
+        assertThat(model.state.value.tool)
+            .isEqualTo(ToolState.Trimming(clipId, ClipEdge.OUT, 2_500_000L))
+    }
+
+    @Test
+    fun `a cancelled trim leaves the document and the history untouched`() = runTest(dispatcher) {
+        val (model, clipId) = importedClip()
+        val before = model.state.value
+
+        model.onIntent(EditorIntent.BeginTrim(clipId, ClipEdge.IN, 1_000_000L))
+        model.onIntent(EditorIntent.UpdateTrim(2_000_000L))
+        model.onIntent(EditorIntent.CancelTrim)
+
+        // No trace: the document is back, the tool is idle, and there is no undo entry for a gesture
+        // the user abandoned. An entry that appeared to do nothing would be worse than none.
+        assertThat(model.state.value.document).isEqualTo(before.document)
+        assertThat(model.state.value.tool).isEqualTo(ToolState.Idle)
+        assertThat(model.state.value.history).isEqualTo(before.history)
+    }
+
+    @Test
+    fun `a drag with no trim in flight is ignored`() = runTest(dispatcher) {
+        val (model, _) = importedClip()
+        val before = model.state.value
+
+        model.onIntent(EditorIntent.UpdateTrim(1_000_000L))
+        model.onIntent(EditorIntent.EndTrim)
+        model.onIntent(EditorIntent.CancelTrim)
+
+        // Taps and drags race on a real screen; an Update arriving after the gesture ended must do
+        // nothing rather than trim a clip nobody is holding.
+        assertThat(model.state.value).isEqualTo(before)
+    }
+
+    @Test
+    fun `a trim on a clip the document does not have is ignored`() = runTest(dispatcher) {
+        val (model, _) = importedClip()
+        val before = model.state.value
+
+        model.onIntent(EditorIntent.BeginTrim("clip-that-never-existed", ClipEdge.IN, 1_000_000L))
+
+        assertThat(model.state.value).isEqualTo(before)
     }
 }

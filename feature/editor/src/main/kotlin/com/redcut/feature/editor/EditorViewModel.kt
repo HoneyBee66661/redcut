@@ -8,11 +8,15 @@ import com.redcut.core.common.di.IoDispatcher
 import com.redcut.core.common.logging.RedcutLogger
 import com.redcut.core.media.MediaSourceReader
 import com.redcut.core.media.SourceReadResult
+import com.redcut.domain.document.Clip
+import com.redcut.domain.document.ClipEdge
 import com.redcut.domain.document.CompoundCommand
 import com.redcut.domain.document.EditDocument
 import com.redcut.domain.document.ImportRejection
+import com.redcut.domain.document.TrimClip
 import com.redcut.domain.document.UndoStack
 import com.redcut.domain.document.planImport
+import com.redcut.domain.document.trimmedTo
 import com.redcut.feature.editor.timeline.TimelineThumbnails
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineDispatcher
@@ -107,9 +111,87 @@ class EditorViewModel @Inject constructor(
             EditorIntent.ClearSelection ->
                 _state.value = _state.value.copy(selection = Selection.None)
 
+            is EditorIntent.BeginTrim -> beginTrim(intent.clipId, intent.edge, intent.sourceTimeUs)
+
+            is EditorIntent.UpdateTrim -> updateTrim(intent.sourceTimeUs)
+
+            EditorIntent.EndTrim -> endTrim()
+
+            EditorIntent.CancelTrim -> cancelTrim()
+
             EditorIntent.DismissImport -> _state.value = _state.value.copy(import = null)
         }
     }
+
+    /**
+     * Starts a trim gesture (FR-2.1).
+     *
+     * A preview, not a command: the whole drag is ONE history entry (§7.3's "Undo Trim"), and the
+     * document changes on every frame of the gesture so the timeline and the stage body follow the
+     * finger live.
+     *
+     * The clip is looked up fresh rather than trusted from the intent: the id came from a hit test
+     * against a frame the user saw, and a clip deleted since then (an undo, a ripple) must not start
+     * a gesture against nothing.
+     */
+    private fun beginTrim(clipId: String, edge: ClipEdge, sourceTimeUs: Long) {
+        val clip = clipOf(clipId) ?: return
+        logger.d(TAG, "trim ${edge.name.lowercase()} of $clipId to $sourceTimeUs")
+        history.preview(trimCommandFor(clip, edge, sourceTimeUs))
+        _state.value = _state.value.copy(
+            tool = ToolState.Trimming(clipId = clipId, edge = edge, sourceTimeUs = sourceTimeUs),
+        )
+        publish()
+    }
+
+    /** The drag moved. Ignored when no trim is in flight, which is not an error: taps race drags. */
+    private fun updateTrim(sourceTimeUs: Long) {
+        val trimming = _state.value.tool as? ToolState.Trimming ?: return
+        val clip = clipOf(trimming.clipId) ?: return
+        // Rebuilt from the CURRENT clip on every frame. That is what makes the held edge invariant:
+        // the drag value only ever moves the edge the gesture started on, and the other end keeps
+        // whatever the last preview put there.
+        history.preview(trimCommandFor(clip, trimming.edge, sourceTimeUs))
+        _state.value = _state.value.copy(tool = trimming.copy(sourceTimeUs = sourceTimeUs))
+        publish()
+    }
+
+    /** The finger lifted: the preview becomes one undo entry, and the tool goes idle. */
+    private fun endTrim() {
+        if (_state.value.tool !is ToolState.Trimming) return
+        history.commit()
+        _state.value = _state.value.copy(tool = ToolState.Idle)
+        publish()
+    }
+
+    /**
+     * The gesture was abandoned.
+     *
+     * The document goes back to what it was before the finger landed — the whole point of previewing
+     * rather than executing: a trim cancelled by a system interruption must leave no trace, and must
+     * not leave an undo entry that appears to do nothing.
+     */
+    private fun cancelTrim() {
+        if (_state.value.tool !is ToolState.Trimming) return
+        history.abortPreview()
+        _state.value = _state.value.copy(tool = ToolState.Idle)
+        publish()
+    }
+
+    /**
+     * The command a trim drag means.
+     *
+     * `trimmedTo` gives the INTENT (one edge moves), and `TrimClip` owns the clamping — so a drag past
+     * the end of the source is recorded as the user's intent and applied as the limit. The UI learns
+     * what it actually got by reading the document back, not by duplicating the rule.
+     */
+    private fun trimCommandFor(clip: Clip, edge: ClipEdge, sourceTimeUs: Long): TrimClip {
+        val (inUs, outUs) = clip.trimmedTo(edge, sourceTimeUs)
+        return TrimClip(clipId = clip.id, sourceInUs = inUs, sourceOutUs = outUs)
+    }
+
+    private fun clipOf(clipId: String): Clip? =
+        history.current.clips.firstOrNull { it.id == clipId }
 
     /**
      * Selects [clipId] if the document actually has it.
@@ -200,6 +282,7 @@ class EditorViewModel @Inject constructor(
             stage = _state.value.stage,
             playheadUs = _state.value.playheadUs.coerceIn(0L, document.timelineDurationUs),
             selection = _state.value.selection.reconciledWith(document.clips.map { it.id }),
+            tool = _state.value.tool.reconciledWith(document.clips.map { it.id }),
             import = import,
         )
     }

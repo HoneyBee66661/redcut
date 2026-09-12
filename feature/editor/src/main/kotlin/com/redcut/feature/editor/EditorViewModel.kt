@@ -72,13 +72,20 @@ class EditorViewModel @Inject constructor(
                 _state.value = _state.value.withStage(intent.stage)
             }
 
+            // Both of these actually MOVE the stack. Until Phase 1.3 the intent existed and
+            // the wiring did not: `Undo` re-read the state without undoing anything, so the
+            // button was a no-op that looked wired. The import test caught it — an import is
+            // the first thing a test can put on the stack and then take off again, which is
+            // why "the stage survives an undo" passed on an empty history and proved nothing.
             EditorIntent.Undo -> {
                 logger.d(TAG, "undo")
+                history.undo()
                 publish()
             }
 
             EditorIntent.Redo -> {
                 logger.d(TAG, "redo")
+                history.redo()
                 publish()
             }
 

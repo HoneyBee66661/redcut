@@ -31,6 +31,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.redcut.domain.document.ClipEdge
+import com.redcut.domain.document.CutAvailability
+import com.redcut.domain.document.CutTool
+import com.redcut.domain.document.availabilityFor
 import com.redcut.feature.editor.timeline.TimelineCanvas
 
 /**
@@ -141,6 +144,12 @@ internal fun EditorScreen(
 
         StageBody(state = state, onThumbnail = onThumbnail)
 
+        // The stage's own tools, under its tabs: the Cut tools only make sense while the Cut stage is
+        // open, and a global row of them would be a row of disabled buttons in the other stages.
+        if (state.stage == Stage.Cut) {
+            CutTools(state = state, onIntent = onIntent)
+        }
+
         // The timeline sits between the preview and the history bar, which is the layout §7.1
         // draws. It is given a fixed height rather than a weight: the preview is what should grow
         // when the screen does, and a timeline that stretched with the window would show more
@@ -243,6 +252,54 @@ private fun EdgeFrame(
             style = MaterialTheme.typography.labelMedium,
         )
     }
+}
+
+/**
+ * The Cut tools (FR-2.2–2.6).
+ *
+ * Every button's enabled state AND its explanation come from `availabilityFor` — the same function the
+ * ViewModel's command path consults before it applies anything. One rule, two readers: a button that
+ * offered what the command would refuse is the classic way an editor feels broken.
+ *
+ * When NOTHING can be cut, the reason is shown. When only some tools are blocked, it is not: the
+ * reasons differ per tool (delete is unavailable on the last clip while split is fine), and printing
+ * one tool's reason under a row of four would be worse than printing none.
+ */
+@Composable
+private fun CutTools(state: EditorUiState, onIntent: (EditorIntent) -> Unit) {
+    val rows = remember(state.document, state.playheadUs) {
+        CUT_TOOLS.map { tool -> tool to state.document.availabilityFor(tool, state.playheadUs) }
+    }
+    val allBlocked = rows.none { (_, availability) -> availability is CutAvailability.Available }
+    val reasons = rows.mapNotNull { (_, availability) ->
+        (availability as? CutAvailability.Unavailable)?.reason
+    }.distinct()
+
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
+        Row {
+            rows.forEach { (tool, availability) ->
+                TextButton(
+                    onClick = { onIntent(EditorIntent.ApplyCut(tool)) },
+                    enabled = availability is CutAvailability.Available,
+                ) {
+                    Text(tool.label(), style = MaterialTheme.typography.labelLarge)
+                }
+            }
+        }
+        if (allBlocked && reasons.size == 1) {
+            Text(text = reasons.first(), style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
+
+private val CUT_TOOLS = listOf(CutTool.SPLIT, CutTool.CUT_LEFT, CutTool.CUT_RIGHT, CutTool.DELETE)
+
+/** A tool's button word. Here rather than in the domain because it is a UI word, not a domain name. */
+private fun CutTool.label(): String = when (this) {
+    CutTool.SPLIT -> "Split"
+    CutTool.CUT_LEFT -> "Cut left"
+    CutTool.CUT_RIGHT -> "Cut right"
+    CutTool.DELETE -> "Delete"
 }
 
 /**

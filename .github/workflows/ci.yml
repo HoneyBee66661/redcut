@@ -69,9 +69,15 @@ jobs:
         # does not. 5s was aspirational and would have failed on a cold cache,
         # which trains people to ignore the check. Tighten once there is a
         # baseline to justify it.
+        #
+        # `-m1` takes only the FIRST time attribute per file — the `<testsuite>`
+        # element. Summing every match also adds each suite's per-case times to the
+        # suite total and roughly doubles the number, which would make this budget
+        # about twice as lenient as it reads.
         run: |
-          TOTAL=$(find . -path '*/build/test-results/*' -name '*.xml' -exec grep -ho 'time="[0-9.]*"' {} + \
-            | sed 's/time="//;s/"//' | awk '{s+=$1} END {printf "%.1f", s}')
+          TOTAL=$(for f in $(find . -path '*/build/test-results/*' -name '*.xml'); do
+            grep -om1 'time="[0-9.]*"' "$f" || true
+          done | sed 's/time="//;s/"//' | awk '{s+=$1} END {printf "%.1f", s}')
           echo "Domain test wall time: ${TOTAL}s"
           awk -v t="${TOTAL:-0}" 'BEGIN { exit (t > 15.0) ? 1 : 0 }' \
             || { echo "::error::Domain test tier exceeded 15s budget (spec §12.1)"; exit 1; }

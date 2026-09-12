@@ -54,14 +54,13 @@ internal object NativeContract {
      * user-facing code would invite a UI to render it, which is the wrong response —
      * the message exists so the log names both numbers.
      */
-    fun verifyHandshake(reported: Int): RedcutResult<Int> =
-        if (reported == EXPECTED_VERSION_CODE) {
-            reported.asSuccess()
-        } else {
-            RedcutError(
-                code = ErrorCode.UNKNOWN,
-                message = "native ABI mismatch: kotlin expects $EXPECTED_VERSION_CODE, " +
-                    "libredcut_core.so reports $reported — stale or mismatched build artifacts",
-            ).asFailure()
-        }
+    fun verifyHandshake(reported: Int): RedcutResult<Int> = if (reported == EXPECTED_VERSION_CODE) {
+        reported.asSuccess()
+    } else {
+        RedcutError(
+            code = ErrorCode.UNKNOWN,
+            message = "native ABI mismatch: kotlin expects $EXPECTED_VERSION_CODE, " +
+                "libredcut_core.so reports $reported — stale or mismatched build artifacts",
+        ).asFailure()
+    }
 }

@@ -11,10 +11,12 @@ import com.redcut.core.media.SourceReadResult
 import com.redcut.domain.document.Clip
 import com.redcut.domain.document.ClipEdge
 import com.redcut.domain.document.CompoundCommand
+import com.redcut.domain.document.CutTool
 import com.redcut.domain.document.EditDocument
 import com.redcut.domain.document.ImportRejection
 import com.redcut.domain.document.TrimClip
 import com.redcut.domain.document.UndoStack
+import com.redcut.domain.document.commandFor
 import com.redcut.domain.document.planImport
 import com.redcut.domain.document.trimmedTo
 import com.redcut.feature.editor.timeline.TimelineThumbnails
@@ -119,8 +121,35 @@ class EditorViewModel @Inject constructor(
 
             EditorIntent.CancelTrim -> cancelTrim()
 
+            is EditorIntent.ApplyCut -> applyCut(intent.tool)
+
             EditorIntent.DismissImport -> _state.value = _state.value.copy(import = null)
         }
+    }
+
+    /**
+     * Runs a Cut tool at the playhead (FR-2.2–2.6).
+     *
+     * The document decides everything: `commandFor` returns null exactly when the tool is not
+     * available, so this handler has no rules of its own to keep in step with the domain — and the UI
+     * asks `availabilityFor` the same question to decide whether to enable the button. One rule, two
+     * readers.
+     *
+     * A discrete command rather than a preview: unlike a trim drag, a cut happens once and is either
+     * wanted or undone, so it goes straight onto the stack as one entry (§7.3's "Undo Split").
+     */
+    private fun applyCut(tool: CutTool) {
+        val command = history.current.commandFor(tool, _state.value.playheadUs) { ids.next() }
+        if (command == null) {
+            logger.d(
+                TAG,
+                "cut ${tool.name.lowercase()} is not available at ${_state.value.playheadUs}",
+            )
+            return
+        }
+        logger.d(TAG, "cut ${tool.name.lowercase()}")
+        history.execute(command)
+        publish()
     }
 
     /**

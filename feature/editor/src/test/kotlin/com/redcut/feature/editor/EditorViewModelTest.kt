@@ -9,6 +9,7 @@ import com.redcut.core.media.SourceReadResult
 import com.redcut.core.media.ThumbnailSource
 import com.redcut.core.media.ThumbnailStore
 import com.redcut.domain.document.ClipEdge
+import com.redcut.domain.document.CutTool
 import com.redcut.domain.document.ImportRejection
 import com.redcut.domain.document.ProbedSource
 import com.redcut.domain.document.SourceProbe
@@ -539,6 +540,84 @@ class EditorViewModelTest {
         val before = model.state.value
 
         model.onIntent(EditorIntent.BeginTrim("clip-that-never-existed", ClipEdge.IN, 1_000_000L))
+
+        assertThat(model.state.value).isEqualTo(before)
+    }
+
+    // --- Cut tools (FR-2.2–2.6) --------------------------------------------
+
+    /** Imports the given videos and returns the model plus its clip ids, in timeline order. */
+    private fun TestScope.importedClips(
+        vararg videos: SourceReadResult.Read,
+    ): Pair<EditorViewModel, List<String>> {
+        val model = viewModel(RecordingReader(videos.toList()))
+        model.onIntent(EditorIntent.ImportMedia(videos.map { it.source.uri }))
+        advanceUntilIdle()
+        return model to model.state.value.document.clips.map { it.id }
+    }
+
+    @Test
+    fun `a split at the playhead makes two clips in one history entry`() = runTest(dispatcher) {
+        val (model, clipIds) = importedClips(video())
+        model.onIntent(EditorIntent.SetPlayhead(2_000_000L))
+
+        model.onIntent(EditorIntent.ApplyCut(CutTool.SPLIT))
+
+        // One entry, labelled with what the tool was: §7.3's "Undo Split". A cut is a discrete
+        // decision, so unlike a trim drag it goes straight onto the stack.
+        assertThat(model.state.value.document.clips).hasSize(2)
+        assertThat(model.state.value.document.clips.first().id).isEqualTo(clipIds.single())
+        assertThat(model.state.value.history)
+            .isEqualTo(HistoryState.Ready(canUndo = true, canRedo = false, topLabel = "Split"))
+
+        model.onIntent(EditorIntent.Undo)
+        assertThat(model.state.value.document.clips).hasSize(1)
+    }
+
+    @Test
+    fun `the tools act on the clip under the playhead`() = runTest(dispatcher) {
+        // Two 4-second clips: the timeline is 0–4 s and 4–8 s. A playhead at 6 s is two seconds into
+        // the SECOND clip, so the cut must land there and leave the first clip alone.
+        val (model, clipIds) = importedClips(
+            video(uri = "content://media/1"),
+            video(uri = "content://media/2"),
+        )
+        model.onIntent(EditorIntent.SetPlayhead(6_000_000L))
+
+        model.onIntent(EditorIntent.ApplyCut(CutTool.CUT_LEFT))
+
+        val first = model.state.value.document.clips[0]
+        val second = model.state.value.document.clips[1]
+        assertThat(first.sourceInUs).isEqualTo(0L)
+        // The surviving tail keeps the ORIGINAL id: a literal split-and-delete would orphan every
+        // effect scoped to this clip and drop the selection (see CutLeft in the domain).
+        assertThat(second.id).isEqualTo(clipIds[1])
+        assertThat(second.sourceInUs).isEqualTo(2_000_000L)
+    }
+
+    @Test
+    fun `delete ripples the gap closed rather than leaving a hole`() = runTest(dispatcher) {
+        val (model, clipIds) = importedClips(
+            video(uri = "content://media/1"),
+            video(uri = "content://media/2"),
+        )
+        model.onIntent(EditorIntent.SetPlayhead(1_000_000L))
+
+        model.onIntent(EditorIntent.ApplyCut(CutTool.DELETE))
+
+        assertThat(model.state.value.document.clips.map { it.id }).containsExactly(clipIds[1])
+    }
+
+    @Test
+    fun `a tool the document refuses changes nothing at all`() = runTest(dispatcher) {
+        val (model, _) = importedClips(video())
+        // The playhead clamps to the end of the timeline, where there is no clip to cut. The UI would
+        // have disabled the button; the handler must not depend on the UI having done so.
+        model.onIntent(EditorIntent.SetPlayhead(9_000_000L))
+        val before = model.state.value
+
+        model.onIntent(EditorIntent.ApplyCut(CutTool.SPLIT))
+        model.onIntent(EditorIntent.ApplyCut(CutTool.DELETE))
 
         assertThat(model.state.value).isEqualTo(before)
     }

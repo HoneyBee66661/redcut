@@ -1,6 +1,7 @@
 package com.redcut.feature.editor
 
 import com.redcut.domain.document.ClipEdge
+import com.redcut.domain.document.CutTool
 
 /**
  * Everything the UI can ask the editor to do (spec §7.2).
@@ -73,6 +74,16 @@ sealed interface EditorIntent {
 
     /** The gesture was abandoned (a second finger, a system interruption): the preview is rolled back. */
     data object CancelTrim : EditorIntent
+
+    /**
+     * Run a Cut tool at the playhead (FR-2.2–2.6).
+     *
+     * One intent for four tools, because they differ only in which command the document produces:
+     * the availability rules and the command construction both live in the domain, next to the
+     * commands they guard. A screen that decided what a tool meant would be a second place for those
+     * rules to drift.
+     */
+    data class ApplyCut(val tool: CutTool) : EditorIntent
 
     /**
      * Dismiss the import report (FR-1.4).

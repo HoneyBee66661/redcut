@@ -50,6 +50,15 @@ hilt = "2.59.2"
 hiltNavigationCompose = "1.2.0"
 timber = "5.0.1"
 
+# --- Annotations -----------------------------------------------------------
+# javax.inject (JSR-330) is here for ONE meta-annotation: @Qualifier, which the
+# dispatcher qualifiers in :core:common are annotated with so that :core:* and
+# :feature:* can be injected without depending on Hilt. That module must stay
+# android-free (spec §4.1 rule 1), so Hilt's own copy of these annotations — which
+# arrives on an Android classpath — is not an option. Per JSR-330, `1` is the only
+# released version of this artifact; it is frozen and API-stable.
+javaxInject = "1"
+
 # --- Serialization ---------------------------------------------------------
 # Must stay in step with `kotlin`. Unlike most libraries, this one is not
 # backward-tolerant: the Kotlin serialization COMPILER PLUGIN checks the runtime
@@ -103,6 +112,8 @@ hilt-android = { group = "com.google.dagger", name = "hilt-android", version.ref
 hilt-compiler = { group = "com.google.dagger", name = "hilt-android-compiler", version.ref = "hilt" }
 androidx-hilt-navigation-compose = { group = "androidx.hilt", name = "hilt-navigation-compose", version.ref = "hiltNavigationCompose" }
 timber = { group = "com.jakewharton.timber", name = "timber", version.ref = "timber" }
+# @Qualifier only — see the note on `javaxInject` above for why this is not Hilt's.
+javax-inject = { group = "javax.inject", name = "javax.inject", version.ref = "javaxInject" }
 
 # --- Serialization ---------------------------------------------------------
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerialization" }

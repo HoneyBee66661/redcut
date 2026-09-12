@@ -1,0 +1,38 @@
+# --- Gradle -----------------------------------------------------------------
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# --- Android ------------------------------------------------------------------
+local.properties
+*.apk
+*.aab
+*.ap_
+*.dex
+captures/
+.cxx/
+.externalNativeBuild/
+
+# --- IDE ----------------------------------------------------------------------
+.idea/
+*.iml
+.vscode/
+.DS_Store
+
+# --- Secrets / local overrides ------------------------------------------------
+# Anything with a .local. infix is machine-specific and must never be committed.
+# This is what keeps API keys and personal hook overrides out of the repo.
+*.local.*
+.claude/
+keystore.properties
+*.jks
+*.keystore
+
+# --- Baselines / generated ----------------------------------------------------
+# Baseline Profiles are generated, but the human-readable profile rules ARE
+# committed — they are hand-editable and get reviewed.
+!**/src/main/baseline-prof.txt
+
+# --- Logs / temp --------------------------------------------------------------
+*.log
+*.hprof

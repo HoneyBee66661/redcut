@@ -1,0 +1,42 @@
+# .editorconfig — the style the whole repo is written in.
+#
+# Two audiences, one file: editors honour it as you type, and ktlint reads it as
+# its rule configuration (ktlint 1.x has no separate config format). Keeping them
+# the same file is the point — a style that only the linter knows is a style that
+# every contributor violates for a week.
+#
+# `max_line_length = 100` is a deliberate choice, not a default: the source was
+# hand-wrapped at ~96 columns from the first commit, and a gate that fights the
+# existing code on day one is a gate everyone learns to bypass.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+indent_style = space
+indent_size = 4
+trim_trailing_whitespace = true
+
+[*.{yml,yaml}]
+indent_size = 2
+
+[*.md]
+# Markdown is read as rendered text; trailing whitespace is sometimes meaningful
+# (a hard line break) and prose wrapping is not a lint failure.
+trim_trailing_whitespace = false
+
+[*.{kt,kts}]
+max_line_length = 100
+# `intellij_idea` rather than `ktlint_official`: it is the style the code in this
+# repo is already written in, and it is what an Android Studio user gets by
+# default. The official style would rewrite every file in a project where every
+# file was written by hand at the same width.
+ktlint_code_style = intellij_idea
+
+# Compose composables are PascalCase BY CONVENTION (they are components, and the
+# convention is what makes `Text(...)` in a composable read as UI rather than as a
+# function call). ktlint's function-naming rule is right about every other function
+# in this repo and wrong about these, so the exception is scoped to the annotation
+# rather than switching the rule off wholesale.
+ktlint_function_naming_ignore_when_annotated_with = Composable

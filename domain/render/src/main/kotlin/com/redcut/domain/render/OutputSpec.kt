@@ -30,7 +30,9 @@ data class OutputSpec(
     val audioBitrate: Int? = null,
 ) {
     init {
-        require(width > 0 && height > 0) { "output must have a positive size, was ${width}x$height" }
+        require(
+            width > 0 && height > 0,
+        ) { "output must have a positive size, was ${width}x$height" }
         require(fps > 0) { "fps must be > 0, was $fps" }
         require(videoBitrate == null || videoBitrate > 0) {
             "videoBitrate must be > 0 when set, was $videoBitrate"

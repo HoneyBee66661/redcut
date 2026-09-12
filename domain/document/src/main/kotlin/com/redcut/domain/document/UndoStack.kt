@@ -57,6 +57,12 @@ class UndoStack(
      */
     private data class Entry(val doc: EditDocument, val label: String)
 
+    // Scoped suppression, with the reason attached: the rule exists to catch
+    // `class Foo { val foo = ... }` where the member shadows the type's own name and
+    // confuses readers. Here the pair is `undoStack` / `redoStack` — the names ARE
+    // the design, they mirror the public `canUndo` / `canRedo` surface, and renaming
+    // them to satisfy a count would make the two deques harder to tell apart.
+    @Suppress("MemberNameEqualsClassName")
     private val undoStack = ArrayDeque<Entry>()
     private val redoStack = ArrayDeque<Entry>()
 

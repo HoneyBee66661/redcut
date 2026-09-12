@@ -40,9 +40,11 @@ sealed interface EditCommand {
 data class AddSource(val source: SourceRef) : EditCommand {
     override val label: String get() = "Add media"
 
-    override fun apply(doc: EditDocument): EditDocument =
-        if (doc.sourceById(source.id) != null) doc
-        else doc.copy(sources = doc.sources + source)
+    override fun apply(doc: EditDocument): EditDocument = if (doc.sourceById(source.id) != null) {
+        doc
+    } else {
+        doc.copy(sources = doc.sources + source)
+    }
 }
 
 /**
@@ -236,33 +238,62 @@ data class MergeClips(val clipIds: List<String>) : EditCommand {
     override val label: String get() = "Merge"
 
     override fun apply(doc: EditDocument): EditDocument {
-        val unique = clipIds.distinct()
-        if (unique.size < 2 || unique.size != clipIds.size) return doc
+        val run = doc.mergeRun(clipIds) ?: return doc
 
-        val selected = doc.clips.filter { it.id in unique.toSet() }
-        if (selected.size != unique.size) return doc
-
-        val firstIndex = doc.clips.indexOfFirst { it.id == unique.first() }
-        if (firstIndex < 0) return doc
-        if (firstIndex + selected.size > doc.clips.size) return doc
-        val ordered = doc.clips.subList(firstIndex, firstIndex + selected.size)
-        // Adjacency: the run taken from the timeline must be exactly the selection.
-        if (ordered.map { it.id }.toSet() != unique.toSet()) return doc
-
-        val head = ordered.first()
-        if (ordered.any { it.sourceId != head.sourceId }) return doc
-        if (ordered.any { it.speed != head.speed || it.reverse != head.reverse }) return doc
-        for (i in 0 until ordered.size - 1) {
-            if (ordered[i].sourceOutUs != ordered[i + 1].sourceInUs) return doc
-        }
-
-        val merged = head.copy(sourceOutUs = ordered.last().sourceOutUs)
+        val merged = run.clips.first().copy(sourceOutUs = run.clips.last().sourceOutUs)
         // Replace the whole run with the merged clip, preserving position.
         val mergedClips = doc.clips.toMutableList()
-        repeat(ordered.size) { mergedClips.removeAt(firstIndex) }
-        mergedClips.add(firstIndex, merged)
+        repeat(run.clips.size) { mergedClips.removeAt(run.startIndex) }
+        mergedClips.add(run.startIndex, merged)
         return doc.copy(clips = mergedClips)
     }
+}
+
+/** A legal merge selection: the contiguous run to replace and where it starts. */
+private data class MergeRun(val startIndex: Int, val clips: List<Clip>)
+
+/**
+ * The contiguous run [ids] selects, or null when the selection is not a legal merge
+ * (FR-2.4): fewer than two distinct clips, an id that is not in the document, a
+ * selection that is not contiguous on the timeline, clips from more than one source
+ * at differing speed or direction, or a run whose source ranges are not adjacent
+ * end to end.
+ *
+ * Extracted from `MergeClips.apply`, and split into three named steps, because the
+ * precondition block was nine guard clauses in the middle of the method that does
+ * the merge — correct, but the reader had to hold the happy path in their head
+ * through all nine to see it. Naming the two legality checks is what makes the
+ * reason a merge is refused legible at the call site rather than only in the guards.
+ */
+private fun EditDocument.mergeRun(ids: List<String>): MergeRun? {
+    val unique = ids.distinct()
+    if (unique.size < 2 || unique.size != ids.size) return null
+
+    val selected = clips.filter { it.id in unique.toSet() }
+    if (selected.size != unique.size) return null
+
+    val start = clips.indexOfFirst { it.id == unique.first() }
+    if (start < 0 || start + selected.size > clips.size) return null
+
+    val ordered = clips.subList(start, start + selected.size)
+    if (!ordered.selectsExactly(unique) || !ordered.isMergeableRun()) return null
+    return MergeRun(start, ordered)
+}
+
+/** Adjacency, taken from the timeline: the run must be exactly the selection. */
+private fun List<Clip>.selectsExactly(ids: List<String>): Boolean =
+    map { it.id }.toSet() == ids.toSet()
+
+/**
+ * Same source, same speed and direction, and each clip's source range continuing
+ * where the previous one ended — the physical precondition for fusing two clips
+ * into one.
+ */
+private fun List<Clip>.isMergeableRun(): Boolean {
+    val head = first()
+    if (any { it.sourceId != head.sourceId }) return false
+    if (any { it.speed != head.speed || it.reverse != head.reverse }) return false
+    return (0 until size - 1).all { this[it].sourceOutUs == this[it + 1].sourceInUs }
 }
 
 /**
@@ -329,8 +360,7 @@ private fun EditDocument.replaceClip(clipId: String, replacements: List<Clip>): 
 }
 
 /** Replaces the clip with one that has the same id, or leaves the document alone. */
-private fun EditDocument.withClip(clip: Clip): EditDocument =
-    replaceClip(clip.id, listOf(clip))
+private fun EditDocument.withClip(clip: Clip): EditDocument = replaceClip(clip.id, listOf(clip))
 
 /** True when this scope targets [clipId]. */
 internal fun EffectScope.isScopedTo(clipId: String): Boolean =

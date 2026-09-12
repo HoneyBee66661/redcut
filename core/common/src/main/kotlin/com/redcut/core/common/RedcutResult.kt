@@ -75,12 +75,11 @@ inline fun <T, R> RedcutResult<T>.map(transform: (T) -> R): RedcutResult<R> = wh
  * outcome, and replacing it with a later, more generic one is how a specific cause
  * (say, a revoked SAF permission) becomes "something went wrong".
  */
-inline fun <T, R> RedcutResult<T>.flatMap(
-    transform: (T) -> RedcutResult<R>,
-): RedcutResult<R> = when (this) {
-    is RedcutResult.Success -> transform(value)
-    is RedcutResult.Failure -> this
-}
+inline fun <T, R> RedcutResult<T>.flatMap(transform: (T) -> RedcutResult<R>): RedcutResult<R> =
+    when (this) {
+        is RedcutResult.Success -> transform(value)
+        is RedcutResult.Failure -> this
+    }
 
 /** Runs [action] on the error, when there is one. Returns the receiver, unchanged. */
 inline fun <T> RedcutResult<T>.onFailure(action: (RedcutError) -> Unit): RedcutResult<T> {
@@ -100,13 +99,11 @@ inline fun <T> RedcutResult<T>.onSuccess(action: (T) -> Unit): RedcutResult<T> {
  * Preferred at UI boundaries, where both outcomes render something and two separate
  * `when` blocks would drift apart.
  */
-inline fun <T, R> RedcutResult<T>.fold(
-    onSuccess: (T) -> R,
-    onFailure: (RedcutError) -> R,
-): R = when (this) {
-    is RedcutResult.Success -> onSuccess(value)
-    is RedcutResult.Failure -> onFailure(error)
-}
+inline fun <T, R> RedcutResult<T>.fold(onSuccess: (T) -> R, onFailure: (RedcutError) -> R): R =
+    when (this) {
+        is RedcutResult.Success -> onSuccess(value)
+        is RedcutResult.Failure -> onFailure(error)
+    }
 
 /** Lifts any value into a success. */
 fun <T> T.asSuccess(): RedcutResult<T> = RedcutResult.Success(this)

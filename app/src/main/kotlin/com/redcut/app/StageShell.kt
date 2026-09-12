@@ -19,39 +19,19 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 
 /**
- * The three stages of the product (spec §4.2, Phase 0 exit criterion).
+ * The three-stage shell (spec §4.2, Phase 0 exit criterion). Stages themselves are
+ * [RedcutStage].
  *
- * This is a shell and says so: each stage's body is a sentence naming the phase
- * that fills it. The point of landing it now is that the app has a real, running
- * frame — CI assembles it, and every later stage is inserted into a structure
- * that already exists rather than renegotiated.
+ * A shell, and it says so: each stage's body is a sentence naming the phase that
+ * fills it. The point of landing it now is that the app has a real, running frame
+ * — CI assembles it — so every later stage is inserted into a structure that
+ * already exists rather than negotiated.
  *
  * The tab row is intentionally NOT the final stage affordance. Phase 1.5 decides
- * how stages are entered once there is a timeline to enter them from, and a
- * bottom NavigationBar would prejudge that. A tab row is the honest placeholder:
- * visible, obviously provisional, zero invented interaction.
+ * how stages are entered once there is a timeline to enter them from, and a bottom
+ * NavigationBar would prejudge that. A tab row is the honest placeholder: visible,
+ * obviously provisional, zero invented interaction.
  */
-internal enum class RedcutStage(
-    val label: String,
-    val detail: String,
-) {
-    Cut(
-        label = "Cut",
-        detail = "Import, trim, split, reorder.\n" +
-            "The timeline canvas lands in Phase 1.5; trim and split gestures in 1.6-1.9.",
-    ),
-    Edit(
-        label = "Edit",
-        detail = "Speed, volume, fades, rotate, crop, reverse.\n" +
-            "The inspector framework lands in Phase 2.1; the tools in 2.2-2.5.",
-    ),
-    Effect(
-        label = "Effect",
-        detail = "LUTs, colour, text, image overlays, cross-dissolve.\n" +
-            "The native GL effect pipeline lands in Phase 3.1-3.9.",
-    ),
-}
-
 @Composable
 internal fun StageShell(modifier: Modifier = Modifier) {
     var selected by rememberSaveable { mutableIntStateOf(0) }

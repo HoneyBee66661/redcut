@@ -137,7 +137,8 @@ class TimelineCompilerTest {
         val preview = TimelineCompiler.compile(doc)
         assertEquals(OutputSpec.preview(CanvasSpec.PORTRAIT_1080), preview.output)
 
-        val export = OutputSpec(1920, 1080, fps = 30, videoBitrate = 8_000_000, audioBitrate = 192_000)
+        val export =
+            OutputSpec(1920, 1080, fps = 30, videoBitrate = 8_000_000, audioBitrate = 192_000)
         assertEquals(export, TimelineCompiler.compile(doc, export).output)
     }
 
@@ -703,7 +704,14 @@ class TimelineCompilerTest {
             val outUs = inUs + rng.nextInt(1, 40) * 100_000L
             clip(
                 id = "c$i",
-                sourceId = if (rng.nextInt(0, 8) == 0) "ghost" else "s${rng.nextInt(0, sourceCount)}",
+                sourceId = if (rng.nextInt(0, 8) == 0) {
+                    "ghost"
+                } else {
+                    "s${rng.nextInt(
+                        0,
+                        sourceCount,
+                    )}"
+                },
                 inUs = inUs,
                 outUs = outUs,
                 speed = SPEEDS[rng.nextInt(0, SPEEDS.size)],
@@ -717,7 +725,12 @@ class TimelineCompilerTest {
 
         val effects = (0 until rng.nextInt(0, 5)).map { i -> randomEffect(rng, clips, i) }
 
-        return document(clips = clips, sources = sources, effects = effects, revision = round.toLong())
+        return document(
+            clips = clips,
+            sources = sources,
+            effects = effects,
+            revision = round.toLong(),
+        )
     }
 
     private fun randomEffect(
@@ -728,7 +741,16 @@ class TimelineCompilerTest {
         val scope = if (clips.isNotEmpty() && rng.nextBoolean()) {
             // ~1 in 4 lands on an id that is not in the document any more, which is
             // the dangling-reference case rule 9 is about.
-            val clipId = if (rng.nextInt(0, 4) == 0) "ghost" else clips[rng.nextInt(0, clips.size)].id
+            val clipId = if (rng.nextInt(0, 4) == 0) {
+                "ghost"
+            } else {
+                clips[
+                    rng.nextInt(
+                        0,
+                        clips.size,
+                    ),
+                ].id
+            }
             EffectScope.Clip(clipId)
         } else {
             EffectScope.Document

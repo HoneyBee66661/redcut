@@ -1,0 +1,75 @@
+# detekt configuration for RedCut.
+#
+# Layered on top of detekt's bundled defaults (`buildUponDefaultConfig = true` in
+# build.gradle.kts), so ONLY deliberate deviations appear here. That matters: a
+# config file that restates defaults rots silently when detekt changes them, and
+# detekt 1.23.7 itself places ReturnCount and MagicNumber under `style`, not
+# `complexity` — a copy-pasted "full" config would have been wrong on arrival.
+#
+# The principle below: a deviation is allowed where the code is right and the
+# default is tuned for a different shape of codebase, never to silence a real
+# smell. Each entry names the sites it is reacting to, so the next person can
+# disagree with the reasoning instead of guessing at it. The one finding that WAS
+# a real smell was handled in code, not configured away: see the scoped
+# @Suppress("MemberNameEqualsClassName") in UndoStack.kt.
+
+build:
+  # A finding is a failure. This is the whole point of switching detekt on: a
+  # report nobody fails on is a report nobody reads.
+  maxIssues: 0
+
+complexity:
+  LongParameterList:
+    # 6 -> 12. Both findings are test fixture builders: DomainFixtures.clip() (6
+    # parameters) and RenderFixtures.clip() (11). A fixture that builds a value from
+    # a long list of defaulted parameters is the readable way to say "this is the
+    # shape of the thing"; the alternative is a builder class nobody asked for.
+    functionThreshold: 12
+  TooManyFunctions:
+    # 11 -> 20, for objects as well as classes: TimelineCompiler is an `object` with
+    # 15 small private helpers, each one step of the compile. Splitting it to satisfy
+    # a count would scatter a single algorithm across files for no gain.
+    thresholdInClasses: 20
+    thresholdInObjects: 20
+  LargeClass:
+    # 600 -> 800. TimelineCompilerTest is 641 lines, one behaviour per test. Test
+    # classes grow with the number of cases by construction; the rule is aimed at
+    # production classes that grew because they do too much.
+    threshold: 800
+
+naming:
+  FunctionNaming:
+    # Compose composables are PascalCase by convention — they are components, and
+    # that is what makes `Text(...)` inside a composable read as UI rather than as a
+    # function call. Scoped to the annotation rather than switching the rule off, so
+    # a non-composable function named `GetThumbnail` is still a finding.
+    ignoreAnnotated: ['Composable']
+
+style:
+  MagicNumber:
+    # All 9 findings are CanvasSpec's enum entries: PORTRAIT_720(720, 1280) and
+    # friends. A dimension in the definition of a named dimension IS the name doing
+    # its job — this is the one place the literal is self-documenting. The rule still
+    # does its work everywhere that matters: it caught a bare `/ 1000L` inside
+    # TimelineCompiler.fadesFor, which now uses the constant the file already had.
+    ignoreEnums: true
+  ReturnCount:
+    # `apply` is excluded BY NAME, and `max` is 5 for everything else.
+    #
+    # The exclusion is not a convenience: `EditCommand.apply` has a documented
+    # contract that it validates preconditions and returns the document UNCHANGED
+    # when the command does not apply (commands are total — spec §5, and the tests
+    # assert it). That contract is written as guard clauses, one per precondition,
+    # and each one carries the reason it exists: SplitClip has five (bad id, taken
+    # id, playhead outside the source range, either half under MIN_DURATION_US).
+    # Collapsing them into a single exit would make the happy path the hardest line
+    # to find, which is the opposite of what the rule is protecting.
+    #
+    # The one outlier was refactored rather than tolerated: MergeClips.apply had 9
+    # returns, and its precondition block became `mergeRun()` plus two named
+    # predicates (EditCommand.kt). 5 is what remains for everything that is not
+    # `apply` — a ceiling that still catches a function tangled beyond that.
+    max: 5
+    excludedFunctions:
+      - 'apply'
+      - 'equals'

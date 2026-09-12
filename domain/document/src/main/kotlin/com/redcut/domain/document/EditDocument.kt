@@ -109,8 +109,7 @@ data class TimelineSlot(
 ) {
     val durationUs: Long get() = endUs - startUs
 
-    operator fun contains(positionUs: Long): Boolean =
-        positionUs >= startUs && positionUs < endUs
+    operator fun contains(positionUs: Long): Boolean = positionUs >= startUs && positionUs < endUs
 }
 
 /** Output frame geometry. MVP ships only 720p and 1080p (FR-5.1). */
@@ -124,9 +123,11 @@ enum class CanvasSpec(val width: Int, val height: Int) {
 
     val isPortrait: Boolean get() = height > width
 
-    fun withLandscape(isLandscape: Boolean): CanvasSpec =
-        if (isLandscape == !isPortrait) this
-        else entries.first { it.isPortrait == !isLandscape && it.width == minOf(width, height) }
+    fun withLandscape(isLandscape: Boolean): CanvasSpec = if (isLandscape == !isPortrait) {
+        this
+    } else {
+        entries.first { it.isPortrait == !isLandscape && it.width == minOf(width, height) }
+    }
 }
 
 /** A half-open range in microseconds: [startUs, endUs). */
@@ -139,6 +140,5 @@ data class TimeRange(val startUs: Long, val endUs: Long) {
 
     val durationUs: Long get() = endUs - startUs
 
-    operator fun contains(positionUs: Long): Boolean =
-        positionUs >= startUs && positionUs < endUs
+    operator fun contains(positionUs: Long): Boolean = positionUs >= startUs && positionUs < endUs
 }

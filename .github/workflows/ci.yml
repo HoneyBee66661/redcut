@@ -42,6 +42,25 @@ jobs:
       - name: Check domain purity and Media3 isolation
         run: bash tools/check-architecture.sh
 
+  # Static analysis. A separate job from `domain-tests` for one reason: it needs no
+  # test execution and no Android SDK, so it can fail in ~40s instead of after a
+  # full compile, and its failures are style/smell findings rather than behaviour.
+  #
+  # The task list is the same list tools/verify.sh runs (`QUALITY_TASKS`), which is
+  # what makes a local green mean something.
+  quality:
+    name: Static analysis (ktlint + detekt)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: ktlint and detekt
+        run: ./gradlew ktlintCheck detekt $GRADLE_FLAGS
+
   # The fast tier (spec §12.1). Because :domain:* is pure JVM this needs no
   # emulator and no Android SDK — which is the entire point of keeping it pure.
   #

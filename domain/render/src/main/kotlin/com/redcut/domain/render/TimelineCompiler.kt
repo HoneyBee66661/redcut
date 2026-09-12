@@ -187,7 +187,7 @@ object TimelineCompiler {
         val outMs = clip.fadeOutMs.coerceAtLeast(0L)
         // The layer's length in whole milliseconds; FadeSpec counts milliseconds, so
         // this is the budget the pair has to fit inside. Integer division is intended.
-        val layerMs = clip.timelineDurationUs / 1000L
+        val layerMs = clip.timelineDurationUs / MILLIS_TO_MICROS
 
         // Does the pair already fit? Tested without ever forming a sum that could
         // overflow: `inMs + outMs` is evaluated only once both are known to be at
@@ -247,8 +247,11 @@ object TimelineCompiler {
         val range = localRange(effect, slots, index) ?: return@mapNotNull null
         when (effect) {
             is AppliedEffect.Lut ->
-                if (effect.strength == 0f) null
-                else RenderEffect.Lut(effect.ref, range, effect.strength)
+                if (effect.strength == 0f) {
+                    null
+                } else {
+                    RenderEffect.Lut(effect.ref, range, effect.strength)
+                }
             is AppliedEffect.Adjust ->
                 if (effect.spec.isIdentity) null else RenderEffect.Adjust(effect.spec, range)
             // Text, Image and Dissolve are not chain entries: they become overlay
@@ -280,8 +283,11 @@ object TimelineCompiler {
         index: Int,
     ): TimeRange? = when (val scope = effect.scope) {
         is EffectScope.Clip ->
-            if (index != clipSlotIndex(slots, scope.clipId)) null
-            else clampToLayer(effect.timeRange, slots[index].durationUs)
+            if (index != clipSlotIndex(slots, scope.clipId)) {
+                null
+            } else {
+                clampToLayer(effect.timeRange, slots[index].durationUs)
+            }
 
         EffectScope.Document -> {
             val layer = slots[index].timeRange
@@ -357,8 +363,9 @@ object TimelineCompiler {
     ): TimeRange? = when (val scope = effect.scope) {
         is EffectScope.Clip -> {
             val index = clipSlotIndex(slots, scope.clipId)
-            if (index < 0) null
-            else {
+            if (index < 0) {
+                null
+            } else {
                 val layer = slots[index].timeRange
                 intersect(
                     saturatingAdd(layer.startUs, effect.timeRange.startUs),

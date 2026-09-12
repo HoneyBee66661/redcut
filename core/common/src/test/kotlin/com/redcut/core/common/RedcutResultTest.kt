@@ -56,7 +56,10 @@ class RedcutResultTest {
     fun `map never runs its transform on a failure`() {
         var calls = 0
 
-        failure.map { calls++; it }
+        failure.map {
+            calls++
+            it
+        }
 
         assertEquals(0, calls, "a transform that ran would be a side effect on a failure path")
     }

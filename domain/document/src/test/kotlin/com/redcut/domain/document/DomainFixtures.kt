@@ -6,10 +6,7 @@ import org.junit.jupiter.api.Assertions.assertTrue
 
 internal const val SEC = 1_000_000L
 
-internal fun source(
-    id: String,
-    durationUs: Long = 10 * SEC,
-): SourceRef = SourceRef(
+internal fun source(id: String, durationUs: Long = 10 * SEC): SourceRef = SourceRef(
     id = id,
     // Deliberately not a real Uri: the domain must never learn about android.net.Uri
     // (spec §4.1 rule 1). If this file ever needs one, the architecture check fails.
@@ -62,10 +59,7 @@ internal fun sampleDocument(): EditDocument = EditDocument(
  * the render pipeline cannot consume -- and the failure would otherwise surface far
  * from the command that caused it.
  */
-internal fun assertInvariants(
-    doc: EditDocument,
-    context: String = "",
-) {
+internal fun assertInvariants(doc: EditDocument, context: String = "") {
     val where = if (context.isEmpty()) "" else " [$context]"
 
     assertTrue(doc.clips.isNotEmpty()) {

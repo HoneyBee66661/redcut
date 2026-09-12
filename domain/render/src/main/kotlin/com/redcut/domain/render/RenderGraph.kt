@@ -298,6 +298,7 @@ data class AudioSpec(
 sealed interface Transition {
     val fromIndex: Int
     val toIndex: Int
+
     /** Timeline time of the seam; always the incoming layer's start. */
     val startUs: Long
     val durationUs: Long

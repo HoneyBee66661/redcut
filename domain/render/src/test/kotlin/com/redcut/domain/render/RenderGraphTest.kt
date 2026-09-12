@@ -149,8 +149,12 @@ class RenderGraphTest {
 
         assertThrows(IllegalArgumentException::class.java) { OutputSpec(0, 1080) }
         assertThrows(IllegalArgumentException::class.java) { OutputSpec(1080, 1920, fps = 0) }
-        assertThrows(IllegalArgumentException::class.java) { OutputSpec(1080, 1920, videoBitrate = 0) }
-        assertThrows(IllegalArgumentException::class.java) { OutputSpec(1080, 1920, audioBitrate = -1) }
+        assertThrows(
+            IllegalArgumentException::class.java,
+        ) { OutputSpec(1080, 1920, videoBitrate = 0) }
+        assertThrows(
+            IllegalArgumentException::class.java,
+        ) { OutputSpec(1080, 1920, audioBitrate = -1) }
     }
 
     @Test
@@ -173,7 +177,12 @@ class RenderGraphTest {
     fun `a fully populated graph survives a JSON round trip`() {
         val doc = sampleDocument().copy(
             effects = listOf(
-                AppliedEffect.Lut("e1", EffectScope.Document, TimeRange(0L, 5 * SEC), LutRef("vivid")),
+                AppliedEffect.Lut(
+                    "e1",
+                    EffectScope.Document,
+                    TimeRange(0L, 5 * SEC),
+                    LutRef("vivid"),
+                ),
                 AppliedEffect.Adjust(
                     "e2",
                     EffectScope.Clip("c2"),

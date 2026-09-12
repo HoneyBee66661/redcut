@@ -16,6 +16,35 @@ plugins {
 }
 
 /**
+ * Static analysis, applied to every module.
+ *
+ * Deliberately here and not in each module's build file: detekt and ktlint are
+ * project-wide policy, and a policy that a new module has to remember to opt into
+ * is a policy with holes. Applying it from the root also means the pure-JVM
+ * modules and the Android ones are held to the same standard — which matters
+ * because the domain is where correctness lives and where a reviewer's attention
+ * is best spent on semantics rather than on formatting.
+ *
+ * `check` picks both up automatically (their plugins wire themselves in), so this
+ * cannot be forgotten in a module that is added later.
+ *
+ * Settings live in .editorconfig (ktlint) and detekt's own defaults; neither is
+ * configured here, because configuration in a build script is configuration that
+ * only builders can read.
+ */
+subprojects {
+    apply(plugin = "org.jlleitschuh.gradle.ktlint")
+    apply(plugin = "io.gitlab.arturbosch.detekt")
+
+    extensions.configure<io.gitlab.arturbosch.detekt.extensions.DetektExtension> {
+        // detekt's own defaults stay on; config/detekt/detekt.yml carries only the
+        // deliberate deviations, each with its reasoning written next to it.
+        buildUponDefaultConfig = true
+        config.setFrom(rootProject.files("config/detekt/detekt.yml"))
+    }
+}
+
+/**
  * Spec §4.1 rule 1 and §6.8 rule D1, enforced.
  *
  * Fails the build if `:domain:*` or `:core:common` reference `android.*` or

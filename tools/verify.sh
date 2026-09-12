@@ -6,23 +6,24 @@
 # same thing:
 #
 #   1. tools/check-architecture.sh   no JDK, no network, fails in seconds
-#   2. the pure-JVM test tier        :domain:* — the fast tier of spec §12.1
-#   3. the fast-tier budget          the tier is only useful while it stays FAST
+#   2. ktlint + detekt               style and code smells, no Android SDK needed
+#   3. the pure-JVM test tier        :domain:* — the fast tier of spec §12.1
+#   4. the fast-tier budget          the tier is only useful while it stays FAST
 #
 # Usage:
 #   ./tools/verify.sh                             # warnings are warnings
 #   ./tools/verify.sh -Predcut.warningsAsErrors   # exactly what CI adds
 #
 # Everything passed in is forwarded to Gradle, which is how CI can add its flags
-# without a second copy of this script. Exit code is 0 only when all three pass.
+# without a second copy of this script. Exit code is 0 only when all four pass.
 #
 # WHY THIS EXISTS
 #
-# The two jobs in .github/workflows/ci.yml are the project's real verification loop
+# The jobs in .github/workflows/ci.yml are the project's real verification loop
 # (§12.1), and a developer who cannot reproduce them locally pushes and waits instead —
 # which is how a fast tier stops being run on every save, and how the checks that
 # protect §4.1 (pure domain) and §6.8 (no Media3 outside :engine:media3) get skipped.
-# Each of the three steps below closes a specific trap that has already bitten once:
+# Each step below closes a specific trap that has already bitten once:
 #
 #   * A bare `./gradlew <task>` failed at configuration because `allWarningsAsErrors`
 #     was set from an absent provider. Fixed in build-logic; this script is the
@@ -32,10 +33,16 @@
 #     Both tiers are listed here and in CI; add :core:common when it exists.
 #   * The 15 s budget existed only in CI, so nothing stopped the "fast" tier from
 #     quietly becoming slow on the machine where it is supposed to run most often.
+#   * ktlint and detekt ran only in CI, so the first person to see a style finding
+#     was CI — on a push, minutes after the code was written. Both are pure JVM, so
+#     there is no reason to make the local loop wait for a network round trip.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
+
+# Keep in step with the `quality` job in .github/workflows/ci.yml.
+QUALITY_TASKS=(ktlintCheck detekt)
 
 # Keep in step with the `domain-tests` job in .github/workflows/ci.yml.
 PURE_TIER_TASKS=(:domain:document:test :domain:render:test :core:common:test)
@@ -56,6 +63,14 @@ fi
 
 echo "== Architecture boundaries ==========================================="
 bash tools/check-architecture.sh
+
+echo
+echo "== Static analysis: ${QUALITY_TASKS[*]} =============================="
+# Same task list as the `quality` job in CI. Both run before the test tier: a style
+# or smell finding is cheaper to read than a stack trace, and neither needs the
+# Android SDK, so this step is also the one that keeps the local loop honest on a
+# host that cannot assemble Android at all.
+./gradlew "${QUALITY_TASKS[@]}" --console=plain "$@"
 
 echo
 echo "== Pure-JVM test tier: ${PURE_TIER_TASKS[*]}"

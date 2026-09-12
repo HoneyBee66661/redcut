@@ -11,12 +11,15 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.redcut.engine.nativecore.NativeSeam
+import com.redcut.engine.nativecore.NativeStatus
 
 /**
  * The three-stage shell (spec §4.2, Phase 0 exit criterion). Stages themselves are
@@ -54,11 +57,53 @@ internal fun StageShell(modifier: Modifier = Modifier) {
                 .padding(24.dp),
             contentAlignment = Alignment.Center,
         ) {
-            Text(
-                text = stage.detail,
-                style = MaterialTheme.typography.bodyLarge,
-                textAlign = TextAlign.Center,
-            )
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = stage.detail,
+                    style = MaterialTheme.typography.bodyLarge,
+                    textAlign = TextAlign.Center,
+                )
+                NativeSeamLine(modifier = Modifier.padding(top = 24.dp))
+            }
         }
     }
+}
+
+/** The seam proof's operands (spec §6.5), named so the line reads as a claim, not arithmetic. */
+private const val SEAM_PROOF_A = 2
+private const val SEAM_PROOF_B = 3
+
+/**
+ * The JNI seam's status, on screen (spec Phase 0 exit criterion: "a native function
+ * returns a value").
+ *
+ * This is TEMPORARY SCAFFOLDING with a job: it is the only way the exit criterion can
+ * be checked on a real device, because the development host has no emulator and no
+ * device, so nothing here can be run — only built. Installing the CI debug APK and
+ * reading this line *is* the device test. It moves to a diagnostics screen in Phase
+ * 0.5, when the shell is replaced by the nav graph, and `add(2, 3)` disappears when the
+ * seam has real work to do in Phase 3.2.
+ *
+ * The sum is rendered because "ready" alone would not prove the boundary works: a
+ * registered-but-wrong native function would still report a version. A 5 on screen
+ * means C++ computed it.
+ */
+@Composable
+private fun NativeSeamLine(modifier: Modifier = Modifier) {
+    val status = remember { NativeSeam.status() }
+    val ready = status is NativeStatus.Ready
+    val line = when (status) {
+        is NativeStatus.Ready ->
+            "native seam ready: v${status.versionCode} · $SEAM_PROOF_A + $SEAM_PROOF_B = " +
+                "${NativeSeam.add(SEAM_PROOF_A, SEAM_PROOF_B)}"
+        is NativeStatus.Unavailable -> "native seam unavailable — ${status.reason}"
+    }
+
+    Text(
+        text = line,
+        style = MaterialTheme.typography.bodySmall,
+        color = if (ready) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+        textAlign = TextAlign.Center,
+        modifier = modifier,
+    )
 }

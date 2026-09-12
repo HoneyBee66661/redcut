@@ -40,19 +40,23 @@ internal object NativeContract {
     const val EXPECTED_VERSION_CODE: Int = 1
 
     /**
-     * Verifies the version the loaded library reports.
+     * Verifies the version the loaded library reports, returning it when it matches.
      *
-     * Returns [RedcutResult.Success] when they agree. On mismatch the failure is
-     * [ErrorCode.UNKNOWN] rather than a new enum entry, and that is deliberate: the
-     * error vocabulary in `:core:common` exists for outcomes a user can be told about
-     * (a revoked permission, an unsupported codec), while a version mismatch is a
-     * build defect that must never reach a user. Giving it a user-facing code would
-     * invite a UI to render it, which is the wrong response — the message exists so
-     * the log names both numbers.
+     * Returning the VERIFIED value rather than `Unit` is what lets a caller report the
+     * number that was actually checked — a handshake whose success carries no value
+     * invites the caller to read the version a second time, and the one thing a
+     * handshake must not do is validate one number and publish another.
+     *
+     * On mismatch the failure is [ErrorCode.UNKNOWN] rather than a new enum entry, and
+     * that is deliberate: the error vocabulary in `:core:common` exists for outcomes a
+     * user can be told about (a revoked permission, an unsupported codec), while a
+     * version mismatch is a build defect that must never reach a user. Giving it a
+     * user-facing code would invite a UI to render it, which is the wrong response —
+     * the message exists so the log names both numbers.
      */
-    fun verifyHandshake(reported: Int): RedcutResult<Unit> =
+    fun verifyHandshake(reported: Int): RedcutResult<Int> =
         if (reported == EXPECTED_VERSION_CODE) {
-            Unit.asSuccess()
+            reported.asSuccess()
         } else {
             RedcutError(
                 code = ErrorCode.UNKNOWN,

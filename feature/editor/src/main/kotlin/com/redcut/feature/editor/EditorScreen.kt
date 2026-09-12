@@ -3,6 +3,7 @@ package com.redcut.feature.editor
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -17,14 +18,19 @@ import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.redcut.domain.document.ClipEdge
 import com.redcut.feature.editor.timeline.TimelineCanvas
 
 /**
@@ -133,7 +139,7 @@ internal fun EditorScreen(
             }
         }
 
-        StageBody(state = state)
+        StageBody(state = state, onThumbnail = onThumbnail)
 
         // The timeline sits between the preview and the history bar, which is the layout §7.1
         // draws. It is given a fixed height rather than a weight: the preview is what should grow
@@ -143,6 +149,7 @@ internal fun EditorScreen(
             document = state.document,
             playheadUs = state.playheadUs,
             selection = state.selection,
+            tool = state.tool,
             onIntent = onIntent,
             onThumbnail = onThumbnail,
             modifier = Modifier
@@ -165,7 +172,10 @@ internal fun EditorScreen(
  * `CompositionPlayer` — replaces the whole function, not the text inside it.
  */
 @Composable
-private fun ColumnScope.StageBody(state: EditorUiState) {
+private fun ColumnScope.StageBody(
+    state: EditorUiState,
+    onThumbnail: suspend (sourceId: String, uri: String, positionUs: Long) -> ImageBitmap?,
+) {
     Box(
         modifier = Modifier
             .weight(1f)
@@ -173,10 +183,64 @@ private fun ColumnScope.StageBody(state: EditorUiState) {
             .padding(24.dp),
         contentAlignment = Alignment.Center,
     ) {
+        val trimming = state.tool as? ToolState.Trimming
+        if (trimming == null) {
+            Text(
+                text = state.stage.detail,
+                style = MaterialTheme.typography.bodyLarge,
+                textAlign = TextAlign.Center,
+            )
+        } else {
+            EdgeFrame(state = state, trimming = trimming, onThumbnail = onThumbnail)
+        }
+    }
+}
+
+/**
+ * FR-2.1's live preview: the frame the edge is being dragged to.
+ *
+ * While a trim is open the stage shows THE FRAME rather than a sentence about the stage — the user is
+ * choosing an in- or out-point, and the only thing that answers "am I there yet" is the picture.
+ *
+ * ### The known cost
+ *
+ * This asks for a frame per drag update, and each one is a fresh decode (the cache key includes the
+ * time, so every position is a miss). The broker's semaphores bound how many decodes run at once and
+ * the store's LRU keeps the recent ones, so the UI degrades to a lagging frame rather than to jank —
+ * but a fast drag is doing more decoding than it needs to, and `LaunchedEffect` cancelling the
+ * previous request is the only throttling here. The real answer is Phase 1.11's preview: a player
+ * already holding the decoded frames, seeked to the edge, rather than a decoder asked for one picture
+ * at a time.
+ */
+@Composable
+private fun EdgeFrame(
+    state: EditorUiState,
+    trimming: ToolState.Trimming,
+    onThumbnail: suspend (sourceId: String, uri: String, positionUs: Long) -> ImageBitmap?,
+) {
+    val clip = state.document.clips.firstOrNull { it.id == trimming.clipId }
+    val uri = clip?.let { c -> state.document.sources.firstOrNull { it.id == c.sourceId }?.uri }
+    var frame by remember { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(clip?.sourceId, uri, trimming.sourceTimeUs) {
+        frame = if (clip != null && uri != null) {
+            onThumbnail(clip.sourceId, uri, trimming.sourceTimeUs)
+        } else {
+            null
+        }
+    }
+
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        frame?.let { image ->
+            Image(
+                bitmap = image,
+                contentDescription = null,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
         Text(
-            text = state.stage.detail,
-            style = MaterialTheme.typography.bodyLarge,
-            textAlign = TextAlign.Center,
+            text = "Trimming ${if (trimming.edge == ClipEdge.IN) "in" else "out"} · " +
+                "${trimming.sourceTimeUs / 1_000} ms",
+            style = MaterialTheme.typography.labelMedium,
         )
     }
 }

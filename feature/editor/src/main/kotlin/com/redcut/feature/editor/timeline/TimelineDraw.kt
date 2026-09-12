@@ -12,6 +12,7 @@ import androidx.compose.ui.unit.IntSize
 import com.redcut.core.common.timeline.ClipRect
 import com.redcut.core.common.timeline.TimelineGeometry
 import com.redcut.core.media.ThumbnailKey
+import com.redcut.domain.document.ClipEdge
 import kotlin.math.roundToInt
 
 /**
@@ -35,6 +36,8 @@ internal data class TimelinePaint(
     val selectionBorder: Color,
     val ruler: Color,
     val playhead: Color,
+    /** The edge a trim gesture is dragging (FR-2.1): brighter than the selection, because it is moving. */
+    val trimEdge: Color,
 )
 
 /** The clip track: everything below the ruler. */
@@ -64,6 +67,7 @@ internal fun DrawScope.drawClip(
     slices: List<SliceRequest>,
     images: Map<ThumbnailKey, ImageBitmap>,
     selected: Boolean,
+    draggedEdge: ClipEdge?,
     geometry: TimelineGeometry,
     track: Track,
     paint: TimelinePaint,
@@ -89,7 +93,33 @@ internal fun DrawScope.drawClip(
                 style = Stroke(width = SELECTION_BORDER_PX),
             )
         }
+        // The edge being dragged, drawn INSIDE the clip's own clipping: the moment a trim shortens a
+        // clip to nothing, its edge line would otherwise scribble over the neighbour.
+        draggedEdge?.let { edge -> drawTrimEdge(edge, left, rect.widthPx, track, paint) }
     }
+}
+
+/**
+ * The line under the finger during a trim.
+ *
+ * Drawn rather than annotated: the clip's rectangle has already changed size (the document is being
+ * previewed live), so the line is what says WHICH edge is moving — at a glance, without reading a
+ * number.
+ */
+private fun DrawScope.drawTrimEdge(
+    edge: ClipEdge,
+    left: Float,
+    widthPx: Float,
+    track: Track,
+    paint: TimelinePaint,
+) {
+    val x = if (edge == ClipEdge.IN) left else left + widthPx
+    drawLine(
+        color = paint.trimEdge,
+        start = Offset(x, track.top),
+        end = Offset(x, track.top + track.height),
+        strokeWidth = TRIM_EDGE_PX,
+    )
 }
 
 /**
@@ -136,3 +166,4 @@ internal fun DrawScope.drawPlayhead(geometry: TimelineGeometry, playheadUs: Long
 private const val RULER_TICK_WIDTH_PX = 1f
 private const val SELECTION_BORDER_PX = 3f
 private const val PLAYHEAD_WIDTH_PX = 2f
+private const val TRIM_EDGE_PX = 4f

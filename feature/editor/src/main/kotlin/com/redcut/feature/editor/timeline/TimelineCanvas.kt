@@ -25,6 +25,7 @@ import com.redcut.core.media.ThumbnailKey
 import com.redcut.domain.document.EditDocument
 import com.redcut.feature.editor.EditorIntent
 import com.redcut.feature.editor.Selection
+import com.redcut.feature.editor.ToolState
 import com.redcut.feature.editor.clipIdOrNull
 import com.redcut.feature.editor.toClipTimings
 
@@ -43,10 +44,10 @@ import com.redcut.feature.editor.toClipTimings
  * ### Gestures, and who owns which surface
  *
  * * **Ruler strip** (the top [RULER_HEIGHT_DP]): the playhead's own surface. Touching or dragging
- *   there scrubs. Scrubbing lives on the ruler rather than on the clips because dragging ON a clip
- *   will mean *trimming* once FR-2 lands, and one surface cannot mean both.
- * * **Clip area**: pan scrolls, pinch zooms about the gesture's centroid, a tap selects a clip and
- *   moves the playhead, a tap on empty space clears the selection.
+ *   there scrubs.
+ * * **A clip's edge zone** (the spec's 48 dp around a boundary, FR-2.1): a trim. Scrubbing lives on
+ *   the ruler and trimming on the edges precisely because one surface cannot mean both.
+ * * **The rest of the clip area**: pan scrolls, pinch zooms about the centroid, a tap selects.
  *
  * The arbitration between them is behaviour, and behaviour here is verified by a device pass (Phase
  * 1's exit criterion), not by CI: this host has no Android runtime, and no test can press a finger on
@@ -57,13 +58,15 @@ import com.redcut.feature.editor.toClipTimings
  * `zoom` and `scroll` live in `rememberSaveable` here rather than in `EditorUiState` (§7.2). They are
  * how the user is LOOKING at the document, like a scroll position in a list; putting them in the
  * state object would make every scroll pixel a state emission the whole editor recomposes for, and
- * `rememberSaveable` is what makes them survive a configuration change.
+ * `rememberSaveable` is what makes them survive a configuration change. The TOOL is the opposite and
+ * lives in the state object: a trim in flight has already changed the document.
  */
 @Composable
 internal fun TimelineCanvas(
     document: EditDocument,
     playheadUs: Long,
     selection: Selection,
+    tool: ToolState,
     onIntent: (EditorIntent) -> Unit,
     onThumbnail: suspend (sourceId: String, uri: String, positionUs: Long) -> ImageBitmap?,
     modifier: Modifier = Modifier,
@@ -75,7 +78,9 @@ internal fun TimelineCanvas(
     var scrollPx by rememberSaveable { mutableFloatStateOf(0f) }
     var viewportWidthPx by remember { mutableFloatStateOf(0f) }
 
+    val clipsById = remember(document) { document.clips.associateBy { it.id } }
     val spans = remember(document) { spansOf(document.toClipTimings()) }
+    val spansByClip = remember(spans) { spans.associateBy { it.clipId } }
     val geometry = TimelineGeometry(
         viewportWidthPx = viewportWidthPx,
         spans = spans,
@@ -84,7 +89,7 @@ internal fun TimelineCanvas(
         density = density,
     )
     val rects = geometry.visibleRects()
-    val requests = rememberSliceRequests(document, rects, spans)
+    val requests = rememberSliceRequests(document, clipsById, rects, spans)
     val images = rememberThumbnails(requests, onThumbnail)
     val paint = rememberTimelinePaint()
     val rulerHeightPx = RULER_HEIGHT_DP * density
@@ -96,9 +101,11 @@ internal fun TimelineCanvas(
             .timelineGestures(
                 geometry = geometry,
                 rulerHeightPx = rulerHeightPx,
-                actions = gestureActions(
+                actions = timelineGestureHandlers(
                     geometry = geometry,
                     onIntent = onIntent,
+                    clipsById = clipsById,
+                    spansByClip = spansByClip,
                     setScrollPx = { scrollPx = it },
                     setZoomPxPerSecond = { zoomPxPerSecond = it },
                 ),
@@ -106,6 +113,7 @@ internal fun TimelineCanvas(
     ) {
         val rulerHeight = RULER_HEIGHT_DP.dp.toPx()
         val track = Track(top = rulerHeight, height = (size.height - rulerHeight).coerceAtLeast(0f))
+        val trimming = tool as? ToolState.Trimming
 
         drawRuler(geometry, rulerHeight, paint.ruler)
         rects.forEach { rect ->
@@ -114,6 +122,7 @@ internal fun TimelineCanvas(
                 slices = requests.filter { it.clipId == rect.clipId },
                 images = images,
                 selected = selection.clipIdOrNull == rect.clipId,
+                draggedEdge = trimming?.takeIf { it.clipId == rect.clipId }?.edge,
                 geometry = geometry,
                 track = track,
                 paint = paint,
@@ -123,7 +132,7 @@ internal fun TimelineCanvas(
     }
 }
 
-/** The five timeline colours, read from the theme where reading it is legal. */
+/** The six timeline colours, read from the theme where reading it is legal. */
 @Composable
 private fun rememberTimelinePaint(): TimelinePaint = TimelinePaint(
     clip = MaterialTheme.colorScheme.surfaceVariant,
@@ -131,6 +140,7 @@ private fun rememberTimelinePaint(): TimelinePaint = TimelinePaint(
     selectionBorder = MaterialTheme.colorScheme.primary,
     ruler = MaterialTheme.colorScheme.outlineVariant,
     playhead = MaterialTheme.colorScheme.error,
+    trimEdge = MaterialTheme.colorScheme.tertiary,
 )
 
 /**
@@ -142,10 +152,10 @@ private fun rememberTimelinePaint(): TimelinePaint = TimelinePaint(
 @Composable
 private fun rememberSliceRequests(
     document: EditDocument,
+    clipsById: Map<String, com.redcut.domain.document.Clip>,
     rects: List<ClipRect>,
     spans: List<ClipSpan>,
 ): List<SliceRequest> {
-    val clipsById = remember(document) { document.clips.associateBy { it.id } }
     val sourcesById = remember(document) { document.sources.associateBy { it.id } }
     return TimelineSlices.requests(
         rects.mapNotNull { rect ->

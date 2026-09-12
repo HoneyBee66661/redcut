@@ -3,6 +3,13 @@ import org.gradle.api.Project
 import org.gradle.api.artifacts.VersionCatalog
 import org.gradle.api.artifacts.VersionCatalogsExtension
 import org.gradle.api.provider.Provider
+// NOTE: `configure` must be imported explicitly. The Gradle Kotlin DSL's default
+// imports cover .gradle.kts scripts, not plain .kt files in a kotlin-dsl project,
+// so without this line `extensions.configure<T> { }` resolves against only the
+// three raw ExtensionContainer overloads that take an `Action`, fails, and then
+// cascades into a misleading "Unresolved reference" for every symbol inside the
+// lambda. The sibling convention plugins import it for exactly this reason.
+import org.gradle.kotlin.dsl.configure
 import org.gradle.kotlin.dsl.getByType
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.dsl.KotlinAndroidProjectExtension
@@ -19,20 +26,6 @@ internal fun Project.versionInt(alias: String): Int =
  * Warnings-as-errors is opt-in via `-Predcut.warningsAsErrors`, not the default.
  * On a greenfield project a hard -Werror during scaffolding is hostile; in CI it
  * is exactly what you want. Controlled by a property so both are true.
- *
- * Applied below as the `-Werror` CLI flag rather than the `allWarningsAsErrors`
- * property. That property is not resolvable from the `compilerOptions {}` DSL on
- * the KGP version this project pins -- it reads as
- *
- *   e: Unresolved reference: allWarningsAsErrors
- *
- * because it lives on the deprecated `KotlinCommonToolOptions` surface and is
- * hidden there. `-Werror` is the flag the property sets underneath, and unlike
- * the property name it is stable across KGP versions. Note that it must be
- * inlined at each call site: factoring it into an extension function on the
- * compiler-options receiver type compiles that type into this file's resolution
- * and cascades into "none of the following functions can be called" errors on
- * the enclosing `extensions.configure` call.
  */
 internal fun Project.warningsAsErrors(): Provider<Boolean> =
     providers.gradleProperty("redcut.warningsAsErrors").map { it.toBoolean() }
@@ -42,7 +35,7 @@ internal fun Project.configureKotlinAndroid() {
     extensions.configure<KotlinAndroidProjectExtension> {
         compilerOptions {
             jvmTarget.set(JvmTarget.JVM_17)
-            if (warningsAsErrors().get()) freeCompilerArgs.add("-Werror")
+            allWarningsAsErrors.set(warningsAsErrors())
             freeCompilerArgs.addAll("-Xjsr305=strict")
         }
     }
@@ -61,7 +54,7 @@ internal fun Project.configureKotlinJvm() {
     extensions.configure<KotlinJvmProjectExtension> {
         compilerOptions {
             jvmTarget.set(JvmTarget.JVM_17)
-            if (warningsAsErrors().get()) freeCompilerArgs.add("-Werror")
+            allWarningsAsErrors.set(warningsAsErrors())
             // Explicit API mode is opt-in via `-Predcut.explicitApi`. It forces an
             // explicit visibility modifier on every public declaration — the right
             // discipline for the domain's public surface, but it slows scaffolding,

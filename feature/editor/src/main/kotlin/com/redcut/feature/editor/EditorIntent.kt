@@ -106,6 +106,16 @@ sealed interface EditorIntent {
     data class ApplyCut(val tool: CutTool) : Edit
 
     /**
+     * Move the clip at the playhead to [toIndex] (FR-2.7).
+     *
+     * The index comes from the document's own arithmetic ([reorderTargetIndex]) rather than from the
+     * drag handler, so "where does a drop here land" is a tested question with edge cases instead of a
+     * line of gesture code. Undoable like any other edit — a reorder the user did not mean is worth
+     * one tap to take back.
+     */
+    data class ApplyReorder(val clipId: String, val toIndex: Int) : Edit
+
+    /**
      * Dismiss the import report (FR-1.4).
      *
      * An explicit intent rather than a timer: a report that says two of five files were unreadable is

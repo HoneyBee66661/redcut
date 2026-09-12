@@ -2,6 +2,7 @@ package com.redcut.feature.editor.timeline
 
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.ui.Modifier
@@ -26,8 +27,14 @@ import com.redcut.feature.editor.toClipEdge
  *
  * 1. **Ruler strip** — the playhead's own surface; consumes what it takes.
  * 2. **Trim** (FR-2.1) — a press inside a clip's edge zone, below the ruler.
- * 3. **Pan / zoom** — the clip area's drag and pinch.
- * 4. **Tap** — select a clip, or clear the selection on empty space.
+ * 3. **Reorder** (FR-2.7) — a LONG PRESS on a clip body, then a drag.
+ * 4. **Pan / zoom** — the clip area's drag and pinch.
+ * 5. **Tap** — select a clip, or clear the selection on empty space.
+ *
+ * Reorder sits above pan/zoom and needs its long press for exactly that reason: a plain horizontal
+ * drag across a clip is how the user SCROLLS the timeline, and two gestures cannot own the same finger.
+ * Holding still to pick a clip up is the convention every NLE uses, and it leaves scrolling working
+ * everywhere on the track.
  *
  * Getting it wrong is not a crash: it is a timeline where a pinch also scrubs, or where dragging an
  * edge scrolls the clips instead of trimming. That arbitration is BEHAVIOUR, and behaviour here is
@@ -50,6 +57,14 @@ internal class TrimGestures(
     val cancel: () -> Unit,
 )
 
+/** The reorder drag's four callbacks (FR-2.7), grouped for the same reason [TrimGestures] is. */
+internal class ReorderGestures(
+    val start: (clipId: String, screenX: Float) -> Unit,
+    val update: (screenX: Float) -> Unit,
+    val end: () -> Unit,
+    val cancel: () -> Unit,
+)
+
 /** Everything a gesture can do. One value, so the Canvas call stays a single statement. */
 internal class TimelineGestures(
     val scrub: (screenX: Float) -> Unit,
@@ -57,6 +72,7 @@ internal class TimelineGestures(
     val zoom: (anchorX: Float, factor: Float) -> Unit,
     val tap: (screenX: Float) -> Unit,
     val trim: TrimGestures,
+    val reorder: ReorderGestures,
 )
 
 /**
@@ -155,6 +171,7 @@ internal fun timelineGestureHandlers(
     spansByClip: Map<String, ClipSpan>,
     setScrollPx: (Float) -> Unit,
     setZoomPxPerSecond: (Float) -> Unit,
+    reorder: ReorderGestures,
 ): TimelineGestures {
     fun sourceTimeAt(clipId: String, screenX: Float): Long {
         val clip = clipsById[clipId] ?: return 0L
@@ -190,6 +207,7 @@ internal fun timelineGestureHandlers(
             end = { onIntent(EditorIntent.EndTrim) },
             cancel = { onIntent(EditorIntent.CancelTrim) },
         ),
+        reorder = reorder,
     )
 }
 
@@ -225,6 +243,7 @@ internal fun Modifier.timelineGestures(
     .pointerInput(geometry, rulerHeightPx) {
         awaitEachGesture { trimGesture(geometry, rulerHeightPx, actions, actions.tap) }
     }
+    .reorderGesture(geometry, rulerHeightPx, actions.reorder)
     .pointerInput(geometry.zoom, geometry.visibleStartPx) {
         detectTransformGestures { centroid, pan, gestureZoom, _ ->
             if (gestureZoom == 1f) actions.scroll(pan.x) else actions.zoom(centroid.x, gestureZoom)
@@ -235,6 +254,36 @@ internal fun Modifier.timelineGestures(
             if (offset.y > rulerHeightPx) actions.tap(offset.x)
         }
     }
+
+/**
+ * Picking a clip up and moving it (FR-2.7).
+ *
+ * Long-press first, deliberately: see the order note at the top of the file. A plain horizontal drag
+ * across a clip body is the SCROLL gesture, so reorder waits for the hold — and the wait is the
+ * platform's, not a number invented here.
+ *
+ * The clip id is resolved here (the only thing this layer knows how to ask), and every position after
+ * that is handed to the Canvas, which owns the drag state and the geometry needed to turn a finger
+ * into a slot.
+ */
+private fun Modifier.reorderGesture(
+    geometry: TimelineGeometry,
+    rulerHeightPx: Float,
+    actions: ReorderGestures,
+): Modifier = pointerInput(geometry, rulerHeightPx) {
+    detectDragGesturesAfterLongPress(
+        onDragStart = { offset ->
+            if (offset.y <= rulerHeightPx) return@detectDragGesturesAfterLongPress
+            val hit = geometry.hitTest(offset.x)
+            val clipId = (hit as? TimelineHit.Body)?.clipId
+                ?: return@detectDragGesturesAfterLongPress
+            actions.start(clipId, offset.x)
+        },
+        onDrag = { change, _ -> actions.update(change.position.x) },
+        onDragEnd = { actions.end() },
+        onDragCancel = { actions.cancel() },
+    )
+}
 
 /** The next event for the pointer that started the gesture, or null when it is gone. */
 private suspend fun AwaitPointerEventScope.nextPointer(

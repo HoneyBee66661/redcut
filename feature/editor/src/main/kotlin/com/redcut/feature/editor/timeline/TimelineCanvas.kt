@@ -15,7 +15,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.unit.dp
 import com.redcut.core.common.timeline.ClipRect
 import com.redcut.core.common.timeline.ClipSpan
 import com.redcut.core.common.timeline.TimelineGeometry
@@ -23,6 +22,8 @@ import com.redcut.core.common.timeline.TimelineZoom
 import com.redcut.core.common.timeline.spansOf
 import com.redcut.core.media.ThumbnailKey
 import com.redcut.domain.document.EditDocument
+import com.redcut.domain.document.reorderMarkerUs
+import com.redcut.domain.document.reorderTargetIndex
 import com.redcut.feature.editor.EditorIntent
 import com.redcut.feature.editor.Selection
 import com.redcut.feature.editor.ToolState
@@ -78,6 +79,84 @@ internal fun TimelineCanvas(
     var scrollPx by rememberSaveable { mutableFloatStateOf(0f) }
     var viewportWidthPx by remember { mutableFloatStateOf(0f) }
 
+    val layer = rememberTimelineLayer(
+        document = document,
+        zoomPxPerSecond = zoomPxPerSecond,
+        scrollPx = scrollPx,
+        viewportWidthPx = viewportWidthPx,
+        density = density,
+        onThumbnail = onThumbnail,
+    )
+    val paint = rememberTimelinePaint()
+    val rulerHeightPx = RULER_HEIGHT_DP * density
+
+    // The reorder drag's state lives HERE rather than in `EditorUiState`: until the finger lifts the
+    // document has not changed at all, and the marker is a drawing of where it would land. That is the
+    // same reasoning as the viewport below, from the other direction — a drag in flight is not an edit
+    // yet, so it must not be state the whole editor recomposes for or history can see.
+    var reorderDrag by remember { mutableStateOf<ReorderDrag?>(null) }
+    val reorderGestures = buildReorderGestures(
+        document = document,
+        geometry = layer.geometry,
+        current = { reorderDrag },
+        setDrag = { reorderDrag = it },
+        onIntent = onIntent,
+    )
+    val actions = timelineGestureHandlers(
+        geometry = layer.geometry,
+        onIntent = onIntent,
+        clipsById = layer.clipsById,
+        spansByClip = layer.spansByClip,
+        setScrollPx = { scrollPx = it },
+        setZoomPxPerSecond = { zoomPxPerSecond = it },
+        reorder = reorderGestures,
+    )
+
+    Canvas(
+        modifier = modifier.timelineSurface(
+            geometry = layer.geometry,
+            rulerHeightPx = rulerHeightPx,
+            actions = actions,
+            onViewportWidthPx = { viewportWidthPx = it },
+        ),
+    ) {
+        drawTimeline(
+            layer = layer,
+            paint = paint,
+            marks = TimelineMarks(
+                playheadUs = playheadUs,
+                selectedClipId = selection.clipIdOrNull,
+                trimmedClipId = (tool as? ToolState.Trimming)?.clipId,
+                draggedEdge = (tool as? ToolState.Trimming)?.edge,
+                draggedClipId = reorderDrag?.clipId,
+                markerUs = reorderDrag?.let { drag ->
+                    document.reorderMarkerUs(drag.clipId, drag.targetIndex)
+                },
+            ),
+        )
+    }
+}
+
+/** The reorder drag as the Canvas sees it: which clip, which slot, and where the finger last was. */
+private data class ReorderDrag(val clipId: String, val targetIndex: Int, val lastScreenX: Float)
+
+/**
+ * The layer: everything the timeline derives from the document and the viewport, in one value.
+ *
+ * The pipeline is the point, and it is worth reading as a chain: clips → spans (prefix-summed start
+ * positions) → geometry (zoom, scroll, density) → rects (which clips are on screen and how wide) →
+ * slices (which frames the filmstrip asks for) → images (the ones that arrived). Each step is tested
+ * somewhere in the fast tier or in CI; this function is only their order.
+ */
+@Composable
+private fun rememberTimelineLayer(
+    document: EditDocument,
+    zoomPxPerSecond: Float,
+    scrollPx: Float,
+    viewportWidthPx: Float,
+    density: Float,
+    onThumbnail: suspend (sourceId: String, uri: String, positionUs: Long) -> ImageBitmap?,
+): TimelineLayer {
     val clipsById = remember(document) { document.clips.associateBy { it.id } }
     val spans = remember(document) { spansOf(document.toClipTimings()) }
     val spansByClip = remember(spans) { spans.associateBy { it.clipId } }
@@ -91,48 +170,83 @@ internal fun TimelineCanvas(
     val rects = geometry.visibleRects()
     val requests = rememberSliceRequests(document, clipsById, rects, spans)
     val images = rememberThumbnails(requests, onThumbnail)
-    val paint = rememberTimelinePaint()
-    val rulerHeightPx = RULER_HEIGHT_DP * density
-
-    Canvas(
-        modifier = modifier
-            .fillMaxSize()
-            .onSizeChanged { size -> viewportWidthPx = size.width.toFloat() }
-            .timelineGestures(
-                geometry = geometry,
-                rulerHeightPx = rulerHeightPx,
-                actions = timelineGestureHandlers(
-                    geometry = geometry,
-                    onIntent = onIntent,
-                    clipsById = clipsById,
-                    spansByClip = spansByClip,
-                    setScrollPx = { scrollPx = it },
-                    setZoomPxPerSecond = { zoomPxPerSecond = it },
-                ),
-            ),
-    ) {
-        val rulerHeight = RULER_HEIGHT_DP.dp.toPx()
-        val track = Track(top = rulerHeight, height = (size.height - rulerHeight).coerceAtLeast(0f))
-        val trimming = tool as? ToolState.Trimming
-
-        drawRuler(geometry, rulerHeight, paint.ruler)
-        rects.forEach { rect ->
-            drawClip(
-                rect = rect,
-                slices = requests.filter { it.clipId == rect.clipId },
-                images = images,
-                selected = selection.clipIdOrNull == rect.clipId,
-                draggedEdge = trimming?.takeIf { it.clipId == rect.clipId }?.edge,
-                geometry = geometry,
-                track = track,
-                paint = paint,
-            )
-        }
-        drawPlayhead(geometry, playheadUs, paint.playhead)
-    }
+    return TimelineLayer(
+        geometry = geometry,
+        rects = rects,
+        slices = requests,
+        images = images,
+        clipsById = clipsById,
+        spansByClip = spansByClip,
+    )
 }
 
-/** The six timeline colours, read from the theme where reading it is legal. */
+/**
+ * The surface: its size, and the gesture chain.
+ *
+ * One call rather than an inline chain, so the composable above reads as "state, then draw" and the
+ * gesture ORDER stays stated in exactly one place ([timelineGestures]).
+ */
+private fun Modifier.timelineSurface(
+    geometry: TimelineGeometry,
+    rulerHeightPx: Float,
+    actions: TimelineGestures,
+    onViewportWidthPx: (Float) -> Unit,
+): Modifier = this
+    .fillMaxSize()
+    .onSizeChanged { size -> onViewportWidthPx(size.width.toFloat()) }
+    .timelineGestures(geometry = geometry, rulerHeightPx = rulerHeightPx, actions = actions)
+
+/**
+ * Turns finger positions into a slot, using the document's own arithmetic.
+ *
+ * `reorderTargetIndex` is the whole reason a drag can be this thin: it answers "if I let go here, which
+ * index does that mean", including the awkward cases (dropping past the end, dropping onto the clip's
+ * own old slot). The gesture layer supplies positions; the document decides what they mean; this
+ * function is the join between them — and the slot it reports is the same number the command will be
+ * given, which is what stops the clip landing somewhere the marker never pointed at.
+ */
+private fun buildReorderGestures(
+    document: EditDocument,
+    geometry: TimelineGeometry,
+    current: () -> ReorderDrag?,
+    setDrag: (ReorderDrag?) -> Unit,
+    onIntent: (EditorIntent) -> Unit,
+): ReorderGestures {
+    fun targetAt(clipId: String, screenX: Float): Int =
+        document.reorderTargetIndex(clipId, geometry.usFor(geometry.contentPxFor(screenX)))
+
+    return ReorderGestures(
+        start = { clipId, screenX ->
+            setDrag(
+                ReorderDrag(
+                    clipId = clipId,
+                    targetIndex = targetAt(clipId, screenX),
+                    lastScreenX = screenX,
+                ),
+            )
+        },
+        update = { screenX ->
+            current()?.let { drag ->
+                setDrag(
+                    drag.copy(targetIndex = targetAt(drag.clipId, screenX), lastScreenX = screenX),
+                )
+            }
+        },
+        end = {
+            // One command, one history entry: a reorder is atomic, so there is nothing to preview frame
+            // by frame the way a trim has to.
+            current()?.let { drag ->
+                onIntent(
+                    EditorIntent.ApplyReorder(drag.clipId, drag.targetIndex),
+                )
+            }
+            setDrag(null)
+        },
+        cancel = { setDrag(null) },
+    )
+}
+
+/** The seven timeline colours, read from the theme where reading it is legal. */
 @Composable
 private fun rememberTimelinePaint(): TimelinePaint = TimelinePaint(
     clip = MaterialTheme.colorScheme.surfaceVariant,
@@ -141,6 +255,7 @@ private fun rememberTimelinePaint(): TimelinePaint = TimelinePaint(
     ruler = MaterialTheme.colorScheme.outlineVariant,
     playhead = MaterialTheme.colorScheme.error,
     trimEdge = MaterialTheme.colorScheme.tertiary,
+    reorderMarker = MaterialTheme.colorScheme.secondary,
 )
 
 /**

@@ -686,6 +686,7 @@ class EditorViewModelTest {
         dispatcher,
     ) {
         val (model, _) = importedClips(video())
+        val historyBefore = model.state.value.history
 
         // One 30 fps clip: a frame is 33 333 µs of timeline.
         model.onIntent(EditorIntent.StepPlayhead(FrameStep.FORWARD))
@@ -694,9 +695,10 @@ class EditorViewModelTest {
         model.onIntent(EditorIntent.StepPlayhead(FrameStep.BACK))
         assertThat(model.state.value.playheadUs).isEqualTo(0L)
 
-        // And it is view state, not an edit: nothing to undo for a moved playhead.
-        assertThat(model.state.value.history)
-            .isEqualTo(HistoryState.Ready(canUndo = false, canRedo = false, topLabel = null))
+        // And it is view state, not an edit: stepping does not ADD a history entry. The import is
+        // already on the stack, so the claim that matters is that stepping left it alone — a playhead
+        // move must never become undoable.
+        assertThat(model.state.value.history).isEqualTo(historyBefore)
     }
 
     @Test

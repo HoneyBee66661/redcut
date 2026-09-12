@@ -18,6 +18,7 @@ import com.redcut.domain.document.TrimClip
 import com.redcut.domain.document.UndoStack
 import com.redcut.domain.document.commandFor
 import com.redcut.domain.document.planImport
+import com.redcut.domain.document.timelineDurationUs
 import com.redcut.domain.document.trimmedTo
 import com.redcut.feature.editor.timeline.TimelineThumbnails
 import dagger.hilt.android.lifecycle.HiltViewModel

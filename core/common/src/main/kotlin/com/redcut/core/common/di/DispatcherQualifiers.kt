@@ -29,13 +29,28 @@ import javax.inject.Qualifier
  * Nothing here is a service locator: these are annotations only. The bindings are
  * provided by the composition root, so a test can substitute a `TestDispatcher`
  * without an Android test runner.
+ *
+ * ### Why only VALUE_PARAMETER and FUNCTION
+ *
+ * Constructor injection in Kotlin writes `@IoDispatcher private val io: ...`. A
+ * `val` constructor parameter is simulaneously a parameter, a property and a
+ * backing field, so as long as this annotation may legally target any TWO of
+ * those, Kotlin 2.2 warns at every such site (KT-73255) that it currently picks
+ * the parameter and will one day apply to both. With warnings-as-errors on, that
+ * is not a warning, it is a build failure — verified: narrowing PROPERTY alone
+ * left the same warning pointing at FIELD.
+ *
+ * The fix belongs here, once, rather than as a `@param:` prefix at every
+ * injection point forever. Dropping to the two targets that carry actual meaning
+ * makes the intent unambiguous: a qualifier marks a dependency (a parameter) or
+ * a provider (a function). FIELD is gone too, deliberately — field injection is
+ * not how this codebase wires anything, and removing the target turns "someone
+ * quietly did it" into a compile error.
  */
 @Qualifier
 @Retention(AnnotationRetention.BINARY)
 @Target(
     AnnotationTarget.FUNCTION,
-    AnnotationTarget.PROPERTY,
-    AnnotationTarget.FIELD,
     AnnotationTarget.VALUE_PARAMETER,
 )
 annotation class IoDispatcher
@@ -51,8 +66,6 @@ annotation class IoDispatcher
 @Retention(AnnotationRetention.BINARY)
 @Target(
     AnnotationTarget.FUNCTION,
-    AnnotationTarget.PROPERTY,
-    AnnotationTarget.FIELD,
     AnnotationTarget.VALUE_PARAMETER,
 )
 annotation class DefaultDispatcher
@@ -68,8 +81,6 @@ annotation class DefaultDispatcher
 @Retention(AnnotationRetention.BINARY)
 @Target(
     AnnotationTarget.FUNCTION,
-    AnnotationTarget.PROPERTY,
-    AnnotationTarget.FIELD,
     AnnotationTarget.VALUE_PARAMETER,
 )
 annotation class MainDispatcher

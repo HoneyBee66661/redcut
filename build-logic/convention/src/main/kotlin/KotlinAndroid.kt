@@ -27,13 +27,23 @@ internal fun Project.versionInt(alias: String): Int =
  * On a greenfield project a hard -Werror during scaffolding is hostile; in CI it
  * is exactly what you want. Controlled by a property so both are true.
  *
- * The `.orElse(false)` is load-bearing: without it the property is *absent* when
- * the flag is not passed, and `allWarningsAsErrors.set(absent)` leaves the
- * KotlinCompile task input unset — which Gradle rejects at configuration time
- * because the property is not optional.
+ * Two subtleties, both of which cost a debugging session if you get them wrong:
+ *
+ * 1. `.orElse(false)` is load-bearing. Without it the property is *absent* when
+ *    the flag is not passed, and `allWarningsAsErrors.set(absent)` leaves the
+ *    KotlinCompile task input unset — which Gradle rejects at configuration time
+ *    because the property is not optional.
+ *
+ * 2. `it.isEmpty() ||` is not defensive coding, it is the fix for a flag that
+ *    silently did nothing. Gradle accepts `-Pfoo` with no value and sets `foo` to
+ *    the EMPTY STRING, not to "true" — so the original `it.toBoolean()` turned
+ *    CI's `-Predcut.warningsAsErrors` into false, and the "warnings are errors in
+ *    CI" gate this file documents never once ran. Verified both ways before
+ *    fixing: the bare flag let three warnings through, `=true` failed the build
+ *    on them. CI now spells it `=true` as well, so the two cannot drift back.
  */
 internal fun Project.warningsAsErrors(): Provider<Boolean> =
-    providers.gradleProperty("redcut.warningsAsErrors").map { it.toBoolean() }.orElse(false)
+    providers.gradleProperty("redcut.warningsAsErrors").map { it.isEmpty() || it.toBoolean() }.orElse(false)
 
 /** Kotlin configuration shared by every Android module. */
 internal fun Project.configureKotlinAndroid() {

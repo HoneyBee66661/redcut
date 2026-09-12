@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The window theme, which is NOT the UI theme (that is RedcutTheme in :core:ui).
+
+  All this does is make the window between launch and first Compose frame the
+  right colour, so a cold start does not flash white. It has a night twin in
+  values-night/ for exactly that reason: the Compose theme follows the system, so
+  a fixed light window background would be a white flash on every dark-mode
+  launch — a detail that is trivial now and infuriating once there is a splash.
+
+  Kept on the platform Material theme, not Material Components: the app has no
+  com.google.android.material dependency, and the Compose Material 3 theme does
+  not need one. Adding an XML theme library to colour a window would be a
+  dependency bought for a background colour.
+-->
+<resources>
+    <style name="Theme.Redcut" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>

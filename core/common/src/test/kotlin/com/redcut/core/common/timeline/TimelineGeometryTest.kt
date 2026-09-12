@@ -288,6 +288,89 @@ class TimelineGeometryTest {
         assertThat(TimelineZoom.DEFAULT.isAtMinimum).isFalse()
     }
 
+    // --- Zoom model (pinch) ------------------------------------------------
+
+    @Test
+    fun `zooming keeps the moment under the fingers in place`() {
+        // The difference between a pinch that feels like the timeline is a physical object and one
+        // that feels like it is sliding away: the frame under the gesture must not move.
+        val before = geometry(spans = threeClips, zoom = TimelineZoom(60f))
+        val anchorScreenX = 180f
+        val timeUnderTheFingers = before.usFor(before.contentPxFor(anchorScreenX))
+
+        val after = before.zoomedAround(anchorScreenX, TimelineZoom(120f))
+
+        assertThat(after.zoom.pixelsPerSecond).isEqualTo(120f)
+        assertThat(after.usFor(after.contentPxFor(anchorScreenX))).isEqualTo(timeUnderTheFingers)
+    }
+
+    @Test
+    fun `zooming out about the left edge puts the start of the timeline back at the edge`() {
+        val before = geometry(spans = threeClips, scrollPx = 60f)
+
+        val after = before.zoomedAround(0f, TimelineZoom(10f))
+
+        assertThat(after.visibleStartPx).isEqualTo(0f)
+    }
+
+    @Test
+    fun `zooming out can leave a scroll offset out of range, and reads clamp it`() {
+        val before = geometry(spans = threeClips, scrollPx = 84f) // scrolled to the end
+
+        // Anchor at the right edge, so zooming out pulls the content leftwards past its own start.
+        val zoomedOut = before.zoomedAround(360f, TimelineZoom(10f))
+
+        assertThat(zoomedOut.scrollPx).isLessThan(0f)
+        assertThat(zoomedOut.visibleStartPx).isEqualTo(0f)
+        assertThat(zoomedOut.visibleRects()).isNotEmpty()
+    }
+
+    // --- Ruler -------------------------------------------------------------
+
+    @Test
+    fun `the ruler interval is the smallest round one that does not crowd`() {
+        // 60 px/s: a 1 s label would be 60 px apart, tighter than the 64 px floor, so the ruler
+        // steps up to 5 s.
+        assertThat(geometry(zoom = TimelineZoom(60f)).rulerIntervalUs()).isEqualTo(5_000_000L)
+        // 480 px/s: 1 s is 480 px apart, comfortable.
+        assertThat(geometry(zoom = TimelineZoom(480f)).rulerIntervalUs()).isEqualTo(1_000_000L)
+        // 2 px/s (zoomed all the way out): 1 s is 2 px apart, so the ruler steps to minutes.
+        assertThat(geometry(zoom = TimelineZoom(2f)).rulerIntervalUs()).isEqualTo(60_000_000L)
+    }
+
+    @Test
+    fun `ruler ticks land on round times inside the visible window`() {
+        val ticks = geometry(spans = threeClips, zoom = TimelineZoom(60f)).rulerTicks()
+
+        // 5 s interval, 360 px of viewport at 60 px/s = 6 s visible: ticks at 0 and 5 s.
+        assertThat(ticks).containsExactly(0L, 5_000_000L).inOrder()
+    }
+
+    @Test
+    fun `the ruler follows the scroll position, and never draws past the content`() {
+        // Ten 10-second clips: 6000 px of content, so 240 px of scroll is reachable (the short
+        // three-clip timeline clamps at 84 px). Scrolled to 4 s, the visible window is 4 s to 10 s
+        // at 60 px/s, and the ruler starts at the first ROUND time inside it.
+        val tenClips = spansOf((1..10).map { ClipTiming("clip-$it", 10 * oneSecond) })
+        val geometry = geometry(spans = tenClips, zoom = TimelineZoom(60f), scrollPx = 240f)
+
+        assertThat(geometry.rulerTicks()).containsExactly(5_000_000L, 10_000_000L).inOrder()
+    }
+
+    @Test
+    fun `the ruler stops at the end of the content`() {
+        // A 7-second timeline scrolled to its end shows no tick past 7 s, even though there is
+        // empty viewport to the right of it: a tick there is a time this project does not have.
+        val geometry = geometry(spans = threeClips, zoom = TimelineZoom(60f), scrollPx = 84f)
+
+        assertThat(geometry.rulerTicks()).containsExactly(5_000_000L)
+    }
+
+    @Test
+    fun `an empty timeline has no ruler ticks`() {
+        assertThat(geometry().rulerTicks()).isEmpty()
+    }
+
     // --- The playhead's clip ----------------------------------------------
 
     @Test

@@ -260,6 +260,73 @@ data class TimelineGeometry(
 
     private fun ClipRect.halfWidth(): Float = widthPx / 2f
 
+    /**
+     * The same timeline at a new zoom, with the moment under [anchorScreenX] staying put.
+     *
+     * This is the whole reason pinch-zoom feels right or wrong. Zooming about the viewport's left
+     * edge makes the content slide out from under the user's fingers; zooming about the centroid
+     * of the gesture keeps the frame they are looking at where they are looking. Being pure
+     * arithmetic, it is decided here rather than buried in a gesture callback:
+     *
+     * 1. What time is under the anchor now? ([usFor] on the content position.)
+     * 2. Where does that time land at the new zoom, in content pixels?
+     * 3. Scroll so it lands under the same screen x again.
+     *
+     * The offset is stored as the gesture produced it and clamped when it is READ ([visibleStartPx],
+     * [contentPxFor]) — storing the clamped value instead would make a pinch that briefly goes past
+     * the end of the timeline write the collapsed position down permanently, so the content would
+     * jump when the user pinched back.
+     */
+    fun zoomedAround(anchorScreenX: Float, newZoom: TimelineZoom): TimelineGeometry {
+        val anchorUs = usFor(contentPxFor(anchorScreenX))
+        val anchorAtNewZoomPx = anchorUs / MICROS_PER_SECOND * newZoom.pixelsPerSecond
+        return copy(zoom = newZoom, scrollPx = anchorAtNewZoomPx - anchorScreenX)
+    }
+
+    /**
+     * Where to draw ruler ticks, in microseconds, inside the visible window.
+     *
+     * Bounded by the CONTENT, not by the viewport: a tick past the end of the last clip is a time
+     * that does not exist in this project, and drawing it invites the user to scrub to nowhere. An
+     * empty timeline therefore has an empty ruler.
+     *
+     * The interval comes from the zoom so labels never collide and never thin out into a solid
+     * line: the smallest round interval (seconds, then minutes) whose on-screen width is at least
+     * [MIN_TICK_SPACING_PX]. Pure arithmetic again — the ruler needs no font measurement and no
+     * Context.
+     */
+    fun rulerTicks(): List<Long> {
+        val contentEndUs = spans.lastOrNull()?.endUs ?: return emptyList()
+        val intervalUs = rulerIntervalUs()
+        val firstTick = ceilToInterval(usFor(visibleStartPx), intervalUs)
+        val limitPx = minOf(visibleEndPx, pxFor(contentEndUs))
+
+        val ticks = mutableListOf<Long>()
+        var tick = firstTick
+        while (pxFor(tick) <= limitPx) {
+            ticks += tick
+            tick += intervalUs
+        }
+        return ticks
+    }
+
+    /** The tick interval for the current zoom, in microseconds. Never zero. */
+    fun rulerIntervalUs(): Long {
+        val wantedUs = usFor(MIN_TICK_SPACING_PX).coerceAtLeast(1L)
+        return TICK_INTERVALS_US.firstOrNull { it >= wantedUs } ?: TICK_INTERVALS_US.last()
+    }
+
+    /**
+     * The first multiple of [intervalUs] at or after [us].
+     *
+     * Rounded UP, so the first tick is drawn just inside the left edge rather than one interval
+     * off-screen: a tick that is never visible would cost a draw call per frame for nothing.
+     */
+    private fun ceilToInterval(us: Long, intervalUs: Long): Long {
+        if (us <= 0L) return 0L
+        return ((us + intervalUs - 1) / intervalUs) * intervalUs
+    }
+
     /** The clip the playhead is inside, which is what FR-2.2/FR-2.3/FR-2.5 act on. */
     fun clipAt(playheadUs: Long): ClipSpan? =
         spans.firstOrNull { playheadUs >= it.startUs && playheadUs < it.endUs }
@@ -275,6 +342,25 @@ data class TimelineGeometry(
 
         /** Room past the last clip, so the end of the timeline is not flush with the frame. */
         const val END_PADDING_PX = 24f
+
+        /** Closest two ruler labels may be drawn before the interval is stepped up. */
+        const val MIN_TICK_SPACING_PX = 64f
+
+        /**
+         * The intervals a ruler is allowed to use, smallest first.
+         *
+         * Round numbers only: 1 s, 5 s, 10 s, 30 s, then minutes. A ruler that reads "3.7 s" is a
+         * ruler nobody can scan, and the intervals people trim by are round ones.
+         */
+        val TICK_INTERVALS_US = listOf(
+            1_000_000L,
+            5_000_000L,
+            10_000_000L,
+            30_000_000L,
+            60_000_000L,
+            300_000_000L,
+            600_000_000L,
+        )
     }
 }
 

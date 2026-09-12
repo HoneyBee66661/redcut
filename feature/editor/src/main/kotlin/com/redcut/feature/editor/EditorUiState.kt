@@ -2,6 +2,7 @@ package com.redcut.feature.editor
 
 import androidx.compose.runtime.Immutable
 import com.redcut.domain.document.EditDocument
+import com.redcut.domain.document.ImportRejection
 import com.redcut.domain.document.UndoStack
 
 /**

@@ -292,7 +292,13 @@ private fun CutTools(state: EditorUiState, onIntent: (EditorIntent) -> Unit) {
     }
 }
 
-private val CUT_TOOLS = listOf(CutTool.SPLIT, CutTool.CUT_LEFT, CutTool.CUT_RIGHT, CutTool.DELETE)
+private val CUT_TOOLS = listOf(
+    CutTool.SPLIT,
+    CutTool.CUT_LEFT,
+    CutTool.CUT_RIGHT,
+    CutTool.DELETE,
+    CutTool.MERGE,
+)
 
 /** A tool's button word. Here rather than in the domain because it is a UI word, not a domain name. */
 private fun CutTool.label(): String = when (this) {
@@ -300,6 +306,7 @@ private fun CutTool.label(): String = when (this) {
     CutTool.CUT_LEFT -> "Cut left"
     CutTool.CUT_RIGHT -> "Cut right"
     CutTool.DELETE -> "Delete"
+    CutTool.MERGE -> "Merge"
 }
 
 /**

@@ -621,4 +621,44 @@ class EditorViewModelTest {
 
         assertThat(model.state.value).isEqualTo(before)
     }
+
+    @Test
+    fun `merge undoes a split, fusing the halves back into one clip`() = runTest(dispatcher) {
+        // The natural flow that makes merge useful, and the only one available before reorder exists:
+        // a split produces two clips of the SAME source with adjacent source ranges, which is exactly
+        // FR-2.4's precondition. Merging them back must be the inverse of the split.
+        val (model, _) = importedClips(video())
+        model.onIntent(EditorIntent.SetPlayhead(2_000_000L))
+        model.onIntent(EditorIntent.ApplyCut(CutTool.SPLIT))
+        assertThat(model.state.value.document.clips).hasSize(2)
+
+        model.onIntent(EditorIntent.SetPlayhead(0L))
+        model.onIntent(EditorIntent.ApplyCut(CutTool.MERGE))
+
+        assertThat(model.state.value.document.clips).hasSize(1)
+        assertThat(model.state.value.document.clips.single().sourceOutUs).isEqualTo(4_000_000L)
+        assertThat(model.state.value.history)
+            .isEqualTo(HistoryState.Ready(canUndo = true, canRedo = false, topLabel = "Merge"))
+
+        // Merge is an ordinary command, so undo brings the split back.
+        model.onIntent(EditorIntent.Undo)
+        assertThat(model.state.value.document.clips).hasSize(2)
+    }
+
+    @Test
+    fun `merge refuses clips from different files`() = runTest(dispatcher) {
+        val (model, _) = importedClips(
+            video(uri = "content://media/1"),
+            video(uri = "content://media/2"),
+        )
+        model.onIntent(EditorIntent.SetPlayhead(0L))
+        val before = model.state.value
+
+        model.onIntent(EditorIntent.ApplyCut(CutTool.MERGE))
+
+        // Two separately imported videos are not source-adjacent, so the toolbar's Merge is disabled
+        // and the handler must refuse too — `MergeClips` returns the document unchanged, which would
+        // otherwise be indistinguishable from a merge that happened to do nothing.
+        assertThat(model.state.value).isEqualTo(before)
+    }
 }

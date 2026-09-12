@@ -33,6 +33,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.redcut.domain.document.ClipEdge
 import com.redcut.domain.document.CutAvailability
 import com.redcut.domain.document.CutTool
+import com.redcut.domain.document.FrameStep
 import com.redcut.domain.document.availabilityFor
 import com.redcut.feature.editor.timeline.TimelineCanvas
 
@@ -149,6 +150,11 @@ internal fun EditorScreen(
         if (state.stage == Stage.Cut) {
             CutTools(state = state, onIntent = onIntent)
         }
+
+        // Frame-stepping sits with the timeline rather than with the Cut tools: it moves the PLAYHEAD,
+        // so it is useful in every stage, and FR-2.9's whole purpose is to place the playhead exactly
+        // before another tool acts on it.
+        FrameStepButtons(state = state, onIntent = onIntent)
 
         // The timeline sits between the preview and the history bar, which is the layout §7.1
         // draws. It is given a fixed height rather than a weight: the preview is what should grow
@@ -288,6 +294,34 @@ private fun CutTools(state: EditorUiState, onIntent: (EditorIntent) -> Unit) {
         }
         if (allBlocked && reasons.size == 1) {
             Text(text = reasons.first(), style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
+
+/**
+ * FR-2.9's frame-step buttons.
+ *
+ * Always visible, unlike the Cut tools: whoever needs a frame-accurate playhead needs these, and the
+ * millisecond readout between them is what makes the step visible — one frame is 33 ms, which is a
+ * third of a blink, and a button whose effect you cannot see reads as a button that did nothing.
+ */
+@Composable
+private fun FrameStepButtons(state: EditorUiState, onIntent: (EditorIntent) -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        TextButton(onClick = { onIntent(EditorIntent.StepPlayhead(FrameStep.BACK)) }) {
+            Text("◀ frame", style = MaterialTheme.typography.labelLarge)
+        }
+        Text(
+            text = "${state.playheadUs / 1_000} ms",
+            style = MaterialTheme.typography.labelMedium,
+        )
+        TextButton(onClick = { onIntent(EditorIntent.StepPlayhead(FrameStep.FORWARD)) }) {
+            Text("frame ▶", style = MaterialTheme.typography.labelLarge)
         }
     }
 }

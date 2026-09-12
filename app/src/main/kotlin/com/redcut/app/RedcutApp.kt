@@ -1,8 +1,15 @@
 package com.redcut.app
 
 import android.app.Application
+import android.content.ComponentCallbacks2
 import com.redcut.app.logging.plantLoggingTrees
+import com.redcut.core.media.ThumbnailStore
 import dagger.hilt.android.HiltAndroidApp
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import javax.inject.Inject
 
 /**
  * Process-wide entry point, and the root of the Hilt graph.
@@ -19,8 +26,44 @@ import dagger.hilt.android.HiltAndroidApp
  */
 @HiltAndroidApp
 class RedcutApp : Application() {
+
+    /**
+     * The thumbnail cache, held here because `onTrimMemory` is where spec §9.3 says to drop it
+     * and an Application is the only thing in the app that receives that callback.
+     */
+    @Inject
+    lateinit var thumbnails: ThumbnailStore
+
+    /**
+     * A scope that outlives every screen.
+     *
+     * `onTrimMemory` is a callback, not a coroutine, and the cache's `clear()` is suspend
+     * (it takes the same mutex a decode in flight is about to write through). A scope tied to
+     * an Activity would be wrong — there is no Activity — and `GlobalScope` would be a leak
+     * nobody can cancel. One application-scoped job, cancelled by the process ending, is the
+     * accurate lifetime for "drop the caches".
+     */
+    private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
     override fun onCreate() {
         super.onCreate()
         plantLoggingTrees()
+    }
+
+    /**
+     * Drops the thumbnail cache when the system asks for memory back (spec §9.3).
+     *
+     * The threshold is `>=` `TRIM_MEMORY_RUNNING_LOW` on purpose, and the reason is that the
+     * levels above it are not all "more urgent" in the same direction: `TRIM_MEMORY_BACKGROUND`
+     * and `TRIM_MEMORY_UI_HIDDEN` mean the app is no longer visible, which is an even better
+     * moment to give 16 MB of bitmaps back than a running-low warning is. The cache is
+     * regenerable by construction (§10.4: the cache directory may be deleted at any time), so
+     * clearing it early costs a re-decode and nothing else.
+     */
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+            applicationScope.launch { thumbnails.clear() }
+        }
     }
 }

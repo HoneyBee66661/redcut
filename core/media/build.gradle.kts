@@ -27,4 +27,11 @@ dependencies {
     // Probing and reading a content:// URI are I/O; the reader is suspend and runs on
     // Dispatchers.IO. `-android` is what supplies it (see DispatchersModule).
     implementation(libs.kotlinx.coroutines.android)
+
+    // The broker's rules are concurrency behaviour, and the concurrency tests need to control
+    // time and dispatchers. This module's tests run in CI's `build` job: an Android module has
+    // no test runner on the development host.
+    testImplementation(libs.junit)
+    testImplementation(libs.truth)
+    testImplementation(libs.kotlinx.coroutines.test)
 }

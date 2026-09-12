@@ -64,7 +64,11 @@ interface MediaProbe {
  */
 @Singleton
 class AndroidMediaProbe @Inject constructor(
-    @ApplicationContext private val context: Context,
+    // `@param:` is explicit because Kotlin 2.2 warns that a bare annotation on a constructor
+    // property will also start applying to the FIELD — and CI compiles with `-Werror`. The
+    // qualifier is needed on the parameter (that is what Hilt reads); saying so pins the
+    // current behaviour instead of inheriting whatever the next Kotlin version decides.
+    @param:ApplicationContext private val context: Context,
     @IoDispatcher private val io: CoroutineDispatcher,
     private val logger: RedcutLogger,
 ) : MediaProbe {

@@ -1,5 +1,8 @@
 package com.redcut.feature.editor
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -36,13 +39,35 @@ fun EditorRoute(
 ) {
     val state by viewModel.state.collectAsState()
 
+    // The SAF picker (FR-1.1). `OpenMultipleDocuments` is the multi-select form of
+    // ACTION_OPEN_DOCUMENT, and it needs no storage permission at all: the read grant comes
+    // with the URIs the user picked, which is exactly why the requirement specifies SAF
+    // rather than READ_MEDIA_VIDEO.
+    //
+    // The launcher lives HERE, not in EditorScreen: it is an Activity-result concern, and the
+    // screen below stays a pure function of state plus callbacks — the property that keeps it
+    // previewable and (Phase 12.2) screenshot-testable.
+    val pickMedia = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenMultipleDocuments(),
+    ) { uris: List<Uri> ->
+        viewModel.onIntent(EditorIntent.ImportMedia(uris.map(Uri::toString)))
+    }
+
     EditorScreen(
         state = state,
         onIntent = viewModel::onIntent,
+        onImportClick = { pickMedia.launch(VIDEO_MIME_TYPES) },
         onExport = onExport,
         onBack = onBack,
     )
 }
+
+/**
+ * What the picker may show (FR-1.1). Video only: an audio bed is FR-1.6 and image overlays
+ * are FR-1.7, both `Should` and both later — offering them now would mean accepting files the
+ * probe and the policy are not yet asked to handle.
+ */
+private val VIDEO_MIME_TYPES = arrayOf("video/*")
 
 /**
  * The stage host (spec §7.1).
@@ -59,6 +84,7 @@ fun EditorRoute(
 internal fun EditorScreen(
     state: EditorUiState,
     onIntent: (EditorIntent) -> Unit,
+    onImportClick: () -> Unit,
     onExport: () -> Unit,
     onBack: () -> Unit,
 ) {
@@ -76,9 +102,19 @@ internal fun EditorScreen(
                 modifier = Modifier.padding(start = 8.dp),
             )
             Box(modifier = Modifier.weight(1f))
+            // Import sits before Export because that is the order of the user's work: a
+            // document with no clips has nothing to export, and the button states it.
+            TextButton(onClick = onImportClick) { Text("Import") }
             TextButton(onClick = onExport, enabled = state.document.clips.isNotEmpty()) {
                 Text("Export")
             }
+        }
+
+        state.import?.let { report ->
+            ImportBanner(
+                report = report,
+                onDismiss = { onIntent(EditorIntent.DismissImport) },
+            )
         }
 
         TabRow(selectedTabIndex = state.stage.ordinal) {
@@ -137,5 +173,46 @@ private fun HistoryBar(history: HistoryState, onIntent: (EditorIntent) -> Unit) 
         TextButton(onClick = { onIntent(EditorIntent.Redo) }, enabled = canRedo) {
             Text("Redo")
         }
+    }
+}
+
+/**
+ * What the last import did (FR-1.2, FR-1.4).
+ *
+ * A banner rather than a toast or a snackbar, and for a specific reason: FR-1.4's rejections
+ * are *per file*, so an import of five videos can produce up to four explanations. A
+ * transient message can hold one line and disappears while it is being read; this stays until
+ * dismissed, which is the only honest way to show a list the user may need to act on (relink
+ * a source, re-encode a file).
+ *
+ * It draws nothing for a clean import with rejections absent — the summary line is still
+ * worth showing, because "3 clips added" is the confirmation that the gesture worked.
+ */
+@Composable
+private fun ImportBanner(report: ImportReport, onDismiss: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+    ) {
+        Text(text = report.summaryLine(), style = MaterialTheme.typography.titleSmall)
+        report.messages.forEach { message ->
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+        TextButton(onClick = onDismiss) { Text("Dismiss") }
+    }
+}
+
+/** The one-line headline: what was added, and whether anything was refused. */
+private fun ImportReport.summaryLine(): String {
+    val clips = if (importedCount == 1) "clip" else "clips"
+    return when {
+        importedCount == 0 && hasRejections -> "Nothing was imported"
+        hasRejections -> "Added $importedCount $clips, refused ${rejected.size}"
+        else -> "Added $importedCount $clips"
     }
 }

@@ -24,4 +24,26 @@ sealed interface EditorIntent {
 
     /** Step one entry forward in history. */
     data object Redo : EditorIntent
+
+    /**
+     * Import the given content URIs (FR-1.1–1.5).
+     *
+     * URIs as `String`, not `Uri`: the intent is the feature's vocabulary, and the feature
+     * is the module that must stay testable on the JVM. Turning what SAF returned into a
+     * string happens in the one place that has an `ActivityResultContracts` callback.
+     *
+     * The reading, probing and policy all happen off the main thread behind this intent;
+     * what comes back is a document with new clips, or a report of what was refused.
+     */
+    data class ImportMedia(val uris: List<String>) : EditorIntent
+
+    /**
+     * Dismiss the import report (FR-1.4).
+     *
+     * An explicit intent rather than a timer: a report that says two of five files were
+     * refused is information the user may need to read twice, and a message that disappears
+     * on its own is a message that gets missed. Dismissal is the UI's decision, made by the
+     * person who read it.
+     */
+    data object DismissImport : EditorIntent
 }

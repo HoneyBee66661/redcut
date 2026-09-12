@@ -32,6 +32,34 @@ sealed interface EditCommand {
 }
 
 // ---------------------------------------------------------------------------
+// Composition
+// ---------------------------------------------------------------------------
+
+/**
+ * Several commands as one (FR-1.2).
+ *
+ * Importing five videos is one action to the user and must be one entry in history: the
+ * alternative — Appending the plan's commands straight through [UndoStack] — makes undo
+ * mean \"the last of six steps\" and turns a single mis-tap into six presses. That is the
+ * same reasoning spec §7.3 applies to drags (preview while dragging, commit once).
+ *
+ * It is the commands in order, applied in order, and it labels the entry with what the user
+ * did rather than with the machinery: \"Add media\", not \"Add source\".
+ *
+ * A compound that produces no change is NOT special-cased here — [UndoStack] already
+ * declines to push an entry for a command that left the document identical, which is what
+ * keeps a fully-rejected import out of the undo history.
+ */
+data class CompoundCommand(
+    override val label: String,
+    val commands: List<EditCommand>,
+) : EditCommand {
+
+    override fun apply(doc: EditDocument): EditDocument =
+        commands.fold(doc) { current, command -> command.apply(current) }
+}
+
+// ---------------------------------------------------------------------------
 // Media import (FR-1). Needed so a document can be built by commands rather than
 // only by hand, which is what lets the command tests start from realistic state.
 // ---------------------------------------------------------------------------

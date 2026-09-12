@@ -52,13 +52,13 @@ jobs:
           java-version: '17'
       - uses: gradle/actions/setup-gradle@v4
       - name: Run pure-JVM tests
-        # Scoped to the modules that exist. Add :core:common here as it is created —
-        # see docs/VIDEO_EDITOR_MVP_SPEC.md §4.1. :domain:render is listed because
-        # Phase 1.10 landed it: it holds TimelineCompiler, the one place framing,
-        # timing and ordering rules exist, and both the preview and the export path
-        # consume its output — so a CI run that did not test it was a green light
-        # for the module the whole product depends on.
-        run: ./gradlew :domain:document:test :domain:render:test $GRADLE_FLAGS
+        # Scoped to the modules that exist — see docs/VIDEO_EDITOR_MVP_SPEC.md §4.1.
+        # :domain:render is listed because Phase 1.10 landed it: it holds
+        # TimelineCompiler, the one place framing, timing and ordering rules exist, and
+        # both the preview and the export path consume its output — so a CI run that
+        # did not test it was a green light for the module the whole product depends on.
+        # :core:common joined with Phase 0.2; tools/verify.sh runs the same list.
+        run: ./gradlew :domain:document:test :domain:render:test :core:common:test $GRADLE_FLAGS
       - name: Fail if the fast tier got slow
         # The tier is only valuable while it is fast enough to run on every save.
         # If this trips, something impure crept into :domain:*.

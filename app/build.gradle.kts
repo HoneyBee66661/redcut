@@ -55,6 +55,9 @@ dependencies {
     // --- Core ---------------------------------------------------------------
     implementation(project(":core:common"))
     implementation(project(":core:ui"))
+    // The composition root is where the resource model is owned: the thumbnail cache is dropped
+    // from Application.onTrimMemory, and the broker (spec §9.1) has exactly one instance.
+    implementation(project(":core:media"))
 
     // --- Engines: bound here and nowhere else -------------------------------
     implementation(project(":engine:media3"))

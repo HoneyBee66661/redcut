@@ -29,7 +29,13 @@ on:
   pull_request:
     paths:
       - "benchmark/**"
+      # Both spellings of the profile's home, because the plugin's output path is the
+      # plugin's business: with `mergeIntoMain = true` the files land in
+      # `app/src/main/generated/baselineProfiles/`, which the first successful run of this
+      # workflow established. The un-suffixed path stays listed for the variant-specific
+      # layout the plugin uses when `mergeIntoMain` is off.
       - "app/src/main/baselineProfiles/**"
+      - "app/src/main/generated/baselineProfiles/**"
       - "app/src/main/baseline-prof.txt"
       - ".github/workflows/baseline-profile.yml"
 

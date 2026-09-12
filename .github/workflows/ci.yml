@@ -124,6 +124,18 @@ jobs:
         run: ./gradlew assembleDebug $GRADLE_FLAGS
       - name: Unit tests
         run: ./gradlew testDebugUnitTest $GRADLE_FLAGS
+      # The APK is the only path to device verification this project has: there is
+      # no emulator or physical device on the development host, so §15's
+      # device-level items (startup, scrub, soak export, APK size, TalkBack) are
+      # checked by sideloading this artifact. `if-no-files-found: error` because a
+      # job that reports success while producing nothing installable is the exact
+      # failure this step exists to catch.
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: redcut-debug-apk
+          path: app/build/outputs/apk/**/*.apk
+          if-no-files-found: error
       - uses: actions/upload-artifact@v4
         if: always()
         with:

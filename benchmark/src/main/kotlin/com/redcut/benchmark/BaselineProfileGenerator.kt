@@ -49,7 +49,18 @@ class BaselineProfileGenerator {
     val baselineProfileRule = BaselineProfileRule()
 
     @Test
-    fun generateBaselineProfile() = baselineProfileRule.collect(packageName = TARGET_PACKAGE) {
+    fun generateBaselineProfile() = baselineProfileRule.collect(
+        packageName = TARGET_PACKAGE,
+        // Emits STARTUP profile rules as well as baseline ones, and this is the half NFR-1
+        // is about: the baseline profile AOT-compiles the paths that run, while the startup
+        // profile is what the platform uses during the cold-start window. The first CI run
+        // of this generator produced baseline rules only and said so:
+        //   "No startup profile rules were generated for the variant `release` ... because
+        //    there are no instrumentation tests with baseline profile rule which specify
+        //    `includeInStartupProfile = true`."
+        // A profile that speeds up the second launch and not the first is the wrong half.
+        includeInStartupProfile = true,
+    ) {
         // --- Cold start ------------------------------------------------------
         // The path NFR-1 is about. `pressHome()` first so the start is a real one and not
         // a warm resume, which would profile the wrong path and under-report it.

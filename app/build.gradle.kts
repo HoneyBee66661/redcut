@@ -29,6 +29,13 @@ android {
 // one space and called that the correct style. The rule is right about Kotlin sources and
 // wrong about Gradle scripts whose bodies are DSL lambdas; the workaround is to not give it
 // a multi-line top-level block, and to keep the explanation in the comment above instead.
+//
+// `mergeIntoMain` puts the generated rules at
+// `app/src/main/generated/baselineProfiles/baseline-prof.txt` — the profile becomes a
+// REVIEWED, CHECKED-IN build input rather than a build artifact. That exact path was found
+// by the first real run of .github/workflows/baseline-profile.yml, which had been looking
+// in `src/main/baselineProfiles/` and reported an empty profile while one existed; the
+// workflow now searches both and assumes neither.
 baselineProfile { mergeIntoMain = true }
 
 dependencies {

@@ -86,26 +86,33 @@ jobs:
           script: ./gradlew :app:generateBaselineProfile $GRADLE_FLAGS
 
       # An empty profile is worse than none: it ships, it looks like a profile, and every
-      # later reader assumes the code paths were covered. So the job fails on one, and on a
-      # profile with no `.txt` rules at all.
-      - name: Fail on an empty profile
+      # later reader assumes the code paths were covered. So the job fails when nothing was
+      # written, and it prints what WAS written — the plugin's output path is its business,
+      # and the first run of this workflow proved the point: with `mergeIntoMain = true` the
+      # profile lands in `app/src/main/generated/baselineProfiles/baseline-prof.txt`, not in
+      # `src/main/baselineProfiles/`, and the empty-profile check below had been looking in
+      # the wrong place. Both locations are searched; neither is assumed.
+      - name: Find the generated profile
+        id: profile
         run: |
           set -euo pipefail
           shopt -s nullglob
-          files=(app/src/main/baselineProfiles/*.txt)
+          files=(app/src/main/baselineProfiles/*.txt app/src/main/generated/baselineProfiles/*.txt)
           if [ ${#files[@]} -eq 0 ]; then
-            echo "::error::No profile was written to app/src/main/baselineProfiles."
-            echo "Check that :benchmark:collect*BaselineProfile ran on the emulator."
+            echo "::error::No profile was written under app/src/main. Check that"
+            echo "::error:::benchmark:collect*BaselineProfile ran on the emulator."
             exit 1
           fi
           for f in "${files[@]}"; do
             bytes=$(wc -c < "$f")
-            rules=$(grep -c '^HSPL\|^Lcom\|^H' "$f" || true)
-            echo "$f: ${bytes} bytes, ${rules} rules"
+            rules=$(grep -c . "$f" || true)
+            startup=$(grep -c '^HSPL' "$f" || true)
+            echo "$f: ${bytes} bytes, ${rules} rules, ${startup} startup markers"
             if [ "$bytes" -eq 0 ]; then
               echo "::error::$f is empty."
               exit 1
             fi
+            echo "path=$f" >> "$GITHUB_OUTPUT"
           done
 
       # The profile is a checked-in input, so the interesting output of this job is the
@@ -116,16 +123,24 @@ jobs:
         run: |
           echo "### Baseline profile" >> "$GITHUB_STEP_SUMMARY"
           echo '' >> "$GITHUB_STEP_SUMMARY"
-          git diff --stat -- app/src/main/baselineProfiles app/src/main/baseline-prof.txt \
-            >> "$GITHUB_STEP_SUMMARY" || true
-          git status --porcelain -- app/src/main/baselineProfiles \
-            >> "$GITHUB_STEP_SUMMARY" || true
+          echo "Generated: \`${{ steps.profile.outputs.path }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo '' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          git status --porcelain -- app/src/main >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo '' >> "$GITHUB_STEP_SUMMARY"
+          echo "The profile is a checked-in input. Download the artifact and commit it — this" \
+            >> "$GITHUB_STEP_SUMMARY"
+          echo "job deliberately does not commit the file itself: a generated artifact that" \
+            >> "$GITHUB_STEP_SUMMARY"
+          echo "commits itself is an artifact nobody reviews." >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
         with:
           name: baseline-profile
           path: |
             app/src/main/baselineProfiles
+            app/src/main/generated/baselineProfiles
             app/src/main/baseline-prof.txt
           if-no-files-found: error
 

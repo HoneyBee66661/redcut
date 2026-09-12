@@ -19,16 +19,22 @@ env:
   # ran. KotlinAndroid.kt now tolerates both spellings; this one is the honest one.
   GRADLE_FLAGS: -Predcut.warningsAsErrors=true --stacktrace
 
-# ONE job is PARKED at the bottom of this file. It is real, it is wanted, and it
-# cannot pass yet because the code it builds does not exist. A job that is red on
-# every run from day one is a job everyone learns to ignore, so it is commented
-# out with the phase that unblocks it, rather than left failing.
+# NO JOBS ARE PARKED any more. Both un-parked during Phase 0:
 #
-# `build` was parked here until Phase 0.2 and is now live: it is the ONLY
-# verification the Android half of this project gets. The development host is
-# aarch64 and Google publishes aapt2 for linux-x86_64 only, so `assembleDebug`
-# cannot run locally at all — this job is not a convenience, it is the compile
-# step.
+#   - `build` (Phase 0.2) is the ONLY verification the Android half gets: the
+#     development host is aarch64 and Google publishes aapt2 for linux-x86_64 only,
+#     so `assembleDebug` cannot run locally at all.
+#   - `native` (Phase 0.4) is the only place C++ is compiled, for the same reason
+#     (no Android NDK on the host), plus the device checks that need an APK.
+#
+# Everything else the spec's §11 CI gate list calls for is live: detekt, ktlint,
+# unit tests, the `:domain:*` purity check, -Werror on both halves, and the 16 KB
+# alignment assertion. Android `lint` and the NFR-7 APK size check are still
+# absent, deliberately — see the notes on the `build` job.
+#
+# tools/verify.sh runs the subset that needs no Android toolchain, which is what
+# makes it a gate rather than a summary: three of the four steps below are
+# reproducible on the development host.
 
 jobs:
   # Runs first and standalone: it needs no JDK, no SDK, and no network, so it
@@ -141,6 +147,21 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - name: Assemble debug
         run: ./gradlew assembleDebug $GRADLE_FLAGS
+      - name: Verify the native library is packaged
+        # `:engine:native` wires CMake only when an Android SDK is present (see its
+        # build file for why), so a runner without one would silently ship an APK with
+        # no native code — and a green job would mean "assembled nothing native". The
+        # `native` job asserts the library's PROPERTIES; this asserts its PRESENCE in
+        # the artifact the app actually ships.
+        run: |
+          set -euo pipefail
+          APK=$(find app/build/outputs/apk -name '*.apk' | head -1)
+          echo "APK=$APK"
+          unzip -l "$APK" | grep -q 'lib/arm64-v8a/libredcut_core.so' || {
+            echo "::error::the debug APK contains no libredcut_core.so — the native build was skipped on this runner"
+            exit 1
+          }
+          echo "native library present"
       - name: Unit tests
         run: ./gradlew testDebugUnitTest $GRADLE_FLAGS
       # The APK is the only path to device verification this project has: there is
@@ -163,39 +184,109 @@ jobs:
             **/build/reports/**
             **/build/test-results/**
 
-  # PARKED: un-comment with Phase 0.4 (JNI seam proof).
+  # The native half of the build, and the only place C++ is compiled.
   #
-  # Verifies the two things that are invisible until they bite in production:
-  # that the C++ core compiles under -Werror, and that its .so is 16 KB
-  # page-aligned (risk R5 — without this the library fails to load on Android 15+).
+  # Every assertion here is invisible until it bites in production:
+  #   - the .so is 16 KB page-aligned (risk R5 — without the link flag it fails to
+  #     LOAD on Android 15+, a shipping blocker that is invisible on older devices);
+  #   - JNI_OnLoad and the registered natives are in the symbol table, so the seam is
+  #     registered by name and not by luck;
+  #   - debug info survives, so ndk-stack can symbolicate a native crash (§6.7);
+  #   - both shipped ABIs are packaged into the APK — a missing ABI is not a build
+  #     error, it is a load failure on the devices that use it;
+  #   - the Kotlin and C++ ABI versions agree, so the startup handshake cannot be born
+  #     broken by a one-sided edit.
   #
-  # native:
-  #   name: Native build and ABI check
-  #   runs-on: ubuntu-latest
-  #   needs: [architecture]
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - uses: actions/setup-java@v4
-  #       with:
-  #         distribution: temurin
-  #         java-version: '17'
-  #     - uses: android-actions/setup-android@v3
-  #     - uses: gradle/actions/setup-gradle@v4
-  #     - name: Build native core
-  #       run: ./gradlew :engine:native:assembleDebug $GRADLE_FLAGS
-  #     - name: Verify 16 KB page alignment
-  #       run: |
-  #         set -euo pipefail
-  #         SO=$(find . -name 'libredcut_core.so' -path '*arm64-v8a*' | head -1)
-  #         if [ -z "$SO" ]; then
-  #           echo "::error::libredcut_core.so not found — native build produced nothing"
-  #           exit 1
-  #         fi
-  #         echo "Inspecting $SO"
-  #         ALIGN=$(llvm-readelf -l "$SO" | awk '/LOAD/ {print $NF; exit}')
-  #         echo "First LOAD segment alignment: $ALIGN"
-  #         if [ "$ALIGN" != "0x4000" ]; then
-  #           echo "::error::expected 0x4000 (16 KB), got $ALIGN — this .so will fail to load on Android 15+ devices. Check -Wl,-z,max-page-size=16384 in native/CMakeLists.txt"
-  #           exit 1
-  #         fi
-  #         echo "16 KB alignment OK"
+  # Separate from `build` on purpose: it downloads an NDK (~1 GB) and pays a CMake
+  # configure, and a failure here is a native failure rather than an app one.
+  native:
+    name: Native build and ABI check
+    runs-on: ubuntu-latest
+    needs: [architecture]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+      - name: JNI ABI versions agree
+        # The version lives in two files in two languages. A comment asking people to
+        # keep them in step is not a mechanism; this is.
+        run: |
+          set -euo pipefail
+          cpp=$(grep -oE 'kVersionCode = [0-9]+' native/include/redcut/seam.h | grep -oE '[0-9]+')
+          kt=$(grep -oE 'EXPECTED_VERSION_CODE: Int = [0-9]+' \
+                engine/native/src/main/kotlin/com/redcut/engine/nativecore/NativeContract.kt \
+                | grep -oE '[0-9]+')
+          echo "C++ kVersionCode=$cpp  Kotlin EXPECTED_VERSION_CODE=$kt"
+          if [ -z "$cpp" ] || [ "$cpp" != "$kt" ]; then
+            echo "::error::JNI ABI versions disagree ($cpp vs $kt) — the startup handshake would fail at runtime"
+            exit 1
+          fi
+      - name: Build the app with its native library
+        # `-Predcut.nativeBuild=true` is explicit rather than inferred from the
+        # runner's environment: the module wires CMake when an SDK is present, and
+        # this job must FAIL if that inference ever stops holding, not quietly build
+        # an app with no native library in it.
+        run: ./gradlew assembleDebug $GRADLE_FLAGS -Predcut.nativeBuild=true
+      - name: Locate the NDK tools
+        run: |
+          set -euo pipefail
+          NDK=$(ls -d "${ANDROID_SDK_ROOT:-${ANDROID_HOME}}/ndk/"* | head -1)
+          echo "resolved NDK=$NDK"
+          echo "TOOLBIN=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin" >> "$GITHUB_ENV"
+      - name: Verify 16 KB page alignment
+        run: |
+          set -euo pipefail
+          LIB=$(find app/build/intermediates/merged_native_libs -path '*arm64-v8a*' \
+                  -name 'libredcut_core.so' | head -1)
+          if [ -z "$LIB" ]; then
+            echo "::error::libredcut_core.so for arm64-v8a was not packaged into the app"
+            exit 1
+          fi
+          echo "inspecting $LIB"
+          "$TOOLBIN/llvm-readelf" -l "$LIB" | grep -A1 -E 'LOAD' | head -12
+          ALIGN=$("$TOOLBIN/llvm-readelf" -l "$LIB" | awk '/LOAD/ {print $NF; exit}')
+          echo "first LOAD segment alignment: $ALIGN"
+          if [ "$ALIGN" != "0x4000" ]; then
+            echo "::error::expected 0x4000 (16 KB), got $ALIGN — this .so fails to load on Android 15+ devices. Check -Wl,-z,max-page-size=16384 in native/CMakeLists.txt"
+            exit 1
+          fi
+          echo "16 KB alignment OK"
+      - name: Verify the registered seam is symbolisable
+        # Proves RegisterNatives produced real symbols and that -g survived, which is
+        # what makes a native crash a stack trace instead of a guess (§6.7).
+        run: |
+          set -euo pipefail
+          SO=$(find engine/native/build -path '*obj*' -name 'libredcut_core.so' | head -1)
+          if [ -z "$SO" ]; then
+            echo "::error::no unstripped libredcut_core.so under engine/native/build — nothing to symbolicate with"
+            exit 1
+          fi
+          echo "unstripped library: $SO"
+          "$TOOLBIN/llvm-nm" "$SO" > /tmp/nm.txt
+          for sym in JNI_OnLoad SeamAdd SeamVersionCode; do
+            grep -q "$sym" /tmp/nm.txt || {
+              echo "::error::$sym missing from $SO — JNI_OnLoad did not register the seam as expected"
+              exit 1
+            }
+          done
+          "$TOOLBIN/llvm-readelf" -S "$SO" | grep -q '\.debug_info' || {
+            echo "::error::no .debug_info in $SO — ndk-stack could not symbolicate a native crash"
+            exit 1
+          }
+          echo "symbols and debug info present"
+      - name: Verify both ABIs are packaged
+        run: |
+          set -euo pipefail
+          APK=$(find app/build/outputs/apk -name '*.apk' | head -1)
+          echo "APK=$APK"
+          for abi in arm64-v8a armeabi-v7a; do
+            if ! unzip -l "$APK" | grep -q "lib/$abi/libredcut_core.so"; then
+              echo "::error::lib/$abi/libredcut_core.so missing from the APK — that ABI would fail to load the library at runtime"
+              exit 1
+            fi
+            echo "  $abi: packaged"
+          done

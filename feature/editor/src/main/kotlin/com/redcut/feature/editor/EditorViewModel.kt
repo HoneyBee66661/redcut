@@ -1,5 +1,6 @@
 package com.redcut.feature.editor
 
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.redcut.core.common.IdSource
@@ -12,6 +13,7 @@ import com.redcut.domain.document.EditDocument
 import com.redcut.domain.document.ImportRejection
 import com.redcut.domain.document.UndoStack
 import com.redcut.domain.document.planImport
+import com.redcut.feature.editor.timeline.TimelineThumbnails
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -49,6 +51,7 @@ import javax.inject.Inject
 class EditorViewModel @Inject constructor(
     private val logger: RedcutLogger,
     private val sourceReader: MediaSourceReader,
+    private val thumbnails: TimelineThumbnails,
     private val ids: IdSource,
     // `@param:` for the same reason as in :core:media — Kotlin 2.2 warns that a bare
     // annotation on a constructor property will also apply to the field, and CI compiles
@@ -126,6 +129,19 @@ class EditorViewModel @Inject constructor(
     }
 
     /**
+     * A thumbnail for one slice of the timeline.
+     *
+     * The Canvas takes a `suspend` loader rather than a Hilt-injected store, so that it stays a
+     * function of its parameters and can be exercised with a fake. The route then has to obtain the
+     * loader from somewhere, and the ViewModel is the Hilt-constructed object it already holds — the
+     * alternatives are an `EntryPointAccessors` lookup in the UI or a second ViewModel that exists
+     * only to hand out one object. The cost is an image-shaped method on a ViewModel; the benefit is
+     * that no composable needs to know how the object graph is wired.
+     */
+    suspend fun timelineThumbnail(sourceId: String, uri: String, positionUs: Long): ImageBitmap? =
+        thumbnails.image(sourceId, uri, positionUs)
+
+    /**
      * Reads, assesses and appends (FR-1.1–1.5).
      *
      * The two rejection sources are merged into one report and kept in selection order only
@@ -169,7 +185,6 @@ class EditorViewModel @Inject constructor(
     /**
      * Re-reads the state from the stack, keeping the view fields (stage, playhead, selection,
      * import report).
-     *
      * None of the four is history: undoing a trim must not also undo "the user is looking at the
      * Effect stage", rewind the playhead, drop the selection, or erase the explanation of why one
      * of four files was refused.

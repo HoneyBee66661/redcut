@@ -1,5 +1,6 @@
 package com.redcut.app.logging
 
+import com.redcut.app.BuildConfig
 import com.redcut.core.common.logging.RedcutLogger
 import timber.log.Timber
 

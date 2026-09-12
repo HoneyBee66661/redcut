@@ -47,6 +47,11 @@ jobs:
       - uses: actions/checkout@v4
       - name: Check domain purity and Media3 isolation
         run: bash tools/check-architecture.sh
+      # Same reason this job exists: it needs no SDK and no compile, so it fails in
+      # seconds instead of after the `build` job's three minutes. Catches the
+      # generated-symbol import mistakes that only `build` can see otherwise.
+      - name: Check app-tier imports
+        run: bash tools/check-app-imports.sh
 
   # Static analysis. A separate job from `domain-tests` for one reason: it needs no
   # test execution and no Android SDK, so it can fail in ~40s instead of after a

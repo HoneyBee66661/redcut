@@ -298,6 +298,7 @@ private val CUT_TOOLS = listOf(
     CutTool.CUT_RIGHT,
     CutTool.DELETE,
     CutTool.MERGE,
+    CutTool.DUPLICATE,
 )
 
 /** A tool's button word. Here rather than in the domain because it is a UI word, not a domain name. */
@@ -307,6 +308,7 @@ private fun CutTool.label(): String = when (this) {
     CutTool.CUT_RIGHT -> "Cut right"
     CutTool.DELETE -> "Delete"
     CutTool.MERGE -> "Merge"
+    CutTool.DUPLICATE -> "Duplicate"
 }
 
 /**

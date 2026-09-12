@@ -10,6 +10,7 @@ import com.redcut.core.media.ThumbnailSource
 import com.redcut.core.media.ThumbnailStore
 import com.redcut.domain.document.ClipEdge
 import com.redcut.domain.document.CutTool
+import com.redcut.domain.document.FrameStep
 import com.redcut.domain.document.ImportRejection
 import com.redcut.domain.document.ProbedSource
 import com.redcut.domain.document.SourceProbe
@@ -661,4 +662,54 @@ class EditorViewModelTest {
         // otherwise be indistinguishable from a merge that happened to do nothing.
         assertThat(model.state.value).isEqualTo(before)
     }
+
+    @Test
+    fun `duplicate copies the clip at the playhead right after itself`() = runTest(dispatcher) {
+        val (model, clipIds) = importedClips(video())
+        model.onIntent(EditorIntent.SetPlayhead(1_000_000L))
+
+        model.onIntent(EditorIntent.ApplyCut(CutTool.DUPLICATE))
+
+        val clips = model.state.value.document.clips
+        assertThat(clips).hasSize(2)
+        // The copy sits immediately after the original, reads the same source range, and has its own
+        // id — which means the two are NOT source-adjacent, so merge will (correctly) refuse them.
+        assertThat(clips[0].id).isEqualTo(clipIds.single())
+        assertThat(clips[1].id).isNotEqualTo(clipIds.single())
+        assertThat(clips[1].sourceInUs).isEqualTo(clips[0].sourceInUs)
+        assertThat(clips[1].sourceOutUs).isEqualTo(clips[0].sourceOutUs)
+        assertThat(model.state.value.history.topLabelOrNull()).isEqualTo("Duplicate")
+    }
+
+    @Test
+    fun `frame-stepping moves the playhead by one frame of the clip it is on`() = runTest(
+        dispatcher,
+    ) {
+        val (model, _) = importedClips(video())
+
+        // One 30 fps clip: a frame is 33 333 µs of timeline.
+        model.onIntent(EditorIntent.StepPlayhead(FrameStep.FORWARD))
+        assertThat(model.state.value.playheadUs).isEqualTo(33_333L)
+
+        model.onIntent(EditorIntent.StepPlayhead(FrameStep.BACK))
+        assertThat(model.state.value.playheadUs).isEqualTo(0L)
+
+        // And it is view state, not an edit: nothing to undo for a moved playhead.
+        assertThat(model.state.value.history.canUndo).isFalse()
+    }
+
+    @Test
+    fun `frame-stepping stops at the ends instead of wrapping`() = runTest(dispatcher) {
+        val (model, _) = importedClips(video())
+
+        model.onIntent(EditorIntent.StepPlayhead(FrameStep.BACK))
+        assertThat(model.state.value.playheadUs).isEqualTo(0L)
+
+        // Four seconds of timeline, so a step forward from the end stays at the end.
+        model.onIntent(EditorIntent.SetPlayhead(4_000_000L))
+        model.onIntent(EditorIntent.StepPlayhead(FrameStep.FORWARD))
+        assertThat(model.state.value.playheadUs).isEqualTo(4_000_000L)
+    }
+
+    private fun HistoryState.topLabelOrNull(): String? = (this as? HistoryState.Ready)?.topLabel
 }

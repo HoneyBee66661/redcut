@@ -1,13 +1,17 @@
 package com.redcut.feature.editor
 
+import android.graphics.Bitmap
 import com.google.common.truth.Truth.assertThat
 import com.redcut.core.common.IdSource
 import com.redcut.core.common.logging.NoOpRedcutLogger
 import com.redcut.core.media.MediaSourceReader
 import com.redcut.core.media.SourceReadResult
+import com.redcut.core.media.ThumbnailSource
+import com.redcut.core.media.ThumbnailStore
 import com.redcut.domain.document.ImportRejection
 import com.redcut.domain.document.ProbedSource
 import com.redcut.domain.document.SourceProbe
+import com.redcut.feature.editor.timeline.TimelineThumbnails
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -61,9 +65,20 @@ class EditorViewModelTest {
     private fun viewModel(reader: MediaSourceReader = RecordingReader()) = EditorViewModel(
         logger = NoOpRedcutLogger,
         sourceReader = reader,
+        // The timeline's pictures are not this test's subject: a store whose source never returns
+        // an image keeps every case here about state rather than about decoding.
+        thumbnails = TimelineThumbnails(
+            ThumbnailStore(source = NoThumbnails, logger = NoOpRedcutLogger),
+        ),
         ids = ids(),
         io = dispatcher,
     )
+
+    /** A thumbnail source that produces nothing, for tests that do not draw a timeline. */
+    private object NoThumbnails : ThumbnailSource {
+        override suspend fun thumbnail(sourceId: String, uri: String, positionUs: Long): Bitmap? =
+            null
+    }
 
     private fun video(
         name: String = "clip.mp4",

@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Tab
@@ -19,9 +20,11 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.redcut.feature.editor.timeline.TimelineCanvas
 
 /**
  * The editor destination: the ViewModel owner.
@@ -59,6 +62,7 @@ fun EditorRoute(
         onImportClick = { pickMedia.launch(VIDEO_MIME_TYPES) },
         onExport = onExport,
         onBack = onBack,
+        onThumbnail = viewModel::timelineThumbnail,
     )
 }
 
@@ -87,6 +91,7 @@ internal fun EditorScreen(
     onImportClick: () -> Unit,
     onExport: () -> Unit,
     onBack: () -> Unit,
+    onThumbnail: suspend (sourceId: String, uri: String, positionUs: Long) -> ImageBitmap?,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
@@ -127,21 +132,51 @@ internal fun EditorScreen(
             }
         }
 
-        Box(
+        StageBody(state = state)
+
+        // The timeline sits between the preview and the history bar, which is the layout §7.1
+        // draws. It is given a fixed height rather than a weight: the preview is what should grow
+        // when the screen does, and a timeline that stretched with the window would show more
+        // empty track rather than more clips.
+        TimelineCanvas(
+            document = state.document,
+            playheadUs = state.playheadUs,
+            selection = state.selection,
+            onIntent = onIntent,
+            onThumbnail = onThumbnail,
             modifier = Modifier
-                .weight(1f)
                 .fillMaxWidth()
-                .padding(24.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                text = state.stage.detail,
-                style = MaterialTheme.typography.bodyLarge,
-                textAlign = TextAlign.Center,
-            )
-        }
+                .height(TIMELINE_HEIGHT_DP.dp)
+                .padding(horizontal = 8.dp),
+        )
 
         HistoryBar(history = state.history, onIntent = onIntent)
+    }
+}
+
+/**
+ * The stage's body, which takes the room the timeline does not.
+ *
+ * An extension on `ColumnScope` because `Modifier.weight` only exists in a column or row: the
+ * weight is the reason this cannot be a plain composable.
+ *
+ * Until Phase 1.11 (the preview) this is a sentence per stage. The preview — Media3's
+ * `CompositionPlayer` — replaces the whole function, not the text inside it.
+ */
+@Composable
+private fun ColumnScope.StageBody(state: EditorUiState) {
+    Box(
+        modifier = Modifier
+            .weight(1f)
+            .fillMaxWidth()
+            .padding(24.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = state.stage.detail,
+            style = MaterialTheme.typography.bodyLarge,
+            textAlign = TextAlign.Center,
+        )
     }
 }
 
@@ -175,6 +210,15 @@ private fun HistoryBar(history: HistoryState, onIntent: (EditorIntent) -> Unit) 
         }
     }
 }
+
+/**
+ * The timeline's height.
+ *
+ * Fixed rather than a weight: the preview is what should grow when the window does. A timeline
+ * that stretched would show more empty track instead of more clips, which is the opposite of what
+ * a taller screen is for.
+ */
+private const val TIMELINE_HEIGHT_DP = 96f
 
 /**
  * What the last import did (FR-1.2, FR-1.4).

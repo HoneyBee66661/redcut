@@ -1,0 +1,792 @@
+package com.redcut.domain.render
+
+import com.redcut.domain.document.AppliedEffect
+import com.redcut.domain.document.CanvasSpec
+import com.redcut.domain.document.ColorAdjustSpec
+import com.redcut.domain.document.EffectScope
+import com.redcut.domain.document.LutRef
+import com.redcut.domain.document.TextSpec
+import com.redcut.domain.document.TimeRange
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Test
+import java.util.Random
+
+/**
+ * The compilation rules of spec §4.3 / §8.1, one test each.
+ *
+ * This is the highest-value suite in the repo (§12.1): the compiler is the only
+ * place framing, timing and ordering rules exist, and both the preview and the
+ * export path consume its output — so a rule that is wrong here is wrong in two
+ * places at once, and a rule that is untested here is untested everywhere.
+ *
+ * Tests read as "given this document, the graph looks like this", never as a
+ * restatement of the implementation. Where a rule has a *reason*, the test names the
+ * reason (a disabled clip ripples rather than leaving a hole; a no-op effect must not
+ * cost a shader pass) so a future change that breaks the intent fails a test whose
+ * name explains why it existed.
+ */
+class TimelineCompilerTest {
+
+    // --- Layers (rule 1, rule 2) ------------------------------------------
+
+    @Test
+    fun `an empty document compiles to an empty graph`() {
+        val graph = TimelineCompiler.compile(document(clips = emptyList()))
+
+        assertTrue(graph.videoLayers.isEmpty())
+        assertEquals(0L, graph.durationUs)
+        assertTrue(graph.transitions.isEmpty())
+        assertTrue(graph.overlayLayers.isEmpty())
+    }
+
+    @Test
+    fun `a single clip becomes one layer covering the whole timeline`() {
+        val doc = singleClipDocument()
+        val graph = TimelineCompiler.compile(doc)
+        val layer = videoLayer(graph, "c1")
+
+        assertEquals(TimeRange(0L, SEC), layer.timeRange)
+        assertEquals(TimeRange(0L, SEC), layer.sourceRange)
+        assertEquals(doc.sources.single(), layer.source)
+        assertEquals(1000 * MS, graph.durationUs)
+    }
+
+    @Test
+    fun `layers are contiguous and in document order`() {
+        val graph = TimelineCompiler.compile(sampleDocument())
+
+        assertEquals(listOf("c1", "c2", "c3"), graph.videoLayers.map { it.clipId })
+        assertEquals(TimeRange(0L, 2 * SEC), videoLayer(graph, "c1").timeRange)
+        assertEquals(TimeRange(2 * SEC, 4 * SEC), videoLayer(graph, "c2").timeRange)
+        assertEquals(TimeRange(4 * SEC, 7 * SEC), videoLayer(graph, "c3").timeRange)
+        assertEquals(7 * SEC, graph.durationUs)
+        assertGraphInvariants(graph)
+    }
+
+    @Test
+    fun `speed shortens the layer but not the source range`() {
+        val doc = document(clips = listOf(clip("c1", "s1", 0L, 2 * SEC, speed = 2f)))
+        val layer = videoLayer(TimelineCompiler.compile(doc), "c1")
+
+        assertEquals(TimeRange(0L, 2 * SEC), layer.sourceRange, "the trim is unchanged")
+        assertEquals(TimeRange(0L, SEC), layer.timeRange, "the timeline is half as long")
+        assertEquals(2f, layer.speed)
+    }
+
+    @Test
+    fun `a very short fast clip is floored at the minimum layer length`() {
+        // 150 ms of source at 4x is 37.5 ms of timeline; Clip floors the layer at
+        // 100 ms, and RenderGraph refuses anything shorter — so the floor has to hold
+        // in both places or the graph cannot be constructed at all.
+        val doc = document(clips = listOf(clip("c1", "s1", 0L, 150 * MS, speed = 4f)))
+        val layer = videoLayer(TimelineCompiler.compile(doc), "c1")
+
+        assertEquals(RenderGraph.MIN_LAYER_US, layer.timeRange.durationUs)
+    }
+
+    @Test
+    fun `a disabled clip is dropped and the timeline ripples closed`() {
+        val doc = document(
+            clips = listOf(
+                clip("c1", "s1", 0L, 2 * SEC),
+                clip("c2", "s1", 2 * SEC, 4 * SEC, enabled = false),
+                clip("c3", "s1", 4 * SEC, 7 * SEC),
+            ),
+        )
+        val graph = TimelineCompiler.compile(doc)
+
+        assertEquals(listOf("c1", "c3"), graph.videoLayers.map { it.clipId })
+        assertEquals(
+            TimeRange(2 * SEC, 5 * SEC),
+            videoLayer(graph, "c3").timeRange,
+            "the gap closes rather than being held open",
+        )
+        assertGraphInvariants(graph)
+    }
+
+    @Test
+    fun `a clip whose source is missing is dropped`() {
+        val doc = document(
+            clips = listOf(
+                clip("c1", "s1", 0L, 2 * SEC),
+                clip("orphan", "ghost", 0L, 2 * SEC),
+            ),
+        )
+        val graph = TimelineCompiler.compile(doc)
+
+        assertEquals(listOf("c1"), graph.videoLayers.map { it.clipId })
+    }
+
+    // --- Document identity (rules carried verbatim) -----------------------
+
+    @Test
+    fun `the graph carries the document revision and canvas verbatim`() {
+        val doc = document(clips = listOf(clip("c1", "s1", 0L, SEC)), revision = 7L)
+            .copy(canvas = CanvasSpec.LANDSCAPE_720)
+        val graph = TimelineCompiler.compile(doc)
+
+        assertEquals(7L, graph.revision, "a cached graph is identified by this value")
+        assertEquals(CanvasSpec.LANDSCAPE_720, graph.canvas)
+    }
+
+    @Test
+    fun `preview output defaults to the document canvas and an export output is kept`() {
+        val doc = document(clips = listOf(clip("c1", "s1", 0L, SEC)))
+        val preview = TimelineCompiler.compile(doc)
+        assertEquals(OutputSpec.preview(CanvasSpec.PORTRAIT_1080), preview.output)
+
+        val export = OutputSpec(1920, 1080, fps = 30, videoBitrate = 8_000_000, audioBitrate = 192_000)
+        assertEquals(export, TimelineCompiler.compile(doc, export).output)
+    }
+
+    // --- Effect chains (rules 3, 4) ---------------------------------------
+
+    @Test
+    fun `a clip-scoped adjust lands only in its own layer, in clip-local time`() {
+        val adjust = colorAdjust()
+        val doc = sampleDocument().copy(
+            effects = listOf(
+                AppliedEffect.Adjust("e1", EffectScope.Clip("c2"), TimeRange(0L, SEC), adjust),
+            ),
+        )
+        val graph = TimelineCompiler.compile(doc)
+
+        assertEquals(
+            listOf(RenderEffect.Adjust(adjust, TimeRange(0L, SEC))),
+            videoLayer(graph, "c2").effects,
+        )
+        assertTrue(videoLayer(graph, "c1").effects.isEmpty())
+        assertTrue(videoLayer(graph, "c3").effects.isEmpty())
+    }
+
+    @Test
+    fun `a document-scoped adjust is rebased into every layer it overlaps`() {
+        val adjust = colorAdjust()
+        val doc = sampleDocument().copy(
+            effects = listOf(
+                AppliedEffect.Adjust("e1", EffectScope.Document, TimeRange(SEC, 3 * SEC), adjust),
+            ),
+        )
+        val graph = TimelineCompiler.compile(doc)
+
+        assertEquals(
+            listOf(RenderEffect.Adjust(adjust, TimeRange(SEC, 2 * SEC))),
+            videoLayer(graph, "c1").effects,
+            "an absolute range becomes layer-local",
+        )
+        assertEquals(
+            listOf(RenderEffect.Adjust(adjust, TimeRange(0L, SEC))),
+            videoLayer(graph, "c2").effects,
+        )
+        assertTrue(videoLayer(graph, "c3").effects.isEmpty())
+    }
+
+    @Test
+    fun `a document-scoped effect that misses a layer is dropped from it`() {
+        val doc = sampleDocument().copy(
+            effects = listOf(
+                AppliedEffect.Adjust(
+                    "e1",
+                    EffectScope.Document,
+                    TimeRange(2 * SEC, 3 * SEC),
+                    colorAdjust(),
+                ),
+            ),
+        )
+        val graph = TimelineCompiler.compile(doc)
+
+        assertTrue(
+            videoLayer(graph, "c1").effects.isEmpty(),
+            "an effect that does not touch c1 must not become a per-frame no-op on it",
+        )
+        assertEquals(1, videoLayer(graph, "c2").effects.size)
+    }
+
+    @Test
+    fun `an identity adjust never enters a chain`() {
+        val doc = sampleDocument().copy(
+            effects = listOf(
+                AppliedEffect.Adjust(
+                    "e1",
+                    EffectScope.Document,
+                    TimeRange(0L, 5 * SEC),
+                    ColorAdjustSpec(),
+                ),
+            ),
+        )
+        val graph = TimelineCompiler.compile(doc)
+
+        assertTrue(graph.videoLayers.all { it.effects.isEmpty() })
+    }
+
+    @Test
+    fun `a zero-strength LUT never enters a chain`() {
+        val doc = sampleDocument().copy(
+            effects = listOf(
+                AppliedEffect.Lut(
+                    "e1",
+                    EffectScope.Document,
+                    TimeRange(0L, 5 * SEC),
+                    LutRef("vivid"),
+                    strength = 0f,
+                ),
+            ),
+        )
+
+        assertTrue(TimelineCompiler.compile(doc).videoLayers.all { it.effects.isEmpty() })
+    }
+
+    @Test
+    fun `a disabled effect never enters a chain`() {
+        val doc = sampleDocument().copy(
+            effects = listOf(
+                AppliedEffect.Adjust(
+                    "e1",
+                    EffectScope.Document,
+                    TimeRange(0L, 5 * SEC),
+                    colorAdjust(),
+                    enabled = false,
+                ),
+            ),
+        )
+
+        assertTrue(TimelineCompiler.compile(doc).videoLayers.all { it.effects.isEmpty() })
+    }
+
+    @Test
+    fun `chain entries keep document stack order`() {
+        val doc = sampleDocument().copy(
+            effects = listOf(
+                AppliedEffect.Lut("e1", EffectScope.Document, TimeRange(0L, SEC), LutRef("vivid")),
+                AppliedEffect.Adjust("e2", EffectScope.Document, TimeRange(0L, SEC), colorAdjust()),
+                AppliedEffect.Lut("e3", EffectScope.Document, TimeRange(0L, SEC), LutRef("noir")),
+            ),
+        )
+        val chain = videoLayer(TimelineCompiler.compile(doc), "c1").effects
+
+        assertEquals(
+            listOf("vivid", "adjust", "noir"),
+            chain.map {
+                when (it) {
+                    is RenderEffect.Lut -> it.ref.id
+                    is RenderEffect.Adjust -> "adjust"
+                }
+            },
+            "render order is list order (FR-4.7): no sort step may come between them",
+        )
+    }
+
+    @Test
+    fun `an effect scoped to a clip that no longer exists is dropped`() {
+        val doc = sampleDocument().copy(
+            effects = listOf(
+                AppliedEffect.Adjust(
+                    "e1",
+                    EffectScope.Clip("deleted"),
+                    TimeRange(0L, SEC),
+                    colorAdjust(),
+                ),
+            ),
+        )
+
+        assertTrue(TimelineCompiler.compile(doc).videoLayers.all { it.effects.isEmpty() })
+    }
+
+    @Test
+    fun `a clip-scoped effect longer than its layer is clamped to the layer`() {
+        val doc = sampleDocument().copy(
+            effects = listOf(
+                AppliedEffect.Adjust(
+                    "e1",
+                    EffectScope.Clip("c1"),
+                    TimeRange(0L, 5 * SEC),
+                    colorAdjust(),
+                ),
+            ),
+        )
+        val chain = videoLayer(TimelineCompiler.compile(doc), "c1").effects
+
+        assertEquals(
+            listOf(RenderEffect.Adjust(colorAdjust(), TimeRange(0L, 2 * SEC))),
+            chain,
+            "an effect cannot name time the layer does not have",
+        )
+    }
+
+    // --- Overlays (rule 5) ------------------------------------------------
+
+    @Test
+    fun `overlays are emitted after the video layers, in stack order`() {
+        val doc = sampleDocument().copy(
+            effects = listOf(
+                textEffect("e1", EffectScope.Document, TimeRange(0L, SEC), "first"),
+                imageEffect("e2", EffectScope.Document, TimeRange(0L, SEC), "s1"),
+            ),
+        )
+        val graph = TimelineCompiler.compile(doc)
+
+        assertEquals(
+            listOf("Video", "Video", "Video", "Text", "Image"),
+            graph.layersInRenderOrder().map { kind(it) },
+            "overlays are drawn over the composited clip, so they come last",
+        )
+        assertEquals(
+            listOf("first"),
+            graph.overlayLayers.filterIsInstance<RenderLayer.Text>().map { it.content.content },
+        )
+    }
+
+    @Test
+    fun `a document-scoped overlay is clamped to the video`() {
+        val doc = sampleDocument().copy(
+            effects = listOf(
+                textEffect("e1", EffectScope.Document, TimeRange(4 * SEC, 9 * SEC), "late"),
+            ),
+        )
+        val layer = TimelineCompiler.compile(doc).overlayLayers.single()
+
+        assertEquals(
+            TimeRange(4 * SEC, 7 * SEC),
+            layer.timeRange,
+            "an overlay must not claim to exist after the video ended",
+        )
+    }
+
+    @Test
+    fun `a clip-scoped overlay is rebased onto the compiled clip start`() {
+        val doc = document(
+            clips = listOf(
+                clip("c1", "s1", 0L, 2 * SEC, enabled = false),
+                clip("c2", "s1", 2 * SEC, 4 * SEC),
+            ),
+            effects = listOf(
+                textEffect("e1", EffectScope.Clip("c2"), TimeRange(0L, SEC), "caption"),
+            ),
+        )
+        val layer = TimelineCompiler.compile(doc).overlayLayers.single()
+
+        assertEquals(
+            TimeRange(0L, SEC),
+            layer.timeRange,
+            "c2 now starts at 0 because c1 is gone: the overlay must follow the " +
+                "rippled timeline, not the document's stale position",
+        )
+    }
+
+    @Test
+    fun `an image overlay whose source is gone is dropped`() {
+        val doc = sampleDocument().copy(
+            effects = listOf(
+                imageEffect("e1", EffectScope.Document, TimeRange(0L, SEC), "ghost"),
+            ),
+        )
+
+        assertTrue(TimelineCompiler.compile(doc).overlayLayers.isEmpty())
+    }
+
+    @Test
+    fun `an overlay on an empty document is dropped`() {
+        val doc = document(
+            clips = emptyList(),
+            effects = listOf(textEffect("e1", EffectScope.Document, TimeRange(0L, SEC), "t")),
+        )
+
+        assertTrue(TimelineCompiler.compile(doc).overlayLayers.isEmpty())
+    }
+
+    // --- Fades and audio (rule 6, rule 8) ---------------------------------
+
+    @Test
+    fun `a fade pair longer than its clip is scaled to fill it`() {
+        val doc = document(
+            clips = listOf(clip("c1", "s1", 0L, 4 * SEC, fadeInMs = 3000L, fadeOutMs = 3000L)),
+        )
+        val layer = videoLayer(TimelineCompiler.compile(doc), "c1")
+
+        assertEquals(FadeSpec(2000L, 2000L), layer.fades, "both edges scale, neither vanishes")
+        assertEquals(4000L, layer.fades.totalMs, "the pair exactly fills the clip")
+    }
+
+    @Test
+    fun `a fade pair that fits is passed through untouched`() {
+        val doc = document(
+            clips = listOf(clip("c1", "s1", 0L, 4 * SEC, fadeInMs = 500L, fadeOutMs = 750L)),
+        )
+        val layer = videoLayer(TimelineCompiler.compile(doc), "c1")
+
+        assertEquals(FadeSpec(500L, 750L), layer.fades)
+    }
+
+    @Test
+    fun `audio carries gain, mute and the same fade pair as the video edge`() {
+        val doc = document(
+            clips = listOf(
+                clip(
+                    "c1",
+                    "s1",
+                    0L,
+                    2 * SEC,
+                    volume = 0.5f,
+                    muted = true,
+                    fadeInMs = 200L,
+                ),
+            ),
+        )
+        val layer = videoLayer(TimelineCompiler.compile(doc), "c1")
+
+        assertEquals(AudioSpec(gain = 0.5f, muted = true, fades = FadeSpec(200L, 0L)), layer.audio)
+        assertEquals(FadeSpec(200L, 0L), layer.fades)
+    }
+
+    @Test
+    fun `volume outside 0 to 2 is coerced and a NaN volume falls back to unity`() {
+        val loud = document(clips = listOf(clip("c1", "s1", 0L, SEC, volume = 3f)))
+        assertEquals(2f, videoLayer(TimelineCompiler.compile(loud), "c1").audio.gain)
+
+        // Clip.volume has no require(), so NaN is constructible — and AudioSpec's own
+        // require() would turn it into a crash rather than a compilation.
+        val nan = document(clips = listOf(clip("c1", "s1", 0L, SEC, volume = Float.NaN)))
+        assertEquals(1f, videoLayer(TimelineCompiler.compile(nan), "c1").audio.gain)
+    }
+
+    @Test
+    fun `the audio graph reports no music bed yet`() {
+        val graph = TimelineCompiler.compile(sampleDocument())
+
+        assertEquals(1f, graph.audio.masterGain)
+        assertNull(graph.audio.music, "EditDocument has no audioBed field yet (FR-1.6)")
+    }
+
+    // --- Dissolves (rule 7) -----------------------------------------------
+
+    @Test
+    fun `a document-scoped dissolve on an interior seam becomes a transition`() {
+        val doc = sampleDocument().copy(
+            effects = listOf(
+                AppliedEffect.Dissolve(
+                    "e1",
+                    EffectScope.Document,
+                    TimeRange(2 * SEC, 3 * SEC),
+                    durationMs = 500L,
+                ),
+            ),
+        )
+        val graph = TimelineCompiler.compile(doc)
+
+        assertEquals(listOf(Transition.Dissolve(0, 1, 2 * SEC, 500 * MS)), graph.transitions)
+        assertGraphInvariants(graph)
+    }
+
+    @Test
+    fun `a clip-scoped dissolve resolves to that clip's end`() {
+        val doc = sampleDocument().copy(
+            effects = listOf(
+                AppliedEffect.Dissolve(
+                    "e1",
+                    EffectScope.Clip("c1"),
+                    TimeRange(0L, SEC),
+                    durationMs = 400L,
+                ),
+            ),
+        )
+        val graph = TimelineCompiler.compile(doc)
+
+        assertEquals(listOf(Transition.Dissolve(0, 1, 2 * SEC, 400 * MS)), graph.transitions)
+    }
+
+    @Test
+    fun `a dissolve is capped by the shorter neighbouring layer`() {
+        val doc = sampleDocument().copy(
+            effects = listOf(
+                AppliedEffect.Dissolve(
+                    "e1",
+                    EffectScope.Document,
+                    TimeRange(2 * SEC, 3 * SEC),
+                    durationMs = 9000L,
+                ),
+            ),
+        )
+        val graph = TimelineCompiler.compile(doc)
+
+        assertEquals(
+            2 * SEC,
+            graph.transitions.single().durationUs,
+            "a 9 s dissolve over two 2 s clips can only be 2 s long",
+        )
+    }
+
+    @Test
+    fun `a dissolve below the floor is dropped rather than shortened`() {
+        val doc = sampleDocument().copy(
+            effects = listOf(
+                AppliedEffect.Dissolve(
+                    "e1",
+                    EffectScope.Document,
+                    TimeRange(2 * SEC, 3 * SEC),
+                    durationMs = 50L,
+                ),
+            ),
+        )
+
+        assertTrue(TimelineCompiler.compile(doc).transitions.isEmpty())
+    }
+
+    @Test
+    fun `a dissolve that is not on a seam is dropped`() {
+        val doc = sampleDocument().copy(
+            effects = listOf(
+                AppliedEffect.Dissolve(
+                    "e1",
+                    EffectScope.Document,
+                    TimeRange(SEC, 2 * SEC),
+                    durationMs = 500L,
+                ),
+            ),
+        )
+
+        assertTrue(TimelineCompiler.compile(doc).transitions.isEmpty())
+    }
+
+    @Test
+    fun `a document-scoped dissolve resolves to the seam at that time, not one later`() {
+        // 4 s is the start of the LAST layer, i.e. the seam between c2 and c3 — a real
+        // seam, so a dissolve there belongs to layers 1 -> 2. Resolving the seam's own
+        // index (2) rather than the outgoing layer's (1) would emit a transition
+        // pointing past the end of the video.
+        val atLastSeam = sampleDocument().copy(
+            effects = listOf(
+                AppliedEffect.Dissolve(
+                    "e1",
+                    EffectScope.Document,
+                    TimeRange(4 * SEC, 5 * SEC),
+                    durationMs = 500L,
+                ),
+            ),
+        )
+
+        assertEquals(
+            listOf(Transition.Dissolve(1, 2, 4 * SEC, 500 * MS)),
+            TimelineCompiler.compile(atLastSeam).transitions,
+        )
+    }
+
+    @Test
+    fun `a dissolve at the head of the video is dropped`() {
+        val doc = sampleDocument().copy(
+            effects = listOf(
+                AppliedEffect.Dissolve(
+                    "e1",
+                    EffectScope.Document,
+                    TimeRange(0L, SEC),
+                    durationMs = 500L,
+                ),
+            ),
+        )
+
+        assertTrue(
+            TimelineCompiler.compile(doc).transitions.isEmpty(),
+            "layer 0's start is the head of the video: there is nothing to dissolve from",
+        )
+    }
+
+    @Test
+    fun `a dissolve addressed to the last clip is dropped`() {
+        val doc = sampleDocument().copy(
+            effects = listOf(
+                AppliedEffect.Dissolve(
+                    "e1",
+                    EffectScope.Clip("c3"),
+                    TimeRange(0L, SEC),
+                    durationMs = 500L,
+                ),
+            ),
+        )
+
+        assertTrue(
+            TimelineCompiler.compile(doc).transitions.isEmpty(),
+            "c3 has nothing after it, and folding the dissolve backwards would move it",
+        )
+    }
+
+    @Test
+    fun `only the first dissolve on a seam is emitted`() {
+        val doc = sampleDocument().copy(
+            effects = listOf(
+                AppliedEffect.Dissolve(
+                    "e1",
+                    EffectScope.Document,
+                    TimeRange(2 * SEC, 3 * SEC),
+                    durationMs = 500L,
+                ),
+                AppliedEffect.Dissolve(
+                    "e2",
+                    EffectScope.Document,
+                    TimeRange(2 * SEC, 3 * SEC),
+                    durationMs = 300L,
+                ),
+            ),
+        )
+
+        assertEquals(1, TimelineCompiler.compile(doc).transitions.size)
+        assertEquals(500 * MS, TimelineCompiler.compile(doc).transitions.single().durationUs)
+    }
+
+    // --- Properties (rule 9) ----------------------------------------------
+
+    /**
+     * Random documents, compiled twice, checked against the graph invariants.
+     *
+     * Composing and reordering are pure list operations, so most of the ways a
+     * document can be strange are cheap to generate: a dangling `sourceId`, a clip
+     * disabled in the middle, a fade pair longer than its clip, an effect scoped to a
+     * clip that was deleted, a dissolve on the last seam. The compiler's contract is
+     * that none of them can throw, and that the graph it produces is one the renderer
+     * can consume.
+     */
+    @Test
+    fun `random documents compile reproducibly and keep the graph invariants`() {
+        val rng = Random(SEED)
+        var nonEmptyGraphs = 0
+
+        repeat(ROUNDS) { round ->
+            val doc = randomDocument(rng, round)
+
+            val first = TimelineCompiler.compile(doc)
+            val second = TimelineCompiler.compile(doc)
+            assertEquals(first, second, "round $round: compilation must be deterministic")
+
+            assertGraphInvariants(first, context = "round=$round")
+            assertEquals(
+                doc.clips.filter { it.enabled && doc.sourceById(it.sourceId) != null }
+                    .sumOf { it.timelineDurationUs },
+                first.durationUs,
+                "round $round: the graph is as long as the live clips",
+            )
+            if (first.videoLayers.isNotEmpty()) nonEmptyGraphs++
+        }
+
+        assertTrue(nonEmptyGraphs > ROUNDS / 2, "the generator should mostly render something")
+    }
+
+    // --- Helpers ----------------------------------------------------------
+
+    private fun colorAdjust(): ColorAdjustSpec = ColorAdjustSpec(brightness = 0.4f)
+
+    private fun textEffect(
+        id: String,
+        scope: EffectScope,
+        range: TimeRange,
+        content: String,
+    ): AppliedEffect = AppliedEffect.Text(id, scope, range, TextSpec(content))
+
+    private fun imageEffect(
+        id: String,
+        scope: EffectScope,
+        range: TimeRange,
+        sourceId: String,
+    ): AppliedEffect = AppliedEffect.Image(id, scope, range, sourceId)
+
+    private fun kind(layer: RenderLayer): String = when (layer) {
+        is RenderLayer.Video -> "Video"
+        is RenderLayer.Text -> "Text"
+        is RenderLayer.Image -> "Image"
+    }
+
+    private fun randomDocument(rng: Random, round: Int): com.redcut.domain.document.EditDocument {
+        val sourceCount = rng.nextInt(1, 3)
+        val sources = (0 until sourceCount).map { source("s$it") }
+
+        val clips = (0 until rng.nextInt(0, 6)).map { i ->
+            val inUs = rng.nextInt(0, 5) * SEC
+            val outUs = inUs + rng.nextInt(1, 40) * 100_000L
+            clip(
+                id = "c$i",
+                sourceId = if (rng.nextInt(0, 8) == 0) "ghost" else "s${rng.nextInt(0, sourceCount)}",
+                inUs = inUs,
+                outUs = outUs,
+                speed = SPEEDS[rng.nextInt(0, SPEEDS.size)],
+                enabled = rng.nextInt(0, 6) != 0,
+                volume = VOLUMES[rng.nextInt(0, VOLUMES.size)],
+                muted = rng.nextBoolean(),
+                fadeInMs = FADES[rng.nextInt(0, FADES.size)],
+                fadeOutMs = FADES[rng.nextInt(0, FADES.size)],
+            )
+        }
+
+        val effects = (0 until rng.nextInt(0, 5)).map { i -> randomEffect(rng, clips, i) }
+
+        return document(clips = clips, sources = sources, effects = effects, revision = round.toLong())
+    }
+
+    private fun randomEffect(
+        rng: Random,
+        clips: List<com.redcut.domain.document.Clip>,
+        index: Int,
+    ): AppliedEffect {
+        val scope = if (clips.isNotEmpty() && rng.nextBoolean()) {
+            // ~1 in 4 lands on an id that is not in the document any more, which is
+            // the dangling-reference case rule 9 is about.
+            val clipId = if (rng.nextInt(0, 4) == 0) "ghost" else clips[rng.nextInt(0, clips.size)].id
+            EffectScope.Clip(clipId)
+        } else {
+            EffectScope.Document
+        }
+        val startUs = rng.nextInt(0, 8) * 500_000L
+        val range = TimeRange(startUs, startUs + rng.nextInt(1, 6) * 500_000L)
+        val enabled = rng.nextInt(0, 4) != 0
+        val id = "e$index"
+
+        return when (rng.nextInt(0, 5)) {
+            0 -> AppliedEffect.Lut(
+                id,
+                scope,
+                range,
+                LutRef("vivid"),
+                enabled,
+                strength = STRENGTHS[rng.nextInt(0, STRENGTHS.size)],
+            )
+
+            1 -> AppliedEffect.Adjust(
+                id,
+                scope,
+                range,
+                ColorAdjustSpec(brightness = BRIGHTNESSES[rng.nextInt(0, BRIGHTNESSES.size)]),
+                enabled,
+            )
+
+            2 -> AppliedEffect.Text(id, scope, range, TextSpec("caption"), enabled)
+
+            3 -> AppliedEffect.Image(
+                id,
+                scope,
+                range,
+                if (rng.nextInt(0, 3) == 0) "ghost" else "s0",
+                enabled,
+            )
+
+            else -> AppliedEffect.Dissolve(
+                id,
+                scope,
+                range,
+                durationMs = DISSOLVES[rng.nextInt(0, DISSOLVES.size)],
+                enabled = enabled,
+            )
+        }
+    }
+
+    private companion object {
+        const val SEED = 20260912L
+        const val ROUNDS = 60
+
+        val SPEEDS = listOf(0.5f, 1f, 2f, 4f)
+        val VOLUMES = listOf(0f, 0.5f, 1f, 2f)
+        val FADES = listOf(0L, 200L, 3000L)
+        val STRENGTHS = listOf(0f, 0.5f, 1f)
+        val BRIGHTNESSES = listOf(0f, 0.25f, -0.5f)
+
+        /** Below the floor, ordinary, and longer than any clip the generator makes. */
+        val DISSOLVES = listOf(50L, 400L, 5000L)
+    }
+}

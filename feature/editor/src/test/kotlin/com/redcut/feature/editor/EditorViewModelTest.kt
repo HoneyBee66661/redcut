@@ -714,5 +714,48 @@ class EditorViewModelTest {
         assertThat(model.state.value.playheadUs).isEqualTo(4_000_000L)
     }
 
+    // --- Reorder (FR-2.7) --------------------------------------------------
+
+    @Test
+    fun `reorder moves a clip to a slot, selects it, and is one undoable entry`() = runTest(
+        dispatcher,
+    ) {
+        val (model, clipIds) = importedClips(
+            video(uri = "content://media/1"),
+            video(uri = "content://media/2"),
+        )
+
+        model.onIntent(EditorIntent.ApplyReorder(clipId = clipIds[1], toIndex = 0))
+
+        assertThat(model.state.value.document.clips.map { it.id })
+            .containsExactly(clipIds[1], clipIds[0]).inOrder()
+        assertThat(model.state.value.history)
+            .isEqualTo(HistoryState.Ready(canUndo = true, canRedo = false, topLabel = "Reorder"))
+        // The moved clip ends up selected: after a reorder the user's attention is on where it went.
+        assertThat(model.state.value.selection).isEqualTo(Selection.Clip(clipIds[1]))
+
+        model.onIntent(EditorIntent.Undo)
+        assertThat(model.state.value.document.clips.map { it.id })
+            .containsExactly(clipIds[0], clipIds[1]).inOrder()
+    }
+
+    @Test
+    fun `reorder to the slot it already occupies adds no history entry`() = runTest(dispatcher) {
+        val (model, clipIds) = importedClips(
+            video(uri = "content://media/1"),
+            video(uri = "content://media/2"),
+        )
+        val historyBefore = model.state.value.history
+
+        model.onIntent(EditorIntent.ApplyReorder(clipId = clipIds[0], toIndex = 0))
+
+        // `ReorderClip` refuses a move to its own slot, and `UndoStack.execute` refuses to record a
+        // command that changed nothing — without that pair, a drag that ended where it started would
+        // leave an undo entry that appears to do nothing when tapped.
+        assertThat(model.state.value.document.clips.map { it.id })
+            .containsExactly(clipIds[0], clipIds[1]).inOrder()
+        assertThat(model.state.value.history).isEqualTo(historyBefore)
+    }
+
     private fun HistoryState.topLabelOrNull(): String? = (this as? HistoryState.Ready)?.topLabel
 }

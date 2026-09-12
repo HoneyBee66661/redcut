@@ -15,6 +15,7 @@ import com.redcut.domain.document.CutTool
 import com.redcut.domain.document.EditDocument
 import com.redcut.domain.document.FrameStep
 import com.redcut.domain.document.ImportRejection
+import com.redcut.domain.document.ReorderClip
 import com.redcut.domain.document.TrimClip
 import com.redcut.domain.document.UndoStack
 import com.redcut.domain.document.commandFor
@@ -108,7 +109,23 @@ class EditorViewModel @Inject constructor(
             EditorIntent.CancelTrim -> cancelTrim()
 
             is EditorIntent.ApplyCut -> applyCut(intent.tool)
+
+            is EditorIntent.ApplyReorder -> applyReorder(intent.clipId, intent.toIndex)
         }
+    }
+
+    /**
+     * Moves a clip to a new slot (FR-2.7).
+     *
+     * `ReorderClip` clamps the index and refuses an unknown clip, so there is nothing to validate here
+     * — and the marker the user dragged to came from the same arithmetic the command will apply, which
+     * is what stops the clip landing somewhere they did not point at.
+     */
+    private fun applyReorder(clipId: String, toIndex: Int) {
+        logger.d(TAG, "reorder $clipId -> $toIndex")
+        history.execute(ReorderClip(clipId = clipId, toIndex = toIndex))
+        _state.value = _state.value.copy(selection = Selection.Clip(clipId))
+        publish()
     }
 
     /**

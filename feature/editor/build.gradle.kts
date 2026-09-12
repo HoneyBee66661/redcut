@@ -6,6 +6,9 @@
 // composition root.
 plugins {
     id("redcut.android.compose")
+    // The editor is the first module that owns an injected type (EditorViewModel), so
+    // it is one of only two modules paying for annotation processing.
+    id("redcut.android.hilt")
 }
 
 android {
@@ -20,4 +23,14 @@ dependencies {
     // output spec) to draw the timeline at the right scale — a pure value from
     // :domain:render, not a Media3 type.
     implementation(project(":domain:render"))
+
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.androidx.hilt.navigation.compose)
+    implementation(libs.kotlinx.coroutines.core)
+
+    // The ViewModel is constructible in a plain JVM test (it takes a RedcutLogger and
+    // touches no Android API), so the stage/undo wiring is verified in the fast tier
+    // rather than only on a device.
+    testImplementation(libs.junit)
+    testImplementation(libs.truth)
 }

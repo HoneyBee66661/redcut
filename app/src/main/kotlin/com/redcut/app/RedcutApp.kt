@@ -1,15 +1,26 @@
 package com.redcut.app
 
 import android.app.Application
+import com.redcut.app.logging.plantLoggingTrees
+import dagger.hilt.android.HiltAndroidApp
 
 /**
- * Process-wide entry point.
+ * Process-wide entry point, and the root of the Hilt graph.
  *
- * Bare on purpose. Hilt's `@HiltAndroidApp` and the Timber tree land with Phase
- * 0.5, which is the point at which there is a dependency graph and a logging
- * target to attach them to. A class here now buys something concrete in the
- * meantime: the manifest reference, the application id and the process lifecycle
- * are exercised by the first CI `assembleDebug`, so Phase 0.5 is an edit to a
- * file that already exists rather than the introduction of the app shell.
+ * `@HiltAndroidApp` is what generates the application-level component every other
+ * injected type hangs off — the composition root spec §4.1 describes. Note what is
+ * NOT here: no manual `object Graph`/service locator, and no `Timber` call inside a
+ * feature. The graph is declared by annotations in `:app/di`, and `:feature:*` only
+ * ever receives what it declares in a constructor.
+ *
+ * Logging is planted here rather than in `MainActivity` because an Application is the
+ * earliest process-wide hook: a crash during Activity creation should already be
+ * logged, not logged from the second thing that runs.
  */
-class RedcutApp : Application()
+@HiltAndroidApp
+class RedcutApp : Application() {
+    override fun onCreate() {
+        super.onCreate()
+        plantLoggingTrees()
+    }
+}

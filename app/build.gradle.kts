@@ -7,6 +7,11 @@
 // build-logic so this file stays a list of what the app IS, not how it is built.
 plugins {
     id("redcut.android.compose.application")
+    // Hilt is applied here and in :feature:editor — the only two modules that own or
+    // consume injected types today. `:domain:*` and `:core:common` never apply it
+    // (they take their collaborators as constructor parameters), which is what keeps
+    // the fast tier free of annotation processing.
+    id("redcut.android.hilt")
 }
 
 android {
@@ -39,4 +44,20 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
+
+    // --- Navigation (spec §7.1) --------------------------------------------
+    implementation(libs.androidx.navigation.compose)
+    // Wires `hiltViewModel()` to the Hilt graph, which is what lets a feature screen
+    // receive its ViewModel without the feature knowing Hilt exists beyond that call.
+    implementation(libs.androidx.hilt.navigation.compose)
+
+    // --- Persistence (spec §10, §3.1 "Preferences: DataStore") --------------
+    implementation(libs.androidx.datastore.preferences)
+
+    // --- Async --------------------------------------------------------------
+    implementation(libs.kotlinx.coroutines.android)
+
+    // --- Logging (spec §3.1: "Timber + a release-mode no-op tree") ----------
+    implementation(libs.timber)
 }

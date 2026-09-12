@@ -44,9 +44,18 @@ datastore = "1.1.1"
 media3 = "1.9.4"
 
 # --- DI / logging ----------------------------------------------------------
-# 2.59+ is the floor that supports AGP 9, so this bump means the eventual AGP 9
-# migration will not also have to move Hilt.
-hilt = "2.59.2"
+# 2.58, NOT 2.59+ — a floor AND a ceiling, and the ceiling was found the hard way.
+#
+# The previous entry here was 2.59.2, chosen on the reasoning that "2.59+ is the floor
+# that supports AGP 9, so bumping now means the eventual AGP 9 migration will not also
+# have to move Hilt". That reasoning was backwards: Hilt 2.59.0 does not merely SUPPORT
+# AGP 9, it REQUIRES it — applying the plugin on AGP 8.9.1 fails during configuration
+# with "The Hilt Android Gradle plugin is only compatible with Android Gradle plugin
+# (AGP) version 9.0.0 or higher". AGP 9 is deliberately not adopted yet (see the note
+# on `agp` above), so the two are locked together: 2.58 is the newest Hilt that runs on
+# AGP 8.9.1, and the AGP 9 migration must move AGP, Hilt and the built-in-Kotlin
+# question in one commit. Verified by trying 2.58, 2.57.2 and 2.56.2 against 8.9.1.
+hilt = "2.58"
 hiltNavigationCompose = "1.2.0"
 timber = "5.0.1"
 
@@ -66,6 +75,12 @@ javaxInject = "1"
 # low" when it is stale. 1.7.3 predates Kotlin 2.2 and would break
 # :domain:document — the one module the fast CI tier depends on.
 kotlinxSerialization = "1.9.0"
+
+# --- Coroutines ------------------------------------------------------------
+# Spec §3.1: "Async: Coroutines + Flow ... cancellation is a hard requirement for
+# scrubbing". 1.9.x is the line that pairs with Kotlin 2.x; the -android artifact is
+# what supplies Dispatchers.Main.immediate, which §9.2's table assigns to UI intents.
+kotlinxCoroutines = "1.9.0"
 
 # --- Testing ---------------------------------------------------------------
 junit = "4.13.2"
@@ -118,6 +133,10 @@ javax-inject = { group = "javax.inject", name = "javax.inject", version.ref = "j
 
 # --- Serialization ---------------------------------------------------------
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
+
+# --- Coroutines ------------------------------------------------------------
+kotlinx-coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core", version.ref = "kotlinxCoroutines" }
+kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "kotlinxCoroutines" }
 
 # --- Testing ---------------------------------------------------------------
 junit = { group = "junit", name = "junit", version.ref = "junit" }

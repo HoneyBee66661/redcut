@@ -238,6 +238,11 @@ jobs:
           echo "resolved NDK=$NDK"
           echo "TOOLBIN=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin" >> "$GITHUB_ENV"
       - name: Verify 16 KB page alignment
+        # LLVM tools exit 74 (EX_IOERR) when their stdout is a pipe that closes early,
+        # and `set -o pipefail` turns that into a step failure — so readelf's output is
+        # captured to a file and parsed from there. Piping it into `head`/`awk … exit`
+        # failed this step once while the alignment it printed was already correct
+        # (R E 0x4000): the check was fine, the plumbing was not.
         run: |
           set -euo pipefail
           LIB=$(find app/build/intermediates/merged_native_libs -path '*arm64-v8a*' \
@@ -247,8 +252,9 @@ jobs:
             exit 1
           fi
           echo "inspecting $LIB"
-          "$TOOLBIN/llvm-readelf" -l "$LIB" | grep -A1 -E 'LOAD' | head -12
-          ALIGN=$("$TOOLBIN/llvm-readelf" -l "$LIB" | awk '/LOAD/ {print $NF; exit}')
+          "$TOOLBIN/llvm-readelf" -l "$LIB" > /tmp/readelf.txt
+          grep -E 'LOAD' /tmp/readelf.txt
+          ALIGN=$(awk '/LOAD/ {print $NF; exit}' /tmp/readelf.txt)
           echo "first LOAD segment alignment: $ALIGN"
           if [ "$ALIGN" != "0x4000" ]; then
             echo "::error::expected 0x4000 (16 KB), got $ALIGN — this .so fails to load on Android 15+ devices. Check -Wl,-z,max-page-size=16384 in native/CMakeLists.txt"
@@ -257,7 +263,8 @@ jobs:
           echo "16 KB alignment OK"
       - name: Verify the registered seam is symbolisable
         # Proves RegisterNatives produced real symbols and that -g survived, which is
-        # what makes a native crash a stack trace instead of a guess (§6.7).
+        # what makes a native crash a stack trace instead of a guess (§6.7). Same
+        # file-not-pipe rule as above: readelf and nm both fail on a closed pipe.
         run: |
           set -euo pipefail
           SO=$(find engine/native/build -path '*obj*' -name 'libredcut_core.so' | head -1)
@@ -267,13 +274,14 @@ jobs:
           fi
           echo "unstripped library: $SO"
           "$TOOLBIN/llvm-nm" "$SO" > /tmp/nm.txt
+          "$TOOLBIN/llvm-readelf" -S "$SO" > /tmp/sections.txt
           for sym in JNI_OnLoad SeamAdd SeamVersionCode; do
             grep -q "$sym" /tmp/nm.txt || {
               echo "::error::$sym missing from $SO — JNI_OnLoad did not register the seam as expected"
               exit 1
             }
           done
-          "$TOOLBIN/llvm-readelf" -S "$SO" | grep -q '\.debug_info' || {
+          grep -q '\.debug_info' /tmp/sections.txt || {
             echo "::error::no .debug_info in $SO — ndk-stack could not symbolicate a native crash"
             exit 1
           }

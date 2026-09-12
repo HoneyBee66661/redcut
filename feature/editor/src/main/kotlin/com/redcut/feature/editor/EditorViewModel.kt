@@ -13,11 +13,13 @@ import com.redcut.domain.document.ClipEdge
 import com.redcut.domain.document.CompoundCommand
 import com.redcut.domain.document.CutTool
 import com.redcut.domain.document.EditDocument
+import com.redcut.domain.document.FrameStep
 import com.redcut.domain.document.ImportRejection
 import com.redcut.domain.document.TrimClip
 import com.redcut.domain.document.UndoStack
 import com.redcut.domain.document.commandFor
 import com.redcut.domain.document.planImport
+import com.redcut.domain.document.steppedPlayheadUs
 import com.redcut.domain.document.timelineDurationUs
 import com.redcut.domain.document.trimmedTo
 import com.redcut.feature.editor.timeline.TimelineThumbnails
@@ -75,7 +77,47 @@ class EditorViewModel @Inject constructor(
     /** The single source of truth the UI renders. */
     val state: StateFlow<EditorUiState> = _state.asStateFlow()
 
+    /**
+     * The dispatcher, in two branches.
+     *
+     * It used to be one `when` over fourteen intents, which `detekt` measured and a reader had to
+     * hold. Splitting by KIND rather than by size is the point: an [EditorIntent.Edit] is a document
+     * change that belongs on the history stack, a [EditorIntent.View] is a change to where the user is
+     * LOOKING, and the difference is the bug class this editor is careful about (an undo that also
+     * rewinds the playhead; a stage tap that lands in the undo stack). No `else` anywhere, so a new
+     * intent cannot fall outside both handlers.
+     */
     fun onIntent(intent: EditorIntent) {
+        when (intent) {
+            is EditorIntent.Edit -> applyEdit(intent)
+            is EditorIntent.View -> updateView(intent)
+        }
+    }
+
+    /** Document edits: everything that ends up on the history stack. */
+    private fun applyEdit(intent: EditorIntent.Edit) {
+        when (intent) {
+            is EditorIntent.ImportMedia -> importMedia(intent.uris)
+
+            is EditorIntent.BeginTrim -> beginTrim(intent.clipId, intent.edge, intent.sourceTimeUs)
+
+            is EditorIntent.UpdateTrim -> updateTrim(intent.sourceTimeUs)
+
+            EditorIntent.EndTrim -> endTrim()
+
+            EditorIntent.CancelTrim -> cancelTrim()
+
+            is EditorIntent.ApplyCut -> applyCut(intent.tool)
+        }
+    }
+
+    /**
+     * View changes: stage, playhead, selection, history navigation.
+     *
+     * None of these touches the document, and none is undoable — which is why they are all here and
+     * not scattered through the edit path.
+     */
+    private fun updateView(intent: EditorIntent.View) {
         when (intent) {
             is EditorIntent.SelectStage -> {
                 logger.d(TAG, "stage -> ${intent.stage.label}")
@@ -99,33 +141,32 @@ class EditorViewModel @Inject constructor(
                 publish()
             }
 
-            is EditorIntent.ImportMedia -> importMedia(intent.uris)
-
-            // The playhead and the selection are VIEW state, so these three never touch the
-            // stack: an undo that also rewound the playhead, or dropped the selection, would move
-            // the view under the user every time they undid an edit.
             is EditorIntent.SetPlayhead -> {
                 val limit = history.current.timelineDurationUs
                 _state.value = _state.value.copy(playheadUs = intent.us.coerceIn(0L, limit))
             }
+
+            is EditorIntent.StepPlayhead -> stepPlayhead(intent.step)
 
             is EditorIntent.SelectClip -> selectClip(intent.clipId)
 
             EditorIntent.ClearSelection ->
                 _state.value = _state.value.copy(selection = Selection.None)
 
-            is EditorIntent.BeginTrim -> beginTrim(intent.clipId, intent.edge, intent.sourceTimeUs)
-
-            is EditorIntent.UpdateTrim -> updateTrim(intent.sourceTimeUs)
-
-            EditorIntent.EndTrim -> endTrim()
-
-            EditorIntent.CancelTrim -> cancelTrim()
-
-            is EditorIntent.ApplyCut -> applyCut(intent.tool)
-
             EditorIntent.DismissImport -> _state.value = _state.value.copy(import = null)
         }
+    }
+
+    /**
+     * Moves the playhead one frame (FR-2.9).
+     *
+     * The frame's length comes from the document, because it belongs to the clip under the playhead —
+     * a 2x clip's timeline frame is half its source frame, and a step computed here from a constant
+     * would be wrong by more the faster the clip plays.
+     */
+    private fun stepPlayhead(step: FrameStep) {
+        val moved = history.current.steppedPlayheadUs(_state.value.playheadUs, step)
+        _state.value = _state.value.copy(playheadUs = moved)
     }
 
     /**

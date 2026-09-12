@@ -9,6 +9,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.dp
 import com.redcut.core.common.timeline.ClipRect
 import com.redcut.core.common.timeline.ClipSpan
 import com.redcut.core.common.timeline.TimelineGeometry

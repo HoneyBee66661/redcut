@@ -40,6 +40,10 @@ gradlePlugin {
             id = "redcut.android.compose"
             implementationClass = "AndroidComposeConventionPlugin"
         }
+        register("androidComposeApplication") {
+            id = "redcut.android.compose.application"
+            implementationClass = "AndroidComposeApplicationConventionPlugin"
+        }
         register("androidHilt") {
             id = "redcut.android.hilt"
             implementationClass = "AndroidHiltConventionPlugin"

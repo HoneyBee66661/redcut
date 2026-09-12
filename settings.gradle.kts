@@ -40,6 +40,7 @@ include(":feature:settings")
 // --- Domain (PURE JVM — no Android dependency, enforced by CI) -------------
 // Spec §4.1 rule 1. See tools/check-domain-purity.sh.
 include(":domain:document")
+include(":domain:project")
 include(":domain:render")
 
 // --- Engines (own the rendering technology; nothing depends on them) -------

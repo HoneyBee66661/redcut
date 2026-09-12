@@ -91,7 +91,37 @@ class EditorViewModel @Inject constructor(
 
             is EditorIntent.ImportMedia -> importMedia(intent.uris)
 
+            // The playhead and the selection are VIEW state, so these three never touch the
+            // stack: an undo that also rewound the playhead, or dropped the selection, would move
+            // the view under the user every time they undid an edit.
+            is EditorIntent.SetPlayhead -> {
+                val limit = history.current.timelineDurationUs
+                _state.value = _state.value.copy(playheadUs = intent.us.coerceIn(0L, limit))
+            }
+
+            is EditorIntent.SelectClip -> selectClip(intent.clipId)
+
+            EditorIntent.ClearSelection ->
+                _state.value = _state.value.copy(selection = Selection.None)
+
             EditorIntent.DismissImport -> _state.value = _state.value.copy(import = null)
+        }
+    }
+
+    /**
+     * Selects [clipId] if the document actually has it.
+     *
+     * The guard is not decoration: the id arrives from a tap, and a tap is resolved against the
+     * geometry of the frame the user SAW. A clip deleted between that frame and the tap (an undo,
+     * a ripple) would otherwise put a stale id in the state, and the inspector would edit a clip
+     * that is not there.
+     */
+    private fun selectClip(clipId: String) {
+        val exists = history.current.clips.any { it.id == clipId }
+        if (exists) {
+            _state.value = _state.value.copy(selection = Selection.Clip(clipId))
+        } else {
+            logger.d(TAG, "ignored a selection for $clipId: no such clip")
         }
     }
 
@@ -137,14 +167,26 @@ class EditorViewModel @Inject constructor(
     }
 
     /**
-     * Re-reads the state from the stack, keeping the stage and the import report.
+     * Re-reads the state from the stack, keeping the view fields (stage, playhead, selection,
+     * import report).
      *
-     * Neither the stage nor the report is history: undoing a trim must not also undo "the
-     * user is looking at the Effect stage", and it must not erase the explanation of why
-     * one of four files was refused.
+     * None of the four is history: undoing a trim must not also undo "the user is looking at the
+     * Effect stage", rewind the playhead, drop the selection, or erase the explanation of why one
+     * of four files was refused.
+     *
+     * The playhead and selection are RE-DERIVED against the new document rather than copied
+     * blindly, which is where two bugs would otherwise live: after a delete or an undo that
+     * shortens the timeline, a playhead past the new end would draw off the timeline, and a
+     * selection naming a clip that no longer exists would leave the inspector editing nothing.
      */
     private fun publish(import: ImportReport? = _state.value.import) {
-        _state.value = history.toUiState(stage = _state.value.stage, import = import)
+        val document = history.current
+        _state.value = history.toUiState(
+            stage = _state.value.stage,
+            playheadUs = _state.value.playheadUs.coerceIn(0L, document.timelineDurationUs),
+            selection = _state.value.selection.reconciledWith(document.clips.map { it.id }),
+            import = import,
+        )
     }
 
     private companion object {

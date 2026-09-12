@@ -50,7 +50,10 @@ class EditorViewModel @Inject constructor(
     private val logger: RedcutLogger,
     private val sourceReader: MediaSourceReader,
     private val ids: IdSource,
-    @IoDispatcher private val io: CoroutineDispatcher,
+    // `@param:` for the same reason as in :core:media — Kotlin 2.2 warns that a bare
+    // annotation on a constructor property will also apply to the field, and CI compiles
+    // with `-Werror`. Stating the target we mean costs one token and cannot regress.
+    @param:IoDispatcher private val io: CoroutineDispatcher,
 ) : ViewModel() {
 
     private val history = UndoStack(

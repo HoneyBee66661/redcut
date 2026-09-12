@@ -74,7 +74,9 @@ interface MediaSourceReader {
  */
 @Singleton
 class SafMediaSourceReader @Inject constructor(
-    @ApplicationContext private val context: Context,
+    // See the note in AndroidMediaProbe: `@param:` pins the target that Hilt reads and keeps
+    // Kotlin 2.2's future-target change from turning a warning into a `-Werror` failure.
+    @param:ApplicationContext private val context: Context,
     private val probe: MediaProbe,
     @IoDispatcher private val io: CoroutineDispatcher,
     private val logger: RedcutLogger,

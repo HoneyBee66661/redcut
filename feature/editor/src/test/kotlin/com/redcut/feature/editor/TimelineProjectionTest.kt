@@ -68,13 +68,23 @@ class TimelineProjectionTest {
 
     @Test
     fun `the timeline duration is the sum of the clip timings`() {
+        // The arithmetic spelled out, because this is the number the ruler and the scroll extent
+        // are built from and a sum that is merely "close" hides a wrong formula:
+        //   a: 4 s of source at 1x            -> 4 s
+        //   b: 4 s of source at 2x            -> 2 s
+        //   c: 1 s..3 s of source at 1x       -> 2 s
+        //                                       -----
+        //                                         8 s
         val mixed = document(
             clip("a", sourceOutUs = 4 * oneSecond),
             clip("b", sourceOutUs = 4 * oneSecond, speed = 2f),
             clip("c", sourceInUs = oneSecond, sourceOutUs = 3 * oneSecond),
         )
 
-        assertThat(mixed.timelineDurationUs).isEqualTo(7 * oneSecond)
+        assertThat(mixed.toClipTimings().map { it.timelineDurationUs })
+            .containsExactly(4 * oneSecond, 2 * oneSecond, 2 * oneSecond)
+            .inOrder()
+        assertThat(mixed.timelineDurationUs).isEqualTo(8 * oneSecond)
     }
 
     @Test

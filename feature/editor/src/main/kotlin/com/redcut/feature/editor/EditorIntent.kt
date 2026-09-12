@@ -38,6 +38,20 @@ sealed interface EditorIntent {
     data class ImportMedia(val uris: List<String>) : EditorIntent
 
     /**
+     * Move the playhead to [us] (FR-2.2/2.3/2.5 act on where it is).
+     *
+     * Not an edit and not undoable: the playhead is where the user is LOOKING, and an undo that
+     * also rewound the playhead would move the view under them every time they undid a trim.
+     */
+    data class SetPlayhead(val us: Long) : EditorIntent
+
+    /** Select a clip: a tap in the timeline drew it, and the inspector follows the selection. */
+    data class SelectClip(val clipId: String) : EditorIntent
+
+    /** Clear the selection (a tap on empty timeline space). */
+    data object ClearSelection : EditorIntent
+
+    /**
      * Dismiss the import report (FR-1.4).
      *
      * An explicit intent rather than a timer: a report that says two of five files were

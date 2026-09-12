@@ -28,6 +28,15 @@ data class EditorUiState(
     val history: HistoryState,
     val stage: Stage,
     /**
+     * Where the playhead is, in microseconds from the start of the timeline (§7.2).
+     *
+     * Not part of the document and not part of history: moving the playhead is not an edit, so
+     * undo must not step through it. The same distinction the stage already has.
+     */
+    val playheadUs: Long = 0L,
+    /** What the user has selected (§7.2). */
+    val selection: Selection = Selection.None,
+    /**
      * What the last import did, or null when nothing has been imported yet (FR-1.4).
      *
      * Part of the ONE state object rather than a second `StateFlow`, for the reason §7.2
@@ -70,17 +79,23 @@ sealed interface HistoryState {
  * on every mutation, and a cached one would be exactly the "inconsistent frame" this
  * state object exists to prevent.
  */
-internal fun UndoStack.toUiState(stage: Stage, import: ImportReport? = null): EditorUiState =
-    EditorUiState(
-        document = current,
-        history = HistoryState.Ready(
-            canUndo = canUndo,
-            canRedo = canRedo,
-            topLabel = undoLabel,
-        ),
-        stage = stage,
-        import = import,
-    )
+internal fun UndoStack.toUiState(
+    stage: Stage,
+    playheadUs: Long = 0L,
+    selection: Selection = Selection.None,
+    import: ImportReport? = null,
+): EditorUiState = EditorUiState(
+    document = current,
+    history = HistoryState.Ready(
+        canUndo = canUndo,
+        canRedo = canRedo,
+        topLabel = undoLabel,
+    ),
+    stage = stage,
+    playheadUs = playheadUs,
+    selection = selection,
+    import = import,
+)
 
 /**
  * Switches stages.

@@ -326,4 +326,95 @@ class EditorViewModelTest {
         assertThat(reader.requested).isEmpty()
         assertThat(model.state.value.import).isNull()
     }
+
+    // --- Playhead and selection (view state, not history) -------------------
+
+    @Test
+    fun `the playhead moves and is held inside the timeline`() = runTest(dispatcher) {
+        val model = viewModel(RecordingReader(listOf(video(durationUs = 4_000_000L))))
+        model.onIntent(EditorIntent.ImportMedia(listOf("content://media/1")))
+        advanceUntilIdle()
+
+        model.onIntent(EditorIntent.SetPlayhead(2_000_000L))
+        assertThat(model.state.value.playheadUs).isEqualTo(2_000_000L)
+
+        // Past the end of the last clip: clamped, because a playhead drawn past the content is a
+        // playhead the user cannot see or scrub back from.
+        model.onIntent(EditorIntent.SetPlayhead(9_000_000L))
+        assertThat(model.state.value.playheadUs).isEqualTo(4_000_000L)
+
+        model.onIntent(EditorIntent.SetPlayhead(-1_000L))
+        assertThat(model.state.value.playheadUs).isEqualTo(0L)
+    }
+
+    @Test
+    fun `moving the playhead is not an edit and cannot be undone`() = runTest(dispatcher) {
+        val model = viewModel(RecordingReader(listOf(video())))
+        model.onIntent(EditorIntent.ImportMedia(listOf("content://media/1")))
+        advanceUntilIdle()
+        val historyAfterImport = model.state.value.history
+
+        model.onIntent(EditorIntent.SetPlayhead(1_000_000L))
+
+        // The stack did not move: undoing the import must not have to be undone twice, and an
+        // undo of a trim must not rewind where the user is looking.
+        assertThat(model.state.value.history).isEqualTo(historyAfterImport)
+    }
+
+    @Test
+    fun `tapping a clip selects it`() = runTest(dispatcher) {
+        val model = viewModel(RecordingReader(listOf(video())))
+        model.onIntent(EditorIntent.ImportMedia(listOf("content://media/1")))
+        advanceUntilIdle()
+        val clipId = model.state.value.document.clips.single().id
+
+        model.onIntent(EditorIntent.SelectClip(clipId))
+
+        assertThat(model.state.value.selection).isEqualTo(Selection.Clip(clipId))
+    }
+
+    @Test
+    fun `a selection for a clip the document does not have is ignored`() = runTest(dispatcher) {
+        // The id comes from a tap resolved against a frame the user saw; a clip deleted in the
+        // meantime must not leave the inspector editing a clip that is not there.
+        val model = viewModel(RecordingReader(listOf(video())))
+        model.onIntent(EditorIntent.ImportMedia(listOf("content://media/1")))
+        advanceUntilIdle()
+
+        model.onIntent(EditorIntent.SelectClip("clip-that-never-existed"))
+
+        assertThat(model.state.value.selection).isEqualTo(Selection.None)
+    }
+
+    @Test
+    fun `clearing the selection leaves nothing selected`() = runTest(dispatcher) {
+        val model = viewModel(RecordingReader(listOf(video())))
+        model.onIntent(EditorIntent.ImportMedia(listOf("content://media/1")))
+        advanceUntilIdle()
+        model.onIntent(EditorIntent.SelectClip(model.state.value.document.clips.single().id))
+
+        model.onIntent(EditorIntent.ClearSelection)
+
+        assertThat(model.state.value.selection).isEqualTo(Selection.None)
+    }
+
+    @Test
+    fun `undoing the import leaves the playhead and the selection consistent with it`() = runTest(
+        dispatcher,
+    ) {
+        val model = viewModel(RecordingReader(listOf(video(durationUs = 4_000_000L))))
+        model.onIntent(EditorIntent.ImportMedia(listOf("content://media/1")))
+        advanceUntilIdle()
+        model.onIntent(EditorIntent.SelectClip(model.state.value.document.clips.single().id))
+        model.onIntent(EditorIntent.SetPlayhead(3_000_000L))
+
+        model.onIntent(EditorIntent.Undo)
+
+        // Both view fields are re-derived against the new (empty) document rather than copied: a
+        // playhead at 3 s and a selection naming a clip that no longer exists would both point at
+        // nothing, and the timeline would draw off its own content.
+        assertThat(model.state.value.document.clips).isEmpty()
+        assertThat(model.state.value.playheadUs).isEqualTo(0L)
+        assertThat(model.state.value.selection).isEqualTo(Selection.None)
+    }
 }

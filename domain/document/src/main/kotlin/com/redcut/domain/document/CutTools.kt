@@ -20,6 +20,9 @@ enum class CutTool {
 
     /** Delete the clip at the playhead and ripple-close the gap (FR-2.6). */
     DELETE,
+
+    /** Fuse the clip at the playhead with the run of source-adjacent clips after it (FR-2.4). */
+    MERGE,
 }
 
 /**
@@ -99,6 +102,10 @@ fun EditDocument.availabilityFor(tool: CutTool, playheadUs: Long): CutAvailabili
             } else {
                 CutAvailability.Available
             }
+
+        // Merge asks a different question (is the NEXT clip fusable?) and has its own four reasons,
+        // which is why its rule lives in ClipMerge.kt and this just forwards the clip at the playhead.
+        CutTool.MERGE -> mergeAvailability(clip.id)
     }
 }
 
@@ -156,6 +163,9 @@ fun EditDocument.commandFor(
         CutTool.CUT_LEFT -> CutLeft(clipId = clip.id, atSourceUs = atSourceUs)
         CutTool.CUT_RIGHT -> CutRight(clipId = clip.id, atSourceUs = atSourceUs)
         CutTool.DELETE -> DeleteClip(clipId = clip.id)
+        // The whole run, not just the next clip: FR-2.4 says "two or more", and a clip split into
+        // five pieces comes back in one action. mergeRunFrom stops at the first clip that cannot join.
+        CutTool.MERGE -> MergeClips(mergeRunFrom(clip.id).map { it.id })
     }
 }
 

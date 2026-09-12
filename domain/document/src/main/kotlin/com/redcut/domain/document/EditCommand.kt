@@ -266,7 +266,7 @@ data class MergeClips(val clipIds: List<String>) : EditCommand {
     override val label: String get() = "Merge"
 
     override fun apply(doc: EditDocument): EditDocument {
-        val run = doc.mergeRun(clipIds) ?: return doc
+        val run = doc.mergeRunOf(clipIds) ?: return doc
 
         val merged = run.clips.first().copy(sourceOutUs = run.clips.last().sourceOutUs)
         // Replace the whole run with the merged clip, preserving position.
@@ -275,53 +275,6 @@ data class MergeClips(val clipIds: List<String>) : EditCommand {
         mergedClips.add(run.startIndex, merged)
         return doc.copy(clips = mergedClips)
     }
-}
-
-/** A legal merge selection: the contiguous run to replace and where it starts. */
-private data class MergeRun(val startIndex: Int, val clips: List<Clip>)
-
-/**
- * The contiguous run [ids] selects, or null when the selection is not a legal merge
- * (FR-2.4): fewer than two distinct clips, an id that is not in the document, a
- * selection that is not contiguous on the timeline, clips from more than one source
- * at differing speed or direction, or a run whose source ranges are not adjacent
- * end to end.
- *
- * Extracted from `MergeClips.apply`, and split into three named steps, because the
- * precondition block was nine guard clauses in the middle of the method that does
- * the merge — correct, but the reader had to hold the happy path in their head
- * through all nine to see it. Naming the two legality checks is what makes the
- * reason a merge is refused legible at the call site rather than only in the guards.
- */
-private fun EditDocument.mergeRun(ids: List<String>): MergeRun? {
-    val unique = ids.distinct()
-    if (unique.size < 2 || unique.size != ids.size) return null
-
-    val selected = clips.filter { it.id in unique.toSet() }
-    if (selected.size != unique.size) return null
-
-    val start = clips.indexOfFirst { it.id == unique.first() }
-    if (start < 0 || start + selected.size > clips.size) return null
-
-    val ordered = clips.subList(start, start + selected.size)
-    if (!ordered.selectsExactly(unique) || !ordered.isMergeableRun()) return null
-    return MergeRun(start, ordered)
-}
-
-/** Adjacency, taken from the timeline: the run must be exactly the selection. */
-private fun List<Clip>.selectsExactly(ids: List<String>): Boolean =
-    map { it.id }.toSet() == ids.toSet()
-
-/**
- * Same source, same speed and direction, and each clip's source range continuing
- * where the previous one ended — the physical precondition for fusing two clips
- * into one.
- */
-private fun List<Clip>.isMergeableRun(): Boolean {
-    val head = first()
-    if (any { it.sourceId != head.sourceId }) return false
-    if (any { it.speed != head.speed || it.reverse != head.reverse }) return false
-    return (0 until size - 1).all { this[it].sourceOutUs == this[it + 1].sourceInUs }
 }
 
 /**

@@ -147,6 +147,10 @@ kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-
 # --- Coroutines ------------------------------------------------------------
 kotlinx-coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core", version.ref = "kotlinxCoroutines" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "kotlinxCoroutines" }
+# JVM tests of the view models: `runTest` and `Dispatchers.setMain`. The editor's import
+# path is suspend, and a state holder tested without control of its dispatcher is a state
+# holder tested by luck.
+kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "kotlinxCoroutines" }
 
 # --- Testing ---------------------------------------------------------------
 junit = { group = "junit", name = "junit", version.ref = "junit" }

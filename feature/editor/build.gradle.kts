@@ -28,9 +28,16 @@ dependencies {
     implementation(libs.androidx.hilt.navigation.compose)
     implementation(libs.kotlinx.coroutines.core)
 
+    // The import path (FR-1). The editor depends on the PORT (MediaSourceReader) and never
+    // on the platform implementation: Hilt binds SafMediaSourceReader at the composition
+    // root, so a JVM test supplies fixtures and the screen knows nothing about SAF.
+    implementation(project(":core:media"))
+
     // The ViewModel is constructible in a plain JVM test (it takes a RedcutLogger and
-    // touches no Android API), so the stage/undo wiring is verified in the fast tier
-    // rather than only on a device.
+    // touches no Android API), so the stage/undo/import wiring is verified in the fast tier
+    // rather than only on a device. `coroutines-test` is what lets that test control the
+    // dispatcher the import runs on.
     testImplementation(libs.junit)
     testImplementation(libs.truth)
+    testImplementation(libs.kotlinx.coroutines.test)
 }

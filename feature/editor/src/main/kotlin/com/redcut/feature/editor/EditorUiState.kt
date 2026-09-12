@@ -26,6 +26,16 @@ data class EditorUiState(
     val document: EditDocument,
     val history: HistoryState,
     val stage: Stage,
+    /**
+     * What the last import did, or null when nothing has been imported yet (FR-1.4).
+     *
+     * Part of the ONE state object rather than a second `StateFlow`, for the reason §7.2
+     * gives: a rejection message that could arrive while the document has already moved on
+     * is exactly the inconsistent frame this type exists to prevent. The report is cleared
+     * by the user dismissing it, not by a timer, so an import that half-failed cannot
+     * disappear before it has been read.
+     */
+    val import: ImportReport? = null,
 ) {
     /** The document's state identity, and the recompilation trigger (spec §1.1, §8.1). */
     val revision: Long get() = document.revision
@@ -59,15 +69,17 @@ sealed interface HistoryState {
  * on every mutation, and a cached one would be exactly the "inconsistent frame" this
  * state object exists to prevent.
  */
-internal fun UndoStack.toUiState(stage: Stage): EditorUiState = EditorUiState(
-    document = current,
-    history = HistoryState.Ready(
-        canUndo = canUndo,
-        canRedo = canRedo,
-        topLabel = undoLabel,
-    ),
-    stage = stage,
-)
+internal fun UndoStack.toUiState(stage: Stage, import: ImportReport? = null): EditorUiState =
+    EditorUiState(
+        document = current,
+        history = HistoryState.Ready(
+            canUndo = canUndo,
+            canRedo = canRedo,
+            topLabel = undoLabel,
+        ),
+        stage = stage,
+        import = import,
+    )
 
 /**
  * Switches stages.
@@ -79,3 +91,30 @@ internal fun UndoStack.toUiState(stage: Stage): EditorUiState = EditorUiState(
  * triggered a recompile of the whole timeline.
  */
 internal fun EditorUiState.withStage(stage: Stage): EditorUiState = copy(stage = stage)
+
+/**
+ * The outcome of one import, as the UI needs to tell it (FR-1.2, FR-1.4).
+ *
+ * Counts and reasons, not the sources themselves: the clips are already in the document,
+ * and a report that carried them too would be a second copy of state the UI can read from
+ * `document`.
+ *
+ * [rejected] holds both kinds of refusal — files the policy turned down (a codec, a
+ * duration) and files that could not be read at all — because the user made one gesture and
+ * is owed one list. The distinction lives in the rejection types, not in two lists.
+ */
+@Immutable
+data class ImportReport(
+    val importedCount: Int,
+    val rejected: List<ImportRejection>,
+) {
+    val hasRejections: Boolean get() = rejected.isNotEmpty()
+
+    /** The user-facing lines, in the order the files were selected. */
+    val messages: List<String> get() = rejected.map { it.message }
+
+    companion object {
+        /** Nothing was imported and nothing was refused — e.g. an empty selection. */
+        val EMPTY = ImportReport(importedCount = 0, rejected = emptyList())
+    }
+}

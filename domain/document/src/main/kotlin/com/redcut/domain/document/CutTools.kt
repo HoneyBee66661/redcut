@@ -23,6 +23,9 @@ enum class CutTool {
 
     /** Fuse the clip at the playhead with the run of source-adjacent clips after it (FR-2.4). */
     MERGE,
+
+    /** Copy the clip at the playhead immediately after itself (FR-2.8). */
+    DUPLICATE,
 }
 
 /**
@@ -39,6 +42,16 @@ sealed interface CutAvailability {
 
     data class Unavailable(val reason: String) : CutAvailability
 }
+
+/**
+ * How long the whole timeline is, in microseconds.
+ *
+ * Derived, never stored (spec §5.1): every position in the editor comes from prefix-summing the clips'
+ * own durations, and this is where that sum lives. It used to exist only in the editor's projection,
+ * which meant the domain's frame-stepping could not ask how far the timeline went — a rule with two
+ * homes is a rule that disagrees with itself eventually.
+ */
+val EditDocument.timelineDurationUs: Long get() = clips.sumOf { it.timelineDurationUs }
 
 /**
  * The clip the playhead is inside, or null when it is past the end of the timeline.
@@ -104,8 +117,13 @@ fun EditDocument.availabilityFor(tool: CutTool, playheadUs: Long): CutAvailabili
             }
 
         // Merge asks a different question (is the NEXT clip fusable?) and has its own four reasons,
-        // which is why its rule lives in ClipMerge.kt and this just forwards the clip at the playhead.
+        // which is why its rule lives in MergeRun.kt and this just forwards the clip at the playhead.
         CutTool.MERGE -> mergeAvailability(clip.id)
+
+        // Duplicate needs only a clip to copy, and reaching this line means the playhead is on one.
+        // Its command refuses nothing else: the id comes from the same source as a split's, so a
+        // collision is impossible by construction.
+        CutTool.DUPLICATE -> CutAvailability.Available
     }
 }
 
@@ -166,6 +184,7 @@ fun EditDocument.commandFor(
         // The whole run, not just the next clip: FR-2.4 says "two or more", and a clip split into
         // five pieces comes back in one action. mergeRunFrom stops at the first clip that cannot join.
         CutTool.MERGE -> MergeClips(mergeRunFrom(clip.id).map { it.id })
+        CutTool.DUPLICATE -> DuplicateClip(clipId = clip.id, newClipId = newClipId())
     }
 }
 

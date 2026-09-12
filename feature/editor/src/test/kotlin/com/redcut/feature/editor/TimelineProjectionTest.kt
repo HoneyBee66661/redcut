@@ -3,6 +3,7 @@ package com.redcut.feature.editor
 import com.google.common.truth.Truth.assertThat
 import com.redcut.domain.document.Clip
 import com.redcut.domain.document.EditDocument
+import com.redcut.domain.document.timelineDurationUs
 import org.junit.Test
 
 /**

@@ -19,7 +19,3 @@ import com.redcut.domain.document.EditDocument
  */
 internal fun EditDocument.toClipTimings(): List<ClipTiming> =
     clips.map { clip -> ClipTiming(clipId = clip.id, timelineDurationUs = clip.timelineDurationUs) }
-
-/** The timeline's total duration: where the last clip ends. */
-internal val EditDocument.timelineDurationUs: Long
-    get() = clips.sumOf { it.timelineDurationUs }

@@ -695,7 +695,8 @@ class EditorViewModelTest {
         assertThat(model.state.value.playheadUs).isEqualTo(0L)
 
         // And it is view state, not an edit: nothing to undo for a moved playhead.
-        assertThat(model.state.value.history.canUndo).isFalse()
+        assertThat(model.state.value.history)
+            .isEqualTo(HistoryState.Ready(canUndo = false, canRedo = false, topLabel = null))
     }
 
     @Test

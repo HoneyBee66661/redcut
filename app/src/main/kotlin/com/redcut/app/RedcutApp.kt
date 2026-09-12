@@ -59,7 +59,16 @@ class RedcutApp : Application() {
      * moment to give 16 MB of bitmaps back than a running-low warning is. The cache is
      * regenerable by construction (§10.4: the cache directory may be deleted at any time), so
      * clearing it early costs a re-decode and nothing else.
+     *
+     * The suppression is scoped here and is about one thing: `TRIM_MEMORY_*` is deprecated as of
+     * API 35, in favour of the platform's newer memory-pressure signals. It is NOT dead code for
+     * this app — `minSdk` is 26, and every device between 26 and 34 sends exactly this level and
+     * nothing else. Dropping it would mean never trimming on the devices with the least memory,
+     * which is the opposite of what §9.3 asks for. Revisit when the API 35 replacement can be
+     * used unconditionally; until then the honest form is "use the deprecated signal where it is
+     * the only signal", stated in one place.
      */
+    @Suppress("DEPRECATION")
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
         if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {

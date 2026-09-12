@@ -103,7 +103,7 @@ internal fun onTimelineTap(
 internal fun Modifier.timelineGestures(
     geometry: TimelineGeometry,
     rulerHeightPx: Float,
-    actions: GestureActions,
+    actions: TimelineGestures,
 ): Modifier = this
     .pointerInput(geometry.zoom, geometry.visibleStartPx, rulerHeightPx) {
         awaitEachGesture {

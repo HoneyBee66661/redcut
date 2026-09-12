@@ -29,6 +29,29 @@ data class EditDocument(
     val canvas: CanvasSpec = CanvasSpec.PORTRAIT_1080,
     val createdAtMs: Long = 0L,
     val modifiedAtMs: Long = 0L,
+    /**
+     * The identity of this document's current *state*, and the recompilation
+     * trigger (spec §1.1, §8.1).
+     *
+     * Spec §1.1 draws `EditDocument` as "immutable, versioned", and spec §8.1
+     * names the trigger explicitly: "Recompilation triggers: any
+     * `EditDocument.revision` change. Compilation is pure and cheap (< 1 ms for
+     * typical projects), so it runs on every revision change without debouncing.
+     * Preview rebuild is debounced at 120 ms during drags to avoid thrashing the
+     * player." So this is a *state identity*, not a timestamp and not a save
+     * counter: two documents with equal content but different revisions are
+     * different states, and a downstream cache that sees the revision unchanged
+     * is entitled to skip a recompile.
+     *
+     * [UndoStack] is the only thing that advances it. The stack is the single
+     * mutation gateway, so it is the only place that can hand out a new state;
+     * commands are pure and never touch this field — applying a command changes
+     * content only (see [EditCommand]).
+     *
+     * Serialized with a default of `0`, so a document written before the field
+     * existed still loads unchanged. [SCHEMA_VERSION] stays `1`.
+     */
+    val revision: Long = 0L,
 ) {
     /**
      * Clips paired with their derived timeline positions, in playback order.

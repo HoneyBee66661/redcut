@@ -40,9 +40,12 @@ object NativeSeam {
             return NativeStatus.Unavailable("libredcut_core.so failed to load: ${e.message}")
         }
 
-        return when (val handshake = NativeContract.verifyHandshake(reported)) {
-            is RedcutResult.Success -> NativeStatus.Ready(handshake.value)
-            is RedcutResult.Failure -> NativeStatus.Unavailable(handshake.error.message)
+        return when (NativeContract.verifyHandshake(reported)) {
+            is RedcutResult.Success -> NativeStatus.Ready(reported)
+            is RedcutResult.Failure -> NativeStatus.Unavailable(
+                "native ABI mismatch: kotlin expects " +
+                    "${NativeContract.EXPECTED_VERSION_CODE}, libredcut_core.so reports $reported",
+            )
         }
     }
 

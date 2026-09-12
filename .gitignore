@@ -36,3 +36,10 @@ keystore.properties
 # --- Logs / temp --------------------------------------------------------------
 *.log
 *.hprof
+
+# --- Worktrees ----------------------------------------------------------------
+# A git worktree checked out INSIDE the repo (what `hermes kanban` and agent
+# orchestration tools do by default) is a second full copy of the sources. Left
+# visible it pollutes `git status`, and it makes repo-wide scans — including
+# tools/check-architecture.sh — report the copy's files as if they were ours.
+.worktrees/

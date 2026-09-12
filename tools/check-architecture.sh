@@ -69,16 +69,22 @@ done
 
 # --- Rule D1: Media3 isolation --------------------------------------------
 echo "  Rule D1: no Media3 outside :$MEDIA3_OWNER"
+# A git worktree checked out inside the repo (`./.worktrees/<task>`, what agent
+# orchestration tools create by default) is a second copy of every source file, so
+# scanning it double-counts and reports the COPY's files as violations of rules the
+# real sources satisfy. Excluded here for the same reason `.git` is.
 while IFS= read -r src_root; do
     module="${src_root#"$ROOT"/}"
     module="${module%/src/*}"
     [ "$module" = "$MEDIA3_OWNER" ] && continue
     scan "rule-D1" 'import[[:space:]]+androidx\.media3' "$src_root"
-done < <(find . -mindepth 3 -maxdepth 3 -type d -name src -not -path './.git/*' 2>/dev/null)
+done < <(find . -mindepth 3 -maxdepth 3 -type d -name src \
+    -not -path './.git/*' -not -path './.worktrees/*' 2>/dev/null)
 
 # The catalog itself must not hand Media3 to a module that should not have it:
 # only :engine:media3 lists a media3 dependency in its own build file.
-for build_file in $(find . -mindepth 2 -maxdepth 3 -name build.gradle.kts -not -path './build-logic/*' -not -path './.git/*' 2>/dev/null); do
+for build_file in $(find . -mindepth 2 -maxdepth 3 -name build.gradle.kts \
+    -not -path './build-logic/*' -not -path './.git/*' -not -path './.worktrees/*' 2>/dev/null); do
     rel="${build_file#"$ROOT"/}"
     case "$rel" in
         "$MEDIA3_OWNER"/*) continue ;;

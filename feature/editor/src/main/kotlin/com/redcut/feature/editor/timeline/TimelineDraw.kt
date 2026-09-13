@@ -129,7 +129,7 @@ internal fun DrawScope.drawTimeline(
         val screenX = layer.geometry.pxFor(us) - layer.geometry.visibleStartPx
         drawReorderMarker(screenX, track, paint.reorderMarker)
     }
-    drawPlayhead(layer.geometry, marks.playheadUs, paint.playhead)
+    drawPlayhead(layer.geometry, track, marks.playheadUs, paint.playhead)
 }
 
 /** Ruler ticks. */
@@ -249,13 +249,36 @@ internal fun DrawScope.drawSlice(
     )
 }
 
-/** The playhead, drawn over everything and only when it is on screen. */
-internal fun DrawScope.drawPlayhead(geometry: TimelineGeometry, playheadUs: Long, color: Color) {
+/**
+ * The playhead: the fixed reference line of UI revision 1.
+ *
+ * ### Three times the track, top-aligned, and red
+ *
+ * The user's spec, and each part earns its place. **Three times the track's height** because a line the
+ * height of the track disappears into the filmstrip it crosses — this one starts at the track's top and
+ * reaches well past the clips, so it is findable at a glance. **Top-aligned** to the track rather than to
+ * the canvas, so it is the same line whatever is above it.
+ *
+ * **Red**, asked for by name, and deliberately NOT a theme colour: a playhead that changed with the theme
+ * (or with the dimmed state of a disabled control near it) stops being the fixed reference the revision
+ * makes it. It is also the one element on screen that is not derived from the document — the tracks move
+ * under it — and its colour says so.
+ *
+ * The line is drawn where the geometry maps the playhead, which under the revision is the viewport's centre
+ * whenever the timeline is long enough to scroll that far (`centredPlayheadPx`), and drifts towards an edge
+ * only at the ends.
+ */
+internal fun DrawScope.drawPlayhead(
+    geometry: TimelineGeometry,
+    track: Track,
+    playheadUs: Long,
+    color: Color,
+) {
     geometry.playheadPx(playheadUs)?.let { x ->
         drawLine(
             color = color,
-            start = Offset(x, 0f),
-            end = Offset(x, size.height),
+            start = Offset(x, track.top),
+            end = Offset(x, track.top + track.height * PLAYHEAD_TRACK_MULTIPLE),
             strokeWidth = PLAYHEAD_WIDTH_PX,
         )
     }
@@ -264,6 +287,9 @@ internal fun DrawScope.drawPlayhead(geometry: TimelineGeometry, playheadUs: Long
 private const val RULER_TICK_WIDTH_PX = 1f
 private const val SELECTION_BORDER_PX = 3f
 private const val SELECTION_STRIPE_PX = 6f
-private const val PLAYHEAD_WIDTH_PX = 2f
+private const val PLAYHEAD_WIDTH_PX = 3f
+
+/** UI revision 1: the line reaches three track-heights down, so it reads over the filmstrip. */
+private const val PLAYHEAD_TRACK_MULTIPLE = 3f
 private const val TRIM_EDGE_PX = 4f
 private const val REORDER_MARKER_PX = 6f

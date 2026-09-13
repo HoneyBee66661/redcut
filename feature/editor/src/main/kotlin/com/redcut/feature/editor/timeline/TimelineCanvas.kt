@@ -12,6 +12,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
@@ -76,13 +77,16 @@ internal fun TimelineCanvas(
     var zoomPxPerSecond by rememberSaveable {
         mutableFloatStateOf(TimelineZoom.DEFAULT.pixelsPerSecond)
     }
-    var scrollPx by rememberSaveable { mutableFloatStateOf(0f) }
     var viewportWidthPx by remember { mutableFloatStateOf(0f) }
 
+    // No stored scroll offset (UI revision 1): the playhead is the fixed line, so the offset that puts it
+    // under the line is DERIVED from it. Storing both would be storing the same fact twice, and the two
+    // could disagree — a scroll the user changed without the playhead moving is exactly the state the
+    // revision removes.
     val layer = rememberTimelineLayer(
         document = document,
+        playheadUs = playheadUs,
         zoomPxPerSecond = zoomPxPerSecond,
-        scrollPx = scrollPx,
         viewportWidthPx = viewportWidthPx,
         density = density,
         onThumbnail = onThumbnail,
@@ -107,7 +111,7 @@ internal fun TimelineCanvas(
         onIntent = onIntent,
         clipsById = layer.clipsById,
         spansByClip = layer.spansByClip,
-        setScrollPx = { scrollPx = it },
+        playheadUs = playheadUs,
         setZoomPxPerSecond = { zoomPxPerSecond = it },
         reorder = reorderGestures,
         // The tap rule is stateful: the first tap on a clip selects it, and a tap on the already
@@ -154,8 +158,8 @@ private data class ReorderDrag(val clipId: String, val targetIndex: Int, val las
 @Composable
 private fun rememberTimelineLayer(
     document: EditDocument,
+    playheadUs: Long,
     zoomPxPerSecond: Float,
-    scrollPx: Float,
     viewportWidthPx: Float,
     density: Float,
     onThumbnail: suspend (sourceId: String, uri: String, positionUs: Long) -> ImageBitmap?,
@@ -163,13 +167,17 @@ private fun rememberTimelineLayer(
     val clipsById = remember(document) { document.clips.associateBy { it.id } }
     val spans = remember(document) { spansOf(document.toClipTimings()) }
     val spansByClip = remember(spans) { spans.associateBy { it.clipId } }
-    val geometry = TimelineGeometry(
+    // Two steps, because the scroll that centres the playhead is a function OF a geometry: build it at 0,
+    // ask where the playhead should sit, then keep that offset. The alternative — a static helper taking
+    // every input the geometry already holds — is the same arithmetic written twice.
+    val unscrolled = TimelineGeometry(
         viewportWidthPx = viewportWidthPx,
         spans = spans,
         zoom = TimelineZoom(zoomPxPerSecond),
-        scrollPx = scrollPx,
+        scrollPx = 0f,
         density = density,
     )
+    val geometry = unscrolled.copy(scrollPx = unscrolled.scrollCentering(playheadUs))
     val rects = geometry.visibleRects()
     val requests = rememberSliceRequests(document, clipsById, rects, spans)
     val images = rememberThumbnails(requests, onThumbnail)
@@ -256,7 +264,7 @@ private fun rememberTimelinePaint(): TimelinePaint = TimelinePaint(
     selectedClip = MaterialTheme.colorScheme.primaryContainer,
     selectionBorder = MaterialTheme.colorScheme.primary,
     ruler = MaterialTheme.colorScheme.outlineVariant,
-    playhead = MaterialTheme.colorScheme.error,
+    playhead = PLAYHEAD_RED,
     trimEdge = MaterialTheme.colorScheme.tertiary,
     reorderMarker = MaterialTheme.colorScheme.secondary,
 )
@@ -319,3 +327,14 @@ private fun rememberThumbnails(
 
 /** The ruler strip's height. 24 dp is a finger's worth of target above the clips. */
 internal const val RULER_HEIGHT_DP = 24f
+
+/**
+ * The playhead's red (UI revision 1, asked for by name).
+ *
+ * A literal rather than a theme colour, and named rather than inline: a playhead that shifted with the
+ * theme would stop being the one fixed reference on the screen, and a colour nobody can find by name is a
+ * colour the next reader will re-invent slightly differently.
+ */
+// Named components rather than the 0xFFFF2A2A literal: detekt reads a packed hex colour as a magic
+// number, and the components say what the colour IS (#FF2A2A) without fighting the linter.
+private val PLAYHEAD_RED = Color(red = 0xFF, green = 0x2A, blue = 0x2A)

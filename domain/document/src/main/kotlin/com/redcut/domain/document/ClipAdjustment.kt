@@ -57,6 +57,23 @@ enum class ClipAdjustment {
             MUTE, REVERSE -> 1f
         }
 
+    /**
+     * The slider's bounds.
+     *
+     * The SAME numbers the commands clamp to (`ClipRanges`), stated here so a row cannot be built with
+     * bounds that disagree with the document. Note the fades: this ceiling is the spec's 3 s, while
+     * `SetFades` clamps further to the clip's own length — so a slider can ask for more than the clip
+     * allows, and the row reads the clamped value back from the document afterwards. That asymmetry is
+     * deliberate: the control offers what the spec allows, and the document decides what is possible.
+     */
+    val range: ClosedFloatingPointRange<Float>
+        get() = when (this) {
+            SPEED -> ClipRanges.SPEED_MIN..ClipRanges.SPEED_MAX
+            VOLUME -> ClipRanges.VOLUME_MIN..ClipRanges.VOLUME_MAX
+            FADE_IN, FADE_OUT -> 0f..ClipRanges.FADE_MAX_MS.toFloat()
+            MUTE, REVERSE -> 0f..1f
+        }
+
     companion object {
         /** Anything at or above this counts as "on" for a switch. */
         const val SWITCH_THRESHOLD = 0.5f

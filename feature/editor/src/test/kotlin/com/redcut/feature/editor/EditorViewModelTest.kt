@@ -9,6 +9,7 @@ import com.redcut.core.media.PreviewFrames
 import com.redcut.core.media.SourceReadResult
 import com.redcut.core.media.ThumbnailSource
 import com.redcut.core.media.ThumbnailStore
+import com.redcut.domain.document.ClipAdjustment
 import com.redcut.domain.document.ClipEdge
 import com.redcut.domain.document.CutTool
 import com.redcut.domain.document.FrameStep
@@ -759,6 +760,85 @@ class EditorViewModelTest {
         assertThat(model.state.value.document.clips.map { it.id })
             .containsExactly(clipIds[0], clipIds[1]).inOrder()
         assertThat(model.state.value.history).isEqualTo(historyBefore)
+    }
+
+    // --- The inspector (FR-3.1–3.4, 3.9) ----------------------------------
+
+    @Test
+    fun `a slider drag is one undoable entry, however many frames it took`() = runTest(dispatcher) {
+        val (model, clipIds) = importedClips(video())
+
+        model.onIntent(EditorIntent.BeginAdjust(clipIds[0], ClipAdjustment.SPEED))
+        // A slider emits a value per frame while the finger is down.
+        listOf(1.5f, 2f, 2.5f).forEach { value -> model.onIntent(EditorIntent.UpdateAdjust(value)) }
+        model.onIntent(EditorIntent.EndAdjust)
+
+        assertThat(model.state.value.document.clips.single().speed).isEqualTo(2.5f)
+        assertThat(model.state.value.history)
+            .isEqualTo(HistoryState.Ready(canUndo = true, canRedo = false, topLabel = "Speed"))
+        assertThat(model.state.value.tool).isEqualTo(ToolState.Idle)
+
+        // One entry, so one undo puts the clip back where the drag started.
+        model.onIntent(EditorIntent.Undo)
+        assertThat(model.state.value.document.clips.single().speed).isEqualTo(1f)
+    }
+
+    @Test
+    fun `starting an adjust selects the clip it is about`() = runTest(dispatcher) {
+        val (model, clipIds) = importedClips(video())
+
+        model.onIntent(EditorIntent.BeginAdjust(clipIds[0], ClipAdjustment.VOLUME))
+
+        assertThat(model.state.value.selection).isEqualTo(Selection.Clip(clipIds[0]))
+        assertThat(model.state.value.tool)
+            .isEqualTo(ToolState.Adjusting(clipIds[0], ClipAdjustment.VOLUME))
+    }
+
+    @Test
+    fun `abandoning a drag rolls the clip back and adds no entry`() = runTest(dispatcher) {
+        val (model, clipIds) = importedClips(video())
+        val historyBefore = model.state.value.history
+
+        model.onIntent(EditorIntent.BeginAdjust(clipIds[0], ClipAdjustment.VOLUME))
+        model.onIntent(EditorIntent.UpdateAdjust(0.2f))
+        model.onIntent(EditorIntent.CancelAdjust)
+
+        assertThat(model.state.value.document.clips.single().volume).isEqualTo(1f)
+        assertThat(model.state.value.history).isEqualTo(historyBefore)
+        assertThat(model.state.value.tool).isEqualTo(ToolState.Idle)
+    }
+
+    @Test
+    fun `a drag that never moves the control changes nothing`() = runTest(dispatcher) {
+        val (model, clipIds) = importedClips(video())
+        val historyBefore = model.state.value.history
+
+        model.onIntent(EditorIntent.BeginAdjust(clipIds[0], ClipAdjustment.MUTE))
+        model.onIntent(EditorIntent.EndAdjust)
+
+        // The finger went down and up on a control it did not move: recording a "Mute" entry there
+        // would give the user an undo button that appears to do nothing.
+        assertThat(model.state.value.history).isEqualTo(historyBefore)
+        assertThat(model.state.value.document.clips.single().muted).isFalse()
+    }
+
+    @Test
+    fun `an update with no drag in flight is ignored`() = runTest(dispatcher) {
+        val (model, _) = importedClips(video())
+        val before = model.state.value
+
+        model.onIntent(EditorIntent.UpdateAdjust(3f))
+
+        assertThat(model.state.value.document).isEqualTo(before.document)
+    }
+
+    @Test
+    fun `an adjust on a clip the document does not have never starts`() = runTest(dispatcher) {
+        val (model, _) = importedClips(video())
+
+        model.onIntent(EditorIntent.BeginAdjust("nope", ClipAdjustment.SPEED))
+
+        assertThat(model.state.value.tool).isEqualTo(ToolState.Idle)
     }
 
     private fun HistoryState.topLabelOrNull(): String? = (this as? HistoryState.Ready)?.topLabel

@@ -11,6 +11,7 @@ import com.redcut.core.media.MediaSourceReader
 import com.redcut.core.media.PreviewFrames
 import com.redcut.core.media.SourceReadResult
 import com.redcut.domain.document.Clip
+import com.redcut.domain.document.ClipAdjustment
 import com.redcut.domain.document.ClipEdge
 import com.redcut.domain.document.CompoundCommand
 import com.redcut.domain.document.CutTool
@@ -20,6 +21,7 @@ import com.redcut.domain.document.ImportRejection
 import com.redcut.domain.document.ReorderClip
 import com.redcut.domain.document.TrimClip
 import com.redcut.domain.document.UndoStack
+import com.redcut.domain.document.adjust
 import com.redcut.domain.document.commandFor
 import com.redcut.domain.document.planImport
 import com.redcut.domain.document.steppedPlayheadUs
@@ -107,14 +109,73 @@ class EditorViewModel @Inject constructor(
 
             is EditorIntent.UpdateTrim -> updateTrim(intent.sourceTimeUs)
 
-            EditorIntent.EndTrim -> endTrim()
+            EditorIntent.EndTrim, EditorIntent.EndAdjust -> endGesture()
 
-            EditorIntent.CancelTrim -> cancelTrim()
+            EditorIntent.CancelTrim, EditorIntent.CancelAdjust -> cancelGesture()
 
             is EditorIntent.ApplyCut -> applyCut(intent.tool)
 
             is EditorIntent.ApplyReorder -> applyReorder(intent.clipId, intent.toIndex)
+
+            is EditorIntent.BeginAdjust -> beginAdjust(intent.clipId, intent.adjustment)
+            is EditorIntent.UpdateAdjust -> updateAdjust(intent.value)
         }
+    }
+
+    /**
+     * Marks a control as being dragged, and selects its clip.
+     *
+     * No command is previewed yet: a drag that has not moved the slider has not changed anything, and
+     * previewing the value it already has would put a no-op on the history the moment the finger went
+     * down. The first [updateAdjust] is what starts the preview.
+     */
+    private fun beginAdjust(clipId: String, adjustment: ClipAdjustment) {
+        if (history.current.clipById(clipId) == null) return
+        logger.d(TAG, "adjust ${adjustment.name.lowercase()} of $clipId")
+        _state.value = _state.value.copy(
+            tool = ToolState.Adjusting(clipId, adjustment),
+            selection = Selection.Clip(clipId),
+        )
+        publish()
+    }
+
+    /**
+     * One frame of a slider drag: preview, so the document — and therefore the preview and the timeline —
+     * follows the finger, and `UndoStack` collapses the whole drag into a single entry on commit.
+     */
+    private fun updateAdjust(value: Float) {
+        val adjusting = (_state.value.tool as? ToolState.Adjusting) ?: return
+        val command = history.current
+            .adjust(adjusting.clipId, adjusting.adjustment, value) ?: return
+        history.preview(command)
+        publish()
+    }
+
+    /**
+     * Ends whichever gesture is open: a trim drag or a slider drag, committing it as ONE entry.
+     *
+     * One function for both because the lifecycle is the same one — a preview is open, the finger has
+     * lifted, and what the document holds right now becomes the edit. The undo label comes from the
+     * command that was previewed, so nothing here needs to know WHICH gesture it is closing; and a
+     * gesture that never moved anything commits nothing, because `UndoStack` refuses to record a
+     * command that changed nothing.
+     */
+    private fun endGesture() {
+        if (_state.value.tool is ToolState.Idle) return
+        history.commit()
+        _state.value = _state.value.copy(tool = ToolState.Idle)
+        publish()
+    }
+
+    /**
+     * Abandons whichever gesture is open: the document goes back to what it held before the finger went
+     * down. The same pairing as [endGesture], and for the same reason.
+     */
+    private fun cancelGesture() {
+        if (_state.value.tool is ToolState.Idle) return
+        history.abortPreview()
+        _state.value = _state.value.copy(tool = ToolState.Idle)
+        publish()
     }
 
     /**
@@ -244,28 +305,6 @@ class EditorViewModel @Inject constructor(
         // whatever the last preview put there.
         history.preview(trimCommandFor(clip, trimming.edge, sourceTimeUs))
         _state.value = _state.value.copy(tool = trimming.copy(sourceTimeUs = sourceTimeUs))
-        publish()
-    }
-
-    /** The finger lifted: the preview becomes one undo entry, and the tool goes idle. */
-    private fun endTrim() {
-        if (_state.value.tool !is ToolState.Trimming) return
-        history.commit()
-        _state.value = _state.value.copy(tool = ToolState.Idle)
-        publish()
-    }
-
-    /**
-     * The gesture was abandoned.
-     *
-     * The document goes back to what it was before the finger landed — the whole point of previewing
-     * rather than executing: a trim cancelled by a system interruption must leave no trace, and must
-     * not leave an undo entry that appears to do nothing.
-     */
-    private fun cancelTrim() {
-        if (_state.value.tool !is ToolState.Trimming) return
-        history.abortPreview()
-        _state.value = _state.value.copy(tool = ToolState.Idle)
         publish()
     }
 

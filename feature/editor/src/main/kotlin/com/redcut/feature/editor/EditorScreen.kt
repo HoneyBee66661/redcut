@@ -147,6 +147,13 @@ internal fun EditorScreen(
             CutTools(state = state, onIntent = onIntent)
         }
 
+        // The Edit stage's controls (task 2.1). Shown only in the Edit stage: the Cut tools belong to
+        // cutting, and speed sliders under a cut gesture would be controls for something the user is not
+        // doing. The stage is already the screen's own state, so no new plumbing.
+        if (state.stage == Stage.Edit) {
+            Inspector(state = state, onIntent = onIntent)
+        }
+
         // Frame-stepping sits with the timeline rather than with the Cut tools: it moves the PLAYHEAD,
         // so it is useful in every stage, and FR-2.9's whole purpose is to place the playhead exactly
         // before another tool acts on it.

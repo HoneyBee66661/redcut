@@ -144,6 +144,19 @@ class ClipAdjustmentTest {
     }
 
     @Test
+    fun `a slider's bounds are the ranges the commands clamp to`() {
+        // The inspector builds a row per control, and a row whose bounds disagreed with the command by a
+        // decimal would display a value the document never holds. The fade ceiling is the spec's 3 s; the
+        // command clamps further against the clip, which is asserted in AdjustCommandsTest.
+        assertThat(ClipAdjustment.SPEED.range).isEqualTo(ClipRanges.SPEED_MIN..ClipRanges.SPEED_MAX)
+        assertThat(
+            ClipAdjustment.VOLUME.range,
+        ).isEqualTo(ClipRanges.VOLUME_MIN..ClipRanges.VOLUME_MAX)
+        assertThat(ClipAdjustment.FADE_IN.range).isEqualTo(0f..ClipRanges.FADE_MAX_MS.toFloat())
+        assertThat(ClipAdjustment.FADE_OUT.range).isEqualTo(0f..ClipRanges.FADE_MAX_MS.toFloat())
+    }
+
+    @Test
     fun `a switch reports itself as one, and the sliders do not`() {
         assertThat(ClipAdjustment.MUTE.isSwitch).isTrue()
         assertThat(ClipAdjustment.REVERSE.isSwitch).isTrue()

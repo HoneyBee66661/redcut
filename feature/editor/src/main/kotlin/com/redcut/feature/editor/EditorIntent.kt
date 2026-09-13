@@ -1,5 +1,6 @@
 package com.redcut.feature.editor
 
+import com.redcut.domain.document.ClipAdjustment
 import com.redcut.domain.document.ClipEdge
 import com.redcut.domain.document.CutTool
 import com.redcut.domain.document.FrameStep
@@ -114,6 +115,23 @@ sealed interface EditorIntent {
      * one tap to take back.
      */
     data class ApplyReorder(val clipId: String, val toIndex: Int) : Edit
+
+    /**
+     * Start adjusting a clip control (FR-3.1–3.4, 3.9).
+     *
+     * Also selects the clip, because a slider and its selection are the same thought: the user reached
+     * for the control of the clip they are looking at, and the inspector draws from the selection.
+     */
+    data class BeginAdjust(val clipId: String, val adjustment: ClipAdjustment) : Edit
+
+    /** A slider's new value, mid-drag. */
+    data class UpdateAdjust(val value: Float) : Edit
+
+    /** The drag ended: the preview becomes ONE undoable entry, not one per frame. */
+    data object EndAdjust : Edit
+
+    /** The drag was abandoned (a second finger, a system interruption): the preview is rolled back. */
+    data object CancelAdjust : Edit
 
     /**
      * Dismiss the import report (FR-1.4).

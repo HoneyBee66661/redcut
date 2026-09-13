@@ -113,8 +113,12 @@ internal fun DrawScope.drawTimeline(
     // lane — a taller screen should show more track, not a taller clip. It also stops the playhead's 3×
     // height from growing with the window until it crosses the whole screen.
     val track = Track(top = rulerHeight, height = layer.geometry.trackHeightPx)
+    // ONE tick selection, drawn twice (UI revision 2, task A3): along the ruler strip, and along each clip's
+    // top edge. Asked for once here rather than by each caller, because "the same ticks" is the requirement —
+    // a clip's marks that came from a second call could only ever be accidentally identical.
+    val ticks = layer.geometry.rulerTicks()
 
-    drawRuler(layer.geometry, rulerHeight, paint.ruler)
+    drawRuler(ticks, layer.geometry, rulerHeight, paint.ruler)
     layer.rects.forEach { rect ->
         drawClip(
             rect = rect,
@@ -124,6 +128,7 @@ internal fun DrawScope.drawTimeline(
             // to know which clip they picked up, and the drag has not selected it yet.
             selected = marks.selectedClipId == rect.clipId || marks.draggedClipId == rect.clipId,
             draggedEdge = marks.draggedEdge?.takeIf { marks.trimmedClipId == rect.clipId },
+            topTicks = layer.geometry.ticksForClipTop(ticks, rect),
             geometry = layer.geometry,
             track = track,
             paint = paint,
@@ -136,9 +141,19 @@ internal fun DrawScope.drawTimeline(
     drawPlayhead(layer.geometry, track, marks.playheadUs, paint.playhead)
 }
 
-/** Ruler ticks. */
-internal fun DrawScope.drawRuler(geometry: TimelineGeometry, rulerHeight: Float, color: Color) {
-    geometry.rulerTicks().forEach { tickUs ->
+/**
+ * Ruler ticks.
+ *
+ * [ticks] comes in rather than being asked for here, because the selection is shared with the marks drawn on
+ * each clip's top edge ([drawClipTopTicks]): one selection, two drawings.
+ */
+internal fun DrawScope.drawRuler(
+    ticks: List<Long>,
+    geometry: TimelineGeometry,
+    rulerHeight: Float,
+    color: Color,
+) {
+    ticks.forEach { tickUs ->
         val x = geometry.pxFor(tickUs) - geometry.visibleStartPx
         drawLine(
             color = color,
@@ -161,6 +176,7 @@ internal fun DrawScope.drawClip(
     images: Map<ThumbnailKey, ImageBitmap>,
     selected: Boolean,
     draggedEdge: ClipEdge?,
+    topTicks: List<Long>,
     geometry: TimelineGeometry,
     track: Track,
     paint: TimelinePaint,
@@ -195,9 +211,40 @@ internal fun DrawScope.drawClip(
                 size = Size(rect.widthPx, SELECTION_STRIPE_PX),
             )
         }
+        // After the selection stripe rather than under it: the clip being cut is usually the selected one, and
+        // a time reference that disappears exactly then is the one case the user asked for it in.
+        drawClipTopTicks(topTicks, geometry, track, paint.ruler)
         // The edge being dragged, drawn INSIDE the clip's own clipping: the moment a trim shortens a
         // clip to nothing, its edge line would otherwise scribble over the neighbour.
         draggedEdge?.let { edge -> drawTrimEdge(edge, left, rect.widthPx, track, paint) }
+    }
+}
+
+/**
+ * The ruler's ticks, repeated along a clip's TOP EDGE (UI revision 2, task A3).
+ *
+ * The user: *"beri ruler indikator waktu juga di top clip untuk memudahkan cut ops dan keyframing"* — a cut
+ * point has to be readable against a time where the cut is made, not only in the strip above the body. The
+ * marks ARE the ruler's ([TimelineGeometry.ticksForClipTop]), so the two readings are the same time at the
+ * same pixel, and zooming in tightens both together.
+ *
+ * Short marks rather than full-height lines: what is under them is the clip the user is looking at, and a
+ * line across it would compete with the two edges a trim drags.
+ */
+private fun DrawScope.drawClipTopTicks(
+    ticks: List<Long>,
+    geometry: TimelineGeometry,
+    track: Track,
+    color: Color,
+) {
+    ticks.forEach { tickUs ->
+        val x = geometry.pxFor(tickUs) - geometry.visibleStartPx
+        drawLine(
+            color = color,
+            start = Offset(x, track.top),
+            end = Offset(x, track.top + CLIP_TOP_TICK_PX),
+            strokeWidth = RULER_TICK_WIDTH_PX,
+        )
     }
 }
 
@@ -291,6 +338,8 @@ internal fun DrawScope.drawPlayhead(
 private const val RULER_TICK_WIDTH_PX = 1f
 private const val SELECTION_BORDER_PX = 3f
 private const val SELECTION_STRIPE_PX = 6f
+/** How far a clip's top-edge tick reaches down the clip (task A3). A mark, not a division. */
+private const val CLIP_TOP_TICK_PX = 6f
 private const val PLAYHEAD_WIDTH_PX = 3f
 
 /** UI revision 1: the line reaches three track-heights down, so it reads over the filmstrip. */

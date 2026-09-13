@@ -377,6 +377,22 @@ data class TimelineGeometry(
     }
 
     /**
+     * The ruler's ticks that land on one clip, in microseconds (UI revision 2, task A3).
+     *
+     * The user: *"beri ruler indikator waktu juga di top clip untuk memudahkan cut ops dan keyframing"* — the
+     * time reference has to be readable where the cut is made, not only in the strip above the body. The
+     * marks on a clip are the RULER's ticks, filtered to the clip's own span, rather than a ladder of their
+     * own: a second answer to "how often is often enough" is a second ladder to keep in step, and the two
+     * would drift apart the first time one of them changed. Reusing it is also what makes the two readings
+     * comparable — zooming in crowds the marks on the clip in exactly the step it crowds the strip above it.
+     *
+     * A tick on the boundary two adjacent clips share is returned by BOTH, deliberately: that is one pixel
+     * drawn twice, which nobody can see, instead of a rule about which neighbour owns a shared instant.
+     */
+    fun ticksForClipTop(ticks: List<Long>, rect: ClipRect): List<Long> =
+        ticks.filter { pxFor(it) in rect.startPx..rect.endPx }
+
+    /**
      * The first multiple of [intervalUs] at or after [us].
      *
      * Rounded UP, so the first tick is drawn just inside the left edge rather than one interval

@@ -1,66 +1,169 @@
 package com.redcut.feature.home
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 
-/**
- * The project list (FR-6.1–6.4, Phase 4.7).
- *
- * Stateless and callback-driven on purpose: it receives where to go and does not know
- * what an editor is, which is what makes "features never depend on each other"
- * (spec §4.1 rule 2) a compile-time fact rather than a convention. Every navigation in
- * this app passes through `:app`.
- *
- * The empty state is the only state, and says so: there is no project storage yet, so
- * "No projects" is not a loading artefact — it is the truth, and naming the phase that
- * changes it is more useful to the next reader than a spinner.
- */
+/** Thumbnail aspect ratio for the project cards: 16:9. */
+private const val THUMBNAIL_ASPECT_RATIO = 16f / 9f
+
 @Composable
 fun HomeScreen(onOpenEditor: () -> Unit, onOpenSettings: () -> Unit) {
-    Column(modifier = Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
+    // Temporary fake data.
+    // Replace this with your project repository/state later.
+    val projects = listOf(
+        ProjectPlaceholder("Project 01", "2 days ago"),
+        ProjectPlaceholder("Project 02", "Yesterday"),
+        ProjectPlaceholder("Project 03", "5 days ago"),
+        ProjectPlaceholder("Project 04", "Last week"),
+        ProjectPlaceholder("Project 05", "Last week"),
+        ProjectPlaceholder("Project 06", "2 weeks ago"),
+    )
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp),
+    ) {
+        // ─────────────────────────────
+        // Header
+        // ─────────────────────────────
+        HomeHeader(onOpenSettings = onOpenSettings)
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // ─────────────────────────────
+        // New Project Button
+        // ─────────────────────────────
+        Button(
+            onClick = onOpenEditor,
+            modifier = Modifier.fillMaxWidth(),
         ) {
-            Text(text = "RedCut", style = MaterialTheme.typography.headlineSmall)
-            Box(modifier = Modifier.weight(1f))
-            TextButton(onClick = onOpenSettings) { Text("Settings") }
+            Icon(
+                imageVector = Icons.Default.Add,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+            )
+
+            Spacer(modifier = Modifier.size(8.dp))
+
+            Text("Open New Project")
         }
 
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(24.dp),
-            contentAlignment = Alignment.Center,
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // ─────────────────────────────
+        // Project section
+        // ─────────────────────────────
+        Text(
+            text = "Projects",
+            style = MaterialTheme.typography.titleLarge,
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // ─────────────────────────────
+        // Project Grid
+        // ─────────────────────────────
+        LazyVerticalGrid(
+            columns = GridCells.Adaptive(minSize = 150.dp),
+            modifier = Modifier.fillMaxSize(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+            items(projects) { project ->
+                ProjectCard(project)
+            }
+        }
+    }
+}
+
+@Composable
+private fun HomeHeader(onOpenSettings: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "RedCut",
+            style = MaterialTheme.typography.headlineSmall,
+        )
+
+        Spacer(modifier = Modifier.weight(1f))
+
+        IconButton(onClick = onOpenSettings) {
+            Icon(
+                imageVector = Icons.Default.Settings,
+                contentDescription = "Settings",
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProjectCard(project: ProjectPlaceholder) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column {
+            // Temporary thumbnail
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(THUMBNAIL_ASPECT_RATIO)
+                    .background(
+                        MaterialTheme.colorScheme.surfaceVariant,
+                    ),
+                contentAlignment = Alignment.Center,
             ) {
-                Text(text = "No projects yet", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    text = "Importing media lands with the Cut stage (Phase 1.3); project " +
-                        "storage, rename and autosave with Phase 4.7.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    textAlign = TextAlign.Center,
+                    text = "THUMBNAIL",
+                    style = MaterialTheme.typography.labelLarge,
                 )
-                Button(onClick = onOpenEditor) { Text("Open the editor") }
+            }
+
+            Column(
+                modifier = Modifier.padding(12.dp),
+            ) {
+                Text(
+                    text = project.name,
+                    style = MaterialTheme.typography.titleMedium,
+                )
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Text(
+                    text = project.date,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }

@@ -1,7 +1,10 @@
 package com.redcut.feature.editor
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -13,14 +16,16 @@ import com.redcut.domain.document.ViewportRect
 import com.redcut.domain.document.snappedToCentre
 
 /**
- * Preview viewport gesture handling (spec UI revision 2, §WS F / Task F3).
+ * Preview viewport gesture handling and rect overlay (spec UI revision 2, §WS F / Tasks F3-F4).
  *
  * User's requirement (§1 row 12):
  * "zoom visual hanya pada area top 50% screen dengan catatan, clip sedang diselect.
  *  ada juga snap vertical horizontal center"
  *
  * Provides pinch-to-zoom (about the rect centre) and drag-to-pan gestures over the
- * preview stage. When no clip is selected, gestures are completely inert.
+ * preview stage. Renders the viewport rect outline and snap guide lines over the preview
+ * frame when a clip is selected. When no clip is selected, gestures and overlay are completely
+ * inert and invisible.
  */
 @Composable
 internal fun EditorViewport(
@@ -39,16 +44,47 @@ internal fun EditorViewport(
         } ?: ViewportRect(canvasSpec = state.document.canvas)
     }
 
+    var currentRect by remember(initialRect) { mutableStateOf(initialRect) }
+
     Box(
         modifier = modifier.viewportGestures(
             enabled = isClipSelected,
             initialRect = initialRect,
             onViewportChange = { rect ->
+                currentRect = rect
                 onIntent(EditorIntent.SetViewport(rect.centerX, rect.centerY, rect.zoom))
             },
         ),
     ) {
         content()
+        if (isClipSelected) {
+            ViewportOverlay(
+                rect = currentRect,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+    }
+}
+
+/**
+ * Overlay rendering the viewport rectangle outline and snap lines over the preview.
+ */
+@Composable
+internal fun ViewportOverlay(
+    rect: ViewportRect,
+    modifier: Modifier = Modifier,
+) {
+    val colors = MaterialTheme.colorScheme
+    val paint = remember(colors) {
+        ViewportPaint(
+            rectBorder = colors.primary,
+            cornerHandle = colors.primary,
+            snapLine = colors.tertiary,
+        )
+    }
+
+    Canvas(modifier = modifier) {
+        drawViewportOverlay(rect = rect, paint = paint)
     }
 }
 

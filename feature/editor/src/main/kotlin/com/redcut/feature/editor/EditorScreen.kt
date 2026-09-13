@@ -132,7 +132,6 @@ internal fun EditorScreen(
             state = state,
             onIntent = onIntent,
             onImportClick = onImportClick,
-            onIntent = onIntent,
             onBack = onBack,
             onPreviewFrame = onPreviewFrame,
             onThumbnail = onThumbnail,

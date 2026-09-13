@@ -83,7 +83,6 @@ internal fun ColumnScope.PreviewHalf(
     state: EditorUiState,
     onIntent: (EditorIntent) -> Unit,
     onImportClick: () -> Unit,
-    onIntent: (EditorIntent) -> Unit,
     onBack: () -> Unit,
     onPreviewFrame: suspend (uri: String, positionUs: Long) -> ImageBitmap?,
     onThumbnail: suspend (sourceId: String, uri: String, positionUs: Long) -> ImageBitmap?,

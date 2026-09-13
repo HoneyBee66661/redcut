@@ -9,15 +9,19 @@ import com.redcut.feature.editor.EditorIntent
 import org.junit.Test
 
 /**
- * What a tap on the timeline means (device pass, second round).
+ * What a tap on the timeline means (device pass, third round).
  *
- * The rule is stateful, and that is the whole reason it is tested here rather than left to the device:
- * **the first tap on a clip selects it; a tap on the already selected clip seeks**. Getting it wrong is
- * not a crash — it is an editor where selecting a clip also moves the playhead somewhere the user did not
- * ask for, which is the kind of thing that reads as "this app is twitchy" rather than as a bug report.
+ * The rule is a TOGGLE — **tap selects, tap again deselects** — and it is tested here rather than left to
+ * the device because the two ways to get it wrong are both quiet: a toggle that never deselects leaves the
+ * user unable to tell the editor "nothing is selected", and one that toggles on the wrong clip means the
+ * inspector silently switches documents under them.
  *
- * `onTimelineTap` is a plain function over the geometry and a callback, so it can be tested with no
- * Compose runtime and no finger: the intents it emits ARE the behaviour.
+ * The rule only exists in this shape because the playhead is now FIXED: the previous round's tap-seek is
+ * gone, since scrolling is what moves the playhead, and a tap that does not seek is a tap whose only job is
+ * selection.
+ *
+ * `onTimelineTap` is a plain function over the geometry and a callback, so it can be tested with no Compose
+ * runtime and no finger: the intents it emits ARE the behaviour.
  */
 class TimelineTapTest {
 
@@ -39,43 +43,42 @@ class TimelineTapTest {
     }
 
     @Test
-    fun `the first tap on an unselected clip selects it, and does not move the playhead`() {
+    fun `a tap on an unselected clip selects it`() {
         // 30 px is the middle of clip-0, which is a body at this width (a third per side reaches 20 px).
-        val intents = intentsFor(30f, selectedClipId = null)
-
-        assertThat(intents).containsExactly(EditorIntent.SelectClip("clip-0"))
+        assertThat(intentsFor(30f, selectedClipId = null))
+            .containsExactly(EditorIntent.SelectClip("clip-0"))
     }
 
     @Test
-    fun `a tap on the already selected clip seeks to that point`() {
-        val intents = intentsFor(30f, selectedClipId = "clip-0")
-
-        assertThat(intents).containsExactly(EditorIntent.SetPlayhead(500_000L))
+    fun `a tap on the selected clip deselects it, and touches nothing else`() {
+        // The toggle, and the reason the timeline needs one: without it there is no way to tell the editor
+        // that nothing is selected, so the inspector keeps editing a clip the user has moved on from.
+        assertThat(intentsFor(30f, selectedClipId = "clip-0"))
+            .containsExactly(EditorIntent.ClearSelection)
     }
 
     @Test
-    fun `tapping a DIFFERENT clip selects it instead of seeking in it`() {
-        // The state is per clip, not "has the user tapped anything yet": tapping the other clip is a
-        // selection, and the playhead stays where it was.
-        val intents = intentsFor(90f, selectedClipId = "clip-0")
-
-        assertThat(intents).containsExactly(EditorIntent.SelectClip("clip-1"))
+    fun `tapping a different clip selects it rather than deselecting anything`() {
+        // The decision is per clip, not "is something selected": tapping clip-1 while clip-0 is selected is a
+        // selection, not a toggle off.
+        assertThat(intentsFor(90f, selectedClipId = "clip-0"))
+            .containsExactly(EditorIntent.SelectClip("clip-1"))
     }
 
     @Test
     fun `a tap past the last clip clears the selection`() {
-        val intents = intentsFor(380f, selectedClipId = "clip-0")
-
-        assertThat(intents).containsExactly(EditorIntent.ClearSelection)
+        assertThat(intentsFor(380f, selectedClipId = "clip-0"))
+            .containsExactly(EditorIntent.ClearSelection)
     }
 
     @Test
-    fun `a tap on an edge seeks, whichever clip is selected`() {
+    fun `an edge taps like a body, so the toggle works from anywhere on a clip`() {
         // 5 px is inside clip-0's left edge zone (a third of 60 px is 20). The trim detector hands a
-        // no-movement edge press here, and an edge is a position, not a selection.
+        // no-movement edge press here, and a tap that selects from the body but does nothing from the edge
+        // is a dead strip the width of the edge target.
         assertThat(intentsFor(5f, selectedClipId = null))
-            .containsExactly(EditorIntent.SetPlayhead(83_333L))
+            .containsExactly(EditorIntent.SelectClip("clip-0"))
         assertThat(intentsFor(5f, selectedClipId = "clip-0"))
-            .containsExactly(EditorIntent.SetPlayhead(83_333L))
+            .containsExactly(EditorIntent.ClearSelection)
     }
 }

@@ -65,3 +65,28 @@ expensive to discover late.
 * **Play / pause**: with the preview being a still frame at the playhead (Phase 1.11's state), play has
   nothing to play yet. The button's place in the layout is real; its behaviour arrives with the
   composition player.
+
+## 3. Timeline selection and the + buttons (third round, after the fixed playhead landed)
+
+The user's words: *"karena playhead fixed, assumin ada 1 clip body active, touch on body = select clip body.
+touch 2 = unselect it."* And then the three affordances that add material:
+
+* **A "+" at the tail of the active clip**: adds a clip merged at the tail (an import that lands where the
+  active clip ends).
+* **A "+" below the clip body**: adds an EMPTY track, whose type the user picks — video, audio, overlay,
+  effect.
+* **A "+" inside an empty track**: imports a file into that track.
+
+### Two consequences worth stating before the code
+
+1. **The tap rule becomes a toggle, and the seek rule dies.** The previous round had "first tap selects, a
+   tap on the selected clip seeks". With the playhead fixed there is nothing for a tap to seek TO: scrolling
+   moves the tracks under the line, so a tap's only remaining job is selection — and a control that only
+   changes selection is a toggle. This is a simplification, not a swap.
+2. **"Tracks" means the document model grows a level.** Today `EditDocument` holds one flat `clips` list and
+   the timeline draws one track. Empty tracks typed as video/audio/overlay/effect mean `tracks: List<Track>`,
+   each with its own clips, and an effect track whose contents are not clips at all. That is a schema change
+   — the first one since the document was defined — so it needs a `schemaVersion` bump, a migration (or an
+   explicit refusal to open a newer file, which Phase 4.7 already owes), and it touches the render graph,
+   the compiler, and every place that assumes `clips`. It is the largest single item on this list and it
+   should be sequenced as its own phase rather than folded into the layout work.

@@ -87,17 +87,17 @@ internal class TimelineGestures(
 /**
  * What a tap means, in one place.
  *
- * ### The rule, and why it is stateful (device pass, second round)
+ * ### The rule, and why it became a TOGGLE (device pass, third round)
  *
- * **The first tap on a clip selects it; a tap on the ALREADY selected clip seeks to that point.** The
- * user's model, verbatim: *"tap pertama di body timeline = select jika unselected; tap kedua atau kondisi
- * selected pindahin playhead ke touch point"*. The reason it is worth a state rather than a single
- * behaviour: the two intents are different acts — one says "this is the clip I am working on", the other
- * says "look here" — and doing both on every tap means a user who only wanted to select has also moved
- * the playhead somewhere they did not ask for.
+ * **A tap on a clip selects it; a tap on the already selected clip deselects it.** The user's model,
+ * verbatim: *"touch on body = select clip body. touch 2 = unselect it"*.
  *
- * A tap on an edge seeks (the trim detector passes a no-movement edge press here), and a tap past the
- * clips clears the selection. [selectedClipId] is what makes the body branch stateful.
+ * This replaces the seek-on-second-tap rule of the previous round, and the replacement is the point of the
+ * fixed playhead: a tap no longer has to move the playhead, because SCROLLING does that — the tracks move
+ * under the line. With seeking gone from the tap, all the tap has left to do is change what is selected,
+ * and a control that only changes selection is a toggle.
+ *
+ * An edge taps the same way as the body. Empty space past the clips clears the selection.
  */
 internal fun onTimelineTap(
     screenX: Float,
@@ -105,17 +105,17 @@ internal fun onTimelineTap(
     onIntent: (EditorIntent) -> Unit,
     selectedClipId: String? = null,
 ) {
-    when (val hit = geometry.hitTest(screenX)) {
-        is TimelineHit.Body -> {
-            if (hit.clipId == selectedClipId) {
-                onIntent(EditorIntent.SetPlayhead(geometry.usFor(geometry.contentPxFor(screenX))))
-            } else {
-                onIntent(EditorIntent.SelectClip(hit.clipId))
-            }
-        }
-        is TimelineHit.Edge ->
-            onIntent(EditorIntent.SetPlayhead(geometry.usFor(geometry.contentPxFor(screenX))))
-        TimelineHit.None -> onIntent(EditorIntent.ClearSelection)
+    val hit = geometry.hitTest(screenX)
+    val tapped = when (hit) {
+        is TimelineHit.Body -> hit.clipId
+        is TimelineHit.Edge -> hit.clipId
+        TimelineHit.None -> null
+    }
+
+    when (tapped) {
+        null -> onIntent(EditorIntent.ClearSelection)
+        selectedClipId -> onIntent(EditorIntent.ClearSelection)
+        else -> onIntent(EditorIntent.SelectClip(tapped))
     }
 }
 

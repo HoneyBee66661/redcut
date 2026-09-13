@@ -16,6 +16,7 @@ android {
 }
 
 dependencies {
+    implementation(project(":domain:project"))
     implementation(project(":core:common"))
     implementation(project(":core:ui"))
     implementation(project(":domain:document"))

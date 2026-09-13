@@ -115,4 +115,24 @@ data class SetReverse(val clipId: String, val reverse: Boolean) : EditCommand {
     }
 }
 
+/**
+ * FR-6.x's project name, as a command.
+ *
+ * A command rather than a direct write to the document, because the name is part of what the user's
+ * project IS — and because the editor names a project at the moment it first has content: the rename is
+ * prepended to the import's own command list, so the whole act ("import these files, and this project is
+ * called untitled 2") lands as ONE undoable entry with the label the user understands.
+ *
+ * A blank name is refused rather than stored: a project with no name is a project the user cannot find
+ * in a list, and the honest answer to "call it nothing" is to keep the name it had.
+ */
+data class RenameDocument(val name: String) : EditCommand {
+    override val label: String get() = "Rename"
+
+    override fun apply(doc: EditDocument): EditDocument {
+        val trimmed = name.trim()
+        return if (trimmed.isEmpty() || trimmed == doc.name) doc else doc.copy(name = trimmed)
+    }
+}
+
 private const val MICROS_PER_MILLI = 1_000L

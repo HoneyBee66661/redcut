@@ -4,16 +4,16 @@
 // types: the implementation needs DataStore and a Context, so it lives in :app.
 // Keeping the format here is what makes schemaVersion migrations testable in
 // milliseconds instead of on a device (Phase 4.7, FR-6.x).
-//
-// SKELETON: Phase 0.2 creates the module boundary only — an empty source set and
-// the serialization toolchain it will need. Phase 4.7 populates it together with
-// the migration tests. Nothing depends on it yet, which is why it is safe to land
-// as a boundary first and a body later.
 plugins {
     id("redcut.jvm.library")
     alias(libs.plugins.kotlin.serialization)
 }
 
 dependencies {
+    // api, not implementation: a SavedProject EMBEDS an EditDocument, so a consumer that receives one
+    // has to be able to name its type. `implementation` would compile here and fail at the first
+    // `project.document.clips` in :feature:editor.
+    api(project(":domain:document"))
+
     implementation(libs.kotlinx.serialization.json)
 }

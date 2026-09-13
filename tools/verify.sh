@@ -49,7 +49,7 @@ ROOT="$PWD"
 QUALITY_TASKS=(ktlintCheck detekt)
 
 # Keep in step with the `domain-tests` job in .github/workflows/ci.yml.
-PURE_TIER_TASKS=(:domain:document:test :domain:render:test :core:common:test)
+PURE_TIER_TASKS=(:domain:document:test :domain:render:test :domain:project:test :core:common:test)
 
 # §12.1's target is 5 s; this is the ceiling CI enforces on the same numbers, and it
 # is a floor on usefulness rather than a target. Raise it only with a measurement in

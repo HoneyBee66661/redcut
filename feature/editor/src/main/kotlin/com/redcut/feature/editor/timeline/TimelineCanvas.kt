@@ -110,6 +110,9 @@ internal fun TimelineCanvas(
         setScrollPx = { scrollPx = it },
         setZoomPxPerSecond = { zoomPxPerSecond = it },
         reorder = reorderGestures,
+        // The tap rule is stateful: the first tap on a clip selects it, and a tap on the already
+        // selected clip seeks (device pass, second round).
+        selectedClipId = (selection as? Selection.Clip)?.clipId,
     )
 
     Canvas(

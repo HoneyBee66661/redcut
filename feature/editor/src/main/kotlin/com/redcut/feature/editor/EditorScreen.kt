@@ -25,6 +25,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.redcut.core.media.PreviewRenderer
 import com.redcut.domain.document.CutAvailability
 import com.redcut.domain.document.CutTool
 import com.redcut.domain.document.availabilityFor
@@ -76,6 +77,10 @@ fun EditorRoute(
 
     EditorScreen(
         state = state,
+        // The renderer is handed to the screen, not built by it: the UI holds the INTERFACE (§6.8 rule
+        // D6) and `:app` decided which implementation it is, so no composable here can name a Media3
+        // type even by accident.
+        renderer = viewModel.previewRenderer,
         onIntent = viewModel::onIntent,
         onImportClick = { pickMedia.launch(VIDEO_MIME_TYPES) },
         onExport = onExport,
@@ -118,6 +123,7 @@ private val VIDEO_MIME_TYPES = arrayOf("video/*")
 @Composable
 internal fun EditorScreen(
     state: EditorUiState,
+    renderer: PreviewRenderer,
     onIntent: (EditorIntent) -> Unit,
     onImportClick: () -> Unit,
     onExport: () -> Unit,
@@ -131,13 +137,13 @@ internal fun EditorScreen(
         PreviewHalf(
             state = state,
             onIntent = onIntent,
+            renderer = renderer,
             onImportClick = onImportClick,
             onBack = onBack,
             onPreviewFrame = onPreviewFrame,
-            onThumbnail = onThumbnail,
         )
 
-        TimelineControls(state = state, onIntent = onIntent)
+        TimelineControls(state = state, renderer = renderer, onIntent = onIntent)
 
         TracksSlice(state = state, onIntent = onIntent, onThumbnail = onThumbnail)
 

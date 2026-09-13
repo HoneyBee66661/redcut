@@ -1,11 +1,14 @@
 package com.redcut.feature.editor
 
 import android.graphics.Bitmap
+import android.view.SurfaceView
 import com.google.common.truth.Truth.assertThat
 import com.redcut.core.common.IdSource
 import com.redcut.core.common.logging.NoOpRedcutLogger
 import com.redcut.core.media.MediaSourceReader
 import com.redcut.core.media.PreviewFrames
+import com.redcut.core.media.PreviewRenderer
+import com.redcut.core.media.PreviewState
 import com.redcut.core.media.SourceReadResult
 import com.redcut.core.media.ThumbnailSource
 import com.redcut.core.media.ThumbnailStore
@@ -25,9 +28,12 @@ import com.redcut.domain.project.ProjectStore
 import com.redcut.domain.project.ProjectSummary
 import com.redcut.domain.project.SavedProject
 import com.redcut.domain.project.summary
+import com.redcut.domain.render.RenderGraph
 import com.redcut.feature.editor.timeline.TimelineThumbnails
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -80,6 +86,7 @@ class EditorViewModelTest {
     private fun viewModel(
         reader: MediaSourceReader = RecordingReader(),
         projects: ProjectStore = RecordingProjects(),
+        renderer: PreviewRenderer = RecordingRenderer(),
     ) = EditorViewModel(
         logger = NoOpRedcutLogger,
         sourceReader = reader,
@@ -92,9 +99,39 @@ class EditorViewModelTest {
             ),
             previewFrames = PreviewFrames(source = NoThumbnails, logger = NoOpRedcutLogger),
         ),
+        // The renderer is a PORT like the reader and the store: what these cases assert is the WIRING —
+        // that the playhead reaches it, and where — never that Media3 drew a frame, which no JVM test
+        // can say (that is CI's `testDebugUnitTest` for the compile and a device pass for the pixels).
+        previewRenderer = renderer,
         ids = ids(),
         io = dispatcher,
     )
+
+    /**
+     * The preview renderer, recording what it was asked to do.
+     *
+     * `attach` is deliberately not recorded: which surface and which graph reach the renderer is the
+     * stage's business, and the stage is a composable that this tier cannot exercise.
+     */
+    private class RecordingRenderer : PreviewRenderer {
+
+        /** Every timeline position the renderer was seeked to, in order. */
+        val seeks = mutableListOf<Long>()
+
+        override val state: StateFlow<PreviewState> = MutableStateFlow(PreviewState.Idle)
+
+        override fun attach(surface: SurfaceView, graph: RenderGraph) = Unit
+
+        override fun play() = Unit
+
+        override fun pause() = Unit
+
+        override fun seekTo(us: Long) {
+            seeks += us
+        }
+
+        override fun release() = Unit
+    }
 
     /**
      * The project store, in memory.
@@ -416,6 +453,55 @@ class EditorViewModelTest {
 
         model.onIntent(EditorIntent.SetPlayhead(-1_000L))
         assertThat(model.state.value.playheadUs).isEqualTo(0L)
+    }
+
+    // --- The preview follows the playhead (FR-2's "correct preview") --------
+
+    @Test
+    fun `a playhead move is sent to the preview as a timeline position`() = runTest(dispatcher) {
+        // The user-visible half of Phase 1's exit criterion: after a trim, a split or a speed change,
+        // the frame under the playhead is the frame the timeline says. What is asserted here is the
+        // WIRING — that a tap and a frame step both reach the renderer, and that what they send is a
+        // TIMELINE position. Which source frame that position means is the graph's answer, and the graph
+        // is what the renderer is attached with (§8.1), so this is the seam the UI owns and no more.
+        val renderer = RecordingRenderer()
+        val model = viewModel(
+            RecordingReader(listOf(video(durationUs = 4_000_000L))),
+            renderer = renderer,
+        )
+        model.onIntent(EditorIntent.ImportMedia(listOf("content://media/1")))
+        advanceUntilIdle()
+        // The import seeks too (it publishes, and the playhead is re-derived there). This case is about
+        // the playhead paths, so the record starts after the document has settled.
+        renderer.seeks.clear()
+
+        model.onIntent(EditorIntent.SetPlayhead(2_000_000L))
+        model.onIntent(EditorIntent.StepPlayhead(FrameStep.FORWARD))
+
+        // The step's exact length is the frame length of the clip under the playhead (FR-2.9) — a number
+        // this test must not restate, or it becomes a second implementation of the rule. So the second
+        // seek is compared against the state the same step produced.
+        assertThat(renderer.seeks.first()).isEqualTo(2_000_000L)
+        assertThat(renderer.seeks.last()).isEqualTo(model.state.value.playheadUs)
+        assertThat(renderer.seeks.last()).isGreaterThan(2_000_000L)
+    }
+
+    @Test
+    fun `a clamped playhead is the position the preview is sent to`() = runTest(dispatcher) {
+        // Not 9 s. A preview sent where the playhead was not allowed to go would show a frame the
+        // timeline does not claim, which is the preview disagreeing with the ruler.
+        val renderer = RecordingRenderer()
+        val model = viewModel(
+            RecordingReader(listOf(video(durationUs = 4_000_000L))),
+            renderer = renderer,
+        )
+        model.onIntent(EditorIntent.ImportMedia(listOf("content://media/1")))
+        advanceUntilIdle()
+        renderer.seeks.clear()
+
+        model.onIntent(EditorIntent.SetPlayhead(9_000_000L))
+
+        assertThat(renderer.seeks).containsExactly(4_000_000L)
     }
 
     @Test

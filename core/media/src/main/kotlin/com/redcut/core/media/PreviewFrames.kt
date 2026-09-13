@@ -6,24 +6,21 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * The frame the preview shows at the playhead (FR-2's "correct preview").
+ * The still the stage shows while a trim edge is dragged (FR-2.1), at the stage's size.
  *
- * ### What this is, and what it deliberately is not
+ * ### Where this sits now that the renderer exists
  *
- * Spec §8.4 describes the preview as a renderer over a `RenderGraph` — `CompositionPlayerRenderer`
- * with an `ExoPlayerRenderer` fallback — because the long-term design is that preview and export share
- * one graph, and parity between them is a test (§12.3). That shape needs the `RenderGraph` →
- * `Composition` mapper and the composition path, which is Phase 4.2's work.
+ * Phase 1.11's other half landed: §8.4's `PreviewRenderer` — `CompositionPlayerRenderer` with an
+ * `ExoPlayerRenderer` fallback — plays the compiled `RenderGraph` onto the stage's `SurfaceView`, so
+ * the frame at the playhead is the player's and never passes through this class. What is left here is
+ * the one question a player cannot answer: **what frame is the trim edge at**. A trim edge is dragged
+ * into media the clip has trimmed away, and those frames are by definition not in the composition
+ * being played — so the still is not a stand-in for the renderer, it is the instrument for a different
+ * picture.
  *
- * Phase 1's exit criterion is narrower: "scrub with correct preview". A scrub shows ONE frame per
- * playhead position, so a still decode is not a shortcut around the renderer — it is what the criterion
- * asks for, and it reuses the pipeline that already exists and is tested: the same
- * `MediaMetadataRetriever` decode as the timeline's thumbnails, behind the same
- * [MediaResourceBroker] semaphore (§9.1), in a cache bounded by bytes (§9.3).
- *
- * What it cannot do is PLAY. Continuous playback across cut points needs a composition, and this class
- * is honest about being one frame at a time — which is why the renderer abstraction in §8.4 is still
- * owed, and is not claimed here.
+ * That still reuses the pipeline that already exists and is tested: the same `MediaMetadataRetriever`
+ * decode as the timeline's thumbnails, behind the same [MediaResourceBroker] semaphore (§9.1), in a
+ * cache bounded by bytes (§9.3).
  *
  * ### Why a bigger frame than a thumbnail
  *
@@ -43,8 +40,11 @@ class PreviewFrames @Inject constructor(
     /**
      * The frame at [positionUs] in [uri], or null when it cannot be decoded.
      *
-     * The URI doubles as the cache key's sourceId: a preview is always "this file at this time", so two
-     * clips of one file share frames rather than decoding twice — the same reason the store's key is
+     * [positionUs] is SOURCE time — the trim edge's own position, which `ToolState.Trimming` already
+     * carries, so nothing maps it on the way here.
+     *
+     * The URI doubles as the cache key's sourceId: the question is always "this file at this time", so
+     * two clips of one file share frames rather than decoding twice — the same reason the store's key is
      * `(source, position)` and not a clip id.
      */
     suspend fun frame(uri: String, positionUs: Long): Bitmap? =

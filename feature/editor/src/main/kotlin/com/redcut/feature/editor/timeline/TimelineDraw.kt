@@ -108,7 +108,11 @@ internal fun DrawScope.drawTimeline(
     marks: TimelineMarks,
 ) {
     val rulerHeight = RULER_HEIGHT_DP.dp.toPx()
-    val track = Track(top = rulerHeight, height = (size.height - rulerHeight).coerceAtLeast(0f))
+    // FIXED height, not `size.height - rulerHeight` (UI revision 2: "tinggi track body timeline fixed, tidak
+    // fitting container"). The canvas may be taller than the track; the leftover is empty lane, drawn as
+    // lane — a taller screen should show more track, not a taller clip. It also stops the playhead's 3×
+    // height from growing with the window until it crosses the whole screen.
+    val track = Track(top = rulerHeight, height = layer.geometry.trackHeightPx)
 
     drawRuler(layer.geometry, rulerHeight, paint.ruler)
     layer.rects.forEach { rect ->

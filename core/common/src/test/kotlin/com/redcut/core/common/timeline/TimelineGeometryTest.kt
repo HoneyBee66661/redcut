@@ -158,8 +158,9 @@ class TimelineGeometryTest {
 
     @Test
     fun `the playhead is drawn where its time is, when it is on screen`() {
-        // Scroll 60, not 100: this timeline's content allows 84 px of scroll, and the geometry
-        // holds the offset inside that (the view cannot be scrolled past its own content).
+        // Scroll 60: `playheadPx` maps a time to its screen position, which is the expression the draw pass
+        // uses. (It no longer says anything about the scroll being "held inside" the content — since UI
+        // revision 1 nothing clamps the scroll, and the viewport follows the playhead.)
         val geometry = geometry(spans = threeClips, scrollPx = 60f)
 
         assertThat(geometry.playheadPx(2 * oneSecond)).isWithin(0.001f).of(60f)
@@ -350,7 +351,9 @@ class TimelineGeometryTest {
 
     @Test
     fun `zoom is clamped into the range the timeline can draw`() {
-        assertThat(TimelineZoom(0.1f).clamped().pixelsPerSecond).isEqualTo(2f)
+        // The floor is 0.1 px/s (an hour on one screen) and the ceiling 480 (a frame at 8 px), both set by
+        // the user's answers in UI revision 2. The values below are OUTSIDE the range, which is the point.
+        assertThat(TimelineZoom(0.01f).clamped().pixelsPerSecond).isEqualTo(0.1f)
         assertThat(TimelineZoom(1_000f).clamped().pixelsPerSecond).isEqualTo(480f)
         assertThat(TimelineZoom(60f).clamped().pixelsPerSecond).isEqualTo(60f)
     }
@@ -373,11 +376,70 @@ class TimelineGeometryTest {
     }
 
     @Test
+    fun `the zoom reaches from an hour down to a frame`() {
+        // The user's two answers, as arithmetic: "shrink max per 1 hr, incase video is hours long" and
+        // "paling coarse 1 detik, 0.5, 0.1, per frame". An hour must fit a 360 px viewport at the coarsest
+        // end, and a 60 fps frame must be a comfortable number of pixels at the tight end.
+        val anHourPx = 3_600f * TimelineZoom.MINIMUM.pixelsPerSecond
+        assertThat(anHourPx).isAtMost(360f)
+
+        val oneFramePx = TimelineZoom.MAXIMUM.pixelsPerSecond * (1f / 60f)
+        assertThat(oneFramePx).isAtLeast(4f)
+    }
+
+    @Test
+    fun `the ruler's ladder includes every granularity the user named`() {
+        // A frame, 0.1 s, 0.5 s, 1 s — and ascending, because `rulerIntervalUs` picks the first interval that
+        // does not crowd: a list out of order would silently pick a coarser one than the zoom allows.
+        val ladder = TimelineGeometry.TICK_INTERVALS_US
+
+        assertThat(ladder).containsAtLeast(
+            TimelineGeometry.FRAME_INTERVAL_US,
+            100_000L,
+            500_000L,
+            1_000_000L,
+        )
+        assertThat(ladder).isInStrictOrder()
+    }
+
+    @Test
     fun `the zoom reports when it is at an end of its range`() {
         assertThat(TimelineZoom.MINIMUM.isAtMinimum).isTrue()
         assertThat(TimelineZoom.MINIMUM.isAtMaximum).isFalse()
         assertThat(TimelineZoom.MAXIMUM.isAtMaximum).isTrue()
         assertThat(TimelineZoom.DEFAULT.isAtMinimum).isFalse()
+    }
+
+    // --- The track body (UI revision 2) ------------------------------------
+
+    @Test
+    fun `a track is a fixed height, and density is the only thing that scales it`() {
+        // The user: "tinggi track body timeline fixed, tidak fitting container". The geometry has no viewport
+        // HEIGHT — it maps x — so the constant lives here where the fast tier can test it, and the draw pass
+        // reads it. A height that depended on the canvas would show a taller clip instead of more track.
+        assertThat(geometry().trackHeightPx).isEqualTo(56f)
+        assertThat(geometry(density = 2f).trackHeightPx).isEqualTo(112f)
+    }
+
+    @Test
+    fun `the first clip's head stops at the playhead when the body is scrolled right`() {
+        // Said twice by the user: "left track body max mentok playhead", then "left clip head saat clip
+        // discroll ke kanan, berhenti di playhead. jadi gak ilang ke off screen". Both are this invariant:
+        // time 0 can reach the playhead and no further, so the beginning of the timeline never leaves the
+        // screen on the right. It holds because a drag moves the PLAYHEAD (clamped to 0..duration) and the
+        // viewport follows it — the whole point of deriving the scroll instead of storing it.
+        val geometry = geometry(
+            spans = listOf(ClipSpan("a", 0, 10 * oneSecond)),
+            zoom = TimelineZoom(60f),
+        )
+        val scrolled = geometry.copy(scrollPx = geometry.scrollCentering(0))
+
+        assertThat(scrolled.visibleStartPx).isEqualTo(-geometry.viewportWidthPx / 2f)
+        // The screen position, which is the expression the draw pass uses: content pixels minus the
+        // viewport's start. `pxFor` alone is a CONTENT position, and time 0's content position is 0 — the
+        // distinction is the whole reason the line lands at the centre rather than at the clip's pixel.
+        assertThat(scrolled.pxFor(0) - scrolled.visibleStartPx)
+            .isEqualTo(geometry.viewportWidthPx / 2f)
     }
 
     // --- Zoom model (pinch) ------------------------------------------------
@@ -414,10 +476,11 @@ class TimelineGeometryTest {
         // 60 px/s: a 1 s label would be 60 px apart, tighter than the 64 px floor, so the ruler
         // steps up to 5 s.
         assertThat(geometry(zoom = TimelineZoom(60f)).rulerIntervalUs()).isEqualTo(5_000_000L)
-        // 480 px/s: 1 s is 480 px apart, comfortable.
-        assertThat(geometry(zoom = TimelineZoom(480f)).rulerIntervalUs()).isEqualTo(1_000_000L)
-        // 2 px/s (zoomed all the way out): 1 s is 2 px apart, so the ruler steps to minutes.
-        assertThat(geometry(zoom = TimelineZoom(2f)).rulerIntervalUs()).isEqualTo(60_000_000L)
+        // 480 px/s: a 1 s label would be comfortable, but a 0.5 s one is 240 px and the ladder now reaches
+        // it, so the ruler reads half-seconds at the tight end — which is what frame-accurate cutting wants.
+        assertThat(geometry(zoom = TimelineZoom(480f)).rulerIntervalUs()).isEqualTo(500_000L)
+        // Zoomed all the way out (0.1 px/s): 1 s is 0.1 px apart, so the ruler steps to minutes.
+        assertThat(geometry(zoom = TimelineZoom.MINIMUM).rulerIntervalUs()).isEqualTo(600_000_000L)
     }
 
     @Test

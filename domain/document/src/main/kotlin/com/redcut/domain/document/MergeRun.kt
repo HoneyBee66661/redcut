@@ -93,22 +93,28 @@ internal fun EditDocument.mergeRunOf(trackId: String, ids: List<String>): MergeR
     return if (run.isMergeable()) run else null
 }
 
-/** The contiguous run [ids] selects on [trackId], or null when the selection is not the run it claims. */
+/**
+ * The contiguous run [ids] selects on [trackId], or null when the selection is not the run it claims.
+ *
+ * One question asked once: take the clip the selection STARTS at, take as many clips as the selection
+ * named, and the slice is the run exactly when it is those ids in that order. "Every id exists", "the
+ * run does not overrun the track" and "the ids are adjacent" are all the same failure seen three ways,
+ * and asking them as separate guards is what made this read as a list of unrelated checks rather than
+ * as one rule about a run.
+ *
+ * The order is compared as well as the membership, deliberately: a "selection" that names a run
+ * backwards is not the run, and `take` past the end of a track yields a SHORT slice rather than the
+ * exception `subList` would throw from a path a finger can reach.
+ */
 private fun EditDocument.contiguousRun(trackId: String, ids: List<String>): MergeRun? {
     val clips = trackById(trackId)?.clips ?: return null
     val unique = ids.distinct()
     if (unique.size < 2 || unique.size != ids.size) return null
 
-    val selected = clips.filter { it.id in unique.toSet() }
-    if (selected.size != unique.size) return null
-
     val start = clips.indexOfFirst { it.id == unique.first() }
-    if (start < 0 || start + selected.size > clips.size) return null
+    val slice = if (start < 0) emptyList() else clips.drop(start).take(unique.size)
 
-    val ordered = clips.subList(start, start + selected.size)
-    if (ordered.map { it.id }.toSet() != unique.toSet()) return null
-
-    return MergeRun(start, ordered)
+    return if (slice.map { it.id } == unique) MergeRun(start, slice) else null
 }
 
 /** Whether every neighbouring pair may fuse — the source-side precondition, pair by pair. */

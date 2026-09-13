@@ -62,7 +62,9 @@ class ClipMergeTest {
             clip("c", 4 * oneSecond, 6 * oneSecond),
         )
 
-        assertThat(doc.mergeRunFrom(VIDEO, "a").map { it.id }).containsExactly("a", "b", "c").inOrder()
+        assertThat(
+            doc.mergeRunFrom(VIDEO, "a").map { it.id },
+        ).containsExactly("a", "b", "c").inOrder()
         assertThat(doc.mergeAvailability(VIDEO, "a")).isEqualTo(CutAvailability.Available)
     }
 

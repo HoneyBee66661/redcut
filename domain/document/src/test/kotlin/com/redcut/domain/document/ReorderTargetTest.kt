@@ -48,7 +48,9 @@ class ReorderTargetTest {
         // laid out contiguously because the timeline has no gaps.
         assertThat(doc.reorderTargetIndex(VIDEO, "a", 0L)).isEqualTo(0)
         assertThat(doc.reorderTargetIndex(VIDEO, "a", 900_000L)).isEqualTo(0) // before b's midpoint
-        assertThat(doc.reorderTargetIndex(VIDEO, "a", 1_400_000L)).isEqualTo(1) // past it, before c's
+        assertThat(
+            doc.reorderTargetIndex(VIDEO, "a", 1_400_000L),
+        ).isEqualTo(1) // past it, before c's
         assertThat(doc.reorderTargetIndex(VIDEO, "a", 4_000_000L)).isEqualTo(2) // past c's as well
     }
 
@@ -91,7 +93,9 @@ class ReorderTargetTest {
         // The arithmetic treats an unknown id as "removing nothing", so its answer is merely a slot;
         // what matters is that the COMMAND refuses, so nothing moves and the document is untouched.
         assertThat(ReorderClip(VIDEO, "nope", 1).apply(doc)).isEqualTo(doc)
-        assertThat(ReorderClip(VIDEO, "nope", 1).apply(doc).ids()).containsExactly("a", "b", "c").inOrder()
+        assertThat(
+            ReorderClip(VIDEO, "nope", 1).apply(doc).ids(),
+        ).containsExactly("a", "b", "c").inOrder()
     }
 
     @Test

@@ -64,7 +64,9 @@ class AdjustCommandsTest {
     fun `speed is clamped to the spec's range, not rejected`() {
         val base = clip()
 
-        assertThat(base.after(SetSpeed(VIDEO, "clip-a", 0.1f)).speed).isEqualTo(ClipRanges.SPEED_MIN)
+        assertThat(
+            base.after(SetSpeed(VIDEO, "clip-a", 0.1f)).speed,
+        ).isEqualTo(ClipRanges.SPEED_MIN)
         assertThat(base.after(SetSpeed(VIDEO, "clip-a", 9f)).speed).isEqualTo(ClipRanges.SPEED_MAX)
         assertThat(base.after(SetSpeed(VIDEO, "clip-a", 1.5f)).speed).isEqualTo(1.5f)
     }
@@ -73,8 +75,12 @@ class AdjustCommandsTest {
     fun `a zero speed clamps instead of throwing, because Clip refuses a non-positive speed`() {
         // The interesting one: `Clip` has `require(speed > 0)`, so a UI that computed 0 (a division, a
         // slider at its floor) would crash the document rather than set a legal value.
-        assertThat(clip().after(SetSpeed(VIDEO, "clip-a", 0f)).speed).isEqualTo(ClipRanges.SPEED_MIN)
-        assertThat(clip().after(SetSpeed(VIDEO, "clip-a", -2f)).speed).isEqualTo(ClipRanges.SPEED_MIN)
+        assertThat(
+            clip().after(SetSpeed(VIDEO, "clip-a", 0f)).speed,
+        ).isEqualTo(ClipRanges.SPEED_MIN)
+        assertThat(
+            clip().after(SetSpeed(VIDEO, "clip-a", -2f)).speed,
+        ).isEqualTo(ClipRanges.SPEED_MIN)
     }
 
     @Test
@@ -94,8 +100,12 @@ class AdjustCommandsTest {
     fun `volume is clamped to 0-200 percent`() {
         val base = clip(volume = 1f)
 
-        assertThat(base.after(SetVolume(VIDEO, "clip-a", 2.5f)).volume).isEqualTo(ClipRanges.VOLUME_MAX)
-        assertThat(base.after(SetVolume(VIDEO, "clip-a", -1f)).volume).isEqualTo(ClipRanges.VOLUME_MIN)
+        assertThat(
+            base.after(SetVolume(VIDEO, "clip-a", 2.5f)).volume,
+        ).isEqualTo(ClipRanges.VOLUME_MAX)
+        assertThat(
+            base.after(SetVolume(VIDEO, "clip-a", -1f)).volume,
+        ).isEqualTo(ClipRanges.VOLUME_MIN)
         assertThat(base.after(SetVolume(VIDEO, "clip-a", 0.4f)).volume).isEqualTo(0.4f)
     }
 
@@ -114,7 +124,9 @@ class AdjustCommandsTest {
 
     @Test
     fun `a fade longer than the spec allows is clamped to three seconds`() {
-        val faded = clip(sourceOutUs = 20 * oneSecond).after(SetFades(VIDEO, "clip-a", 9_000L, 9_000L))
+        val faded = clip(
+            sourceOutUs = 20 * oneSecond,
+        ).after(SetFades(VIDEO, "clip-a", 9_000L, 9_000L))
 
         assertThat(faded.fadeInMs).isEqualTo(ClipRanges.FADE_MAX_MS)
         assertThat(faded.fadeOutMs).isEqualTo(ClipRanges.FADE_MAX_MS)

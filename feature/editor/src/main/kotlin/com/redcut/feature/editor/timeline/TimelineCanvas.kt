@@ -130,24 +130,41 @@ internal fun TimelineCanvas(
         drawTimeline(
             layer = layer,
             paint = paint,
-            marks = TimelineMarks(
-                playheadUs = playheadUs,
-                selectedClipId = selection.clipIdOrNull,
-                trimmedClipId = (tool as? ToolState.Trimming)?.clipId,
-                draggedEdge = (tool as? ToolState.Trimming)?.edge,
-                draggedClipId = reorderDrag?.clipId,
-                markerUs = reorderDrag?.let { drag ->
-                    // A drag is a position within ONE lane's own order, so the marker is asked for on
-                    // the lane the dragged clip is on. Until the gesture layer carries a (track, clip)
-                    // pair of its own, that lane is looked up here, from the clip id it does carry.
-                    document.trackIdOf(drag.clipId)?.let { trackId ->
-                        document.reorderMarkerUs(trackId, drag.clipId, drag.targetIndex)
-                    }
-                },
-            ),
+            marks = timelineMarks(document, playheadUs, selection, tool, reorderDrag),
         )
     }
 }
+
+/**
+ * What the draw pass marks as "where the user is": the playhead, the selected clip, the edge being
+ * dragged, and the slot a reorder would drop into.
+ *
+ * A MAPPING rather than a layout, which is why it is its own function: interaction state in, the
+ * drawing's own vocabulary out. The reorder marker is the part that needs the DOCUMENT — a drop lands
+ * inside one lane's own order, so the lane is resolved from the clip being dragged — and keeping that
+ * lookup in here leaves the composable as the wiring this file says it is: state in, draw calls out.
+ *
+ * The lane lookup is a stopgap the gesture layer is expected to take over: once a drag carries a
+ * `(track, clip)` pair, the marker is arithmetic on the pair and nothing here needs the document.
+ */
+private fun timelineMarks(
+    document: EditDocument,
+    playheadUs: Long,
+    selection: Selection,
+    tool: ToolState,
+    reorderDrag: ReorderDrag?,
+): TimelineMarks = TimelineMarks(
+    playheadUs = playheadUs,
+    selectedClipId = selection.clipIdOrNull,
+    trimmedClipId = (tool as? ToolState.Trimming)?.clipId,
+    draggedEdge = (tool as? ToolState.Trimming)?.edge,
+    draggedClipId = reorderDrag?.clipId,
+    markerUs = reorderDrag?.let { drag ->
+        document.trackIdOf(drag.clipId)?.let { trackId ->
+            document.reorderMarkerUs(trackId, drag.clipId, drag.targetIndex)
+        }
+    },
+)
 
 /** The reorder drag as the Canvas sees it: which clip, which slot, and where the finger last was. */
 private data class ReorderDrag(val clipId: String, val targetIndex: Int, val lastScreenX: Float)
@@ -238,7 +255,11 @@ private fun buildReorderGestures(
         // order. A clip id no track holds has no slot to land in, so the answer is 0 and the drop is a
         // no-op rather than a guess.
         val trackId = document.trackIdOf(clipId) ?: return 0
-        return document.reorderTargetIndex(trackId, clipId, geometry.usFor(geometry.contentPxFor(screenX)))
+        return document.reorderTargetIndex(
+            trackId,
+            clipId,
+            geometry.usFor(geometry.contentPxFor(screenX)),
+        )
     }
 
     return ReorderGestures(

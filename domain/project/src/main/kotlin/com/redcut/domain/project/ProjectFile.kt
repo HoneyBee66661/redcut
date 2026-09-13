@@ -2,7 +2,7 @@ package com.redcut.domain.project
 
 import com.redcut.domain.document.Clip
 import com.redcut.domain.document.EditDocument
-import com.redcut.domain.document.videoTrack
+import com.redcut.domain.document.promotedFromV1
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
@@ -109,39 +109,27 @@ object ProjectCodec {
      * (FR-1.4): a corrupt or half-written project file is a project the user cannot open, which is worth
      * telling them — and it is not worth crashing the editor they opened to look at a different one.
      *
-     * A schema-v1 document is migrated on the way in ([migratedFromV1]), because the alternative —
-     * decoding `tracks` (absent, so the default empty one) and dropping `clips` — would open the user's
-     * project with its timeline silently emptied. `ignoreUnknownKeys` is what makes that silent, which is
-     * why the clips are read a second time through [V1Project] rather than after the decode: by then,
-     * they are gone.
+     * A schema-v1 document is promoted on the way in ([promoteV1Clips] → `EditDocument.promotedFromV1`),
+     * because the alternative — decoding `tracks` (absent, so the default empty one) and dropping
+     * `clips` — would open the user's project with its timeline silently emptied. `ignoreUnknownKeys` is
+     * what makes that silent, which is why the clips are read a second time through [V1Project] rather
+     * than after the decode: by then, they are gone.
      */
     fun decode(text: String): SavedProject? = runCatching {
-        val legacyClips = json.decodeFromString<V1Project>(text).document.clips
-        json.decodeFromString<SavedProject>(text).migratedFromV1(legacyClips)
+        val project = json.decodeFromString<SavedProject>(text)
+        project.promoteV1Clips(json.decodeFromString<V1Project>(text).document.clips)
     }.getOrNull()
 
     /**
-     * Moves a schema-v1 document's flat `clips` into the one video track that schema v2 keeps them in.
+     * Hands the codec's v1 reading of `clips` to the document's own migration rule.
      *
-     * Two independent conditions, because either one alone is a silent way to lose an edit: an old file
-     * that already says `2` (hand-edited, or written by a build between the two formats) keeps its own
-     * clips, and a document that already has clips in a track is left exactly as it is. When the version
-     * is old and there are clips to move, they are moved VERBATIM and in order — a migration that dropped
-     * a clip or reordered one would be a migration that lost the user's edit — and only the `clips` key
-     * changes place, so `sources`, `effects`, `canvas` and `name` are untouched by construction.
-     *
-     * The stamp is brought forward either way: what comes out of here is a v2 document, and one that
-     * still said `1` would be migrated a second time by the next reader.
+     * Two decodes of the same text, because the v2 shape and the v1 shape disagree about where the
+     * clips are: the first reads everything else, the second reads the one key this build no longer
+     * looks at. The decision — whether this document is old, and whether it has anything to move —
+     * belongs to `promotedFromV1` in :domain:document, where it is tested without JSON.
      */
-    private fun SavedProject.migratedFromV1(legacyClips: List<Clip>): SavedProject {
-        if (document.schemaVersion >= EditDocument.SCHEMA_VERSION) return this
-        val promoted = if (document.clips.isEmpty() && legacyClips.isNotEmpty()) {
-            document.copy(tracks = listOf(videoTrack(legacyClips)))
-        } else {
-            document
-        }
-        return copy(document = promoted.copy(schemaVersion = EditDocument.SCHEMA_VERSION))
-    }
+    private fun SavedProject.promoteV1Clips(v1Clips: List<Clip>): SavedProject =
+        copy(document = document.promotedFromV1(v1Clips))
 }
 
 /**

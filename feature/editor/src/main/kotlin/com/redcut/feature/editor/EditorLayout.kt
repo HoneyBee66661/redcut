@@ -25,6 +25,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.dp
 import com.redcut.domain.document.FrameStep
+import com.redcut.feature.editor.timeline.TimelineCanvas
 
 /**
  * The layout's fixed strip heights.

@@ -1,9 +1,11 @@
 package com.redcut.domain.project
 
 import com.google.common.truth.Truth.assertThat
+import com.redcut.domain.document.CanvasSpec
 import com.redcut.domain.document.Clip
 import com.redcut.domain.document.EditDocument
 import com.redcut.domain.document.SourceRef
+import com.redcut.domain.document.Track
 import com.redcut.domain.document.TrackKind
 import com.redcut.domain.document.videoTrack
 import org.junit.jupiter.api.Test
@@ -12,14 +14,25 @@ import org.junit.jupiter.api.Test
  * A project file exactly as schema v1 wrote one: a flat `clips` list, no `tracks` key anywhere.
  *
  * A literal rather than `encode(project())`, because what is being tested is precisely that a file from
- * BEFORE this build still opens — and a fixture produced by this build's encoder could not be that.
+ * BEFORE this build still opens — and a fixture produced by this build's encoder could not be that. Two
+ * clips, so their ORDER is testable; a non-default canvas, a name and timestamps, so "nothing lost" is
+ * a claim about fields that could plausibly have been dropped on the way through.
  */
 private const val V1_FILE = """
-{"id":"p1","name":"untitled","updatedAtMs":1700000000000,
- "document":{"schemaVersion":1,"id":"doc","name":"Doc",
+{"id":"p1","name":"Holiday","updatedAtMs":1700000000000,
+ "document":{"schemaVersion":1,"id":"doc-1","name":"Holiday 2",
   "sources":[{"id":"src-1","uri":"content://media/1","displayName":"clip.mp4",
-   "durationUs":60000000,"width":1920,"height":1080}],
-  "clips":[{"id":"clip-a","sourceId":"src-1","sourceInUs":0,"sourceOutUs":4000000}]}}
+   "durationUs":60000000,"width":1280,"height":720,"hasAudio":true}],
+  "clips":[
+   {"id":"clip-a","sourceId":"src-1","sourceInUs":0,"sourceOutUs":4000000},
+   {"id":"clip-b","sourceId":"src-1","sourceInUs":4000000,"sourceOutUs":6000000,"speed":2.0}],
+  "canvas":"LANDSCAPE_1080","createdAtMs":1600000000000,"modifiedAtMs":1700000000000}}
+"""
+
+/** A v1 file with nothing on the timeline: a project the user made and then emptied. */
+private const val V1_FILE_EMPTY = """
+{"id":"p1","name":"Empty","updatedAtMs":1,
+ "document":{"schemaVersion":1,"id":"doc-1","name":"Empty","clips":[]}}
 """
 
 /**
@@ -132,7 +145,7 @@ class ProjectFileTest {
     }
 
     @Test
-    fun `a v1 file's flat clips open as one video track`() {
+    fun `a v1 file's flat clips open as one video track holding them, in order`() {
         // Schema v2 moved the clips inside a track, so a file written before that says `clips` and has no
         // `tracks` at all. Without the migration the decode succeeds and the timeline comes back EMPTY —
         // the one failure a user cannot tell apart from "my edits are gone".
@@ -140,9 +153,53 @@ class ProjectFileTest {
 
         assertThat(opened.document.schemaVersion).isEqualTo(EditDocument.SCHEMA_VERSION)
         assertThat(opened.document.tracks).hasSize(1)
+        assertThat(opened.document.tracks.single().id).isEqualTo(Track.MAIN_ID)
         assertThat(opened.document.tracks.single().kind).isEqualTo(TrackKind.VIDEO)
-        assertThat(opened.document.clips.map { it.id }).containsExactly("clip-a")
-        assertThat(opened.document.sourceById("src-1")).isNotNull()
+        assertThat(opened.document.clips.map { it.id })
+            .containsExactly("clip-a", "clip-b")
+            .inOrder()
+    }
+
+    @Test
+    fun `a v1 file keeps everything that was not its clips`() {
+        // The migration rewrites one key. Everything else the user's project holds has to arrive
+        // unchanged: the name they gave it, the sources its clips point at (with the facts the probe
+        // found), the canvas, and the timestamps a gallery sorts by.
+        val opened = ProjectCodec.decode(V1_FILE)!!
+
+        assertThat(opened.name).isEqualTo("Holiday")
+        assertThat(opened.updatedAtMs).isEqualTo(1_700_000_000_000L)
+        assertThat(opened.document.id).isEqualTo("doc-1")
+        assertThat(opened.document.name).isEqualTo("Holiday 2")
+        assertThat(opened.document.canvas).isEqualTo(CanvasSpec.LANDSCAPE_1080)
+        assertThat(opened.document.createdAtMs).isEqualTo(1_600_000_000_000L)
+        assertThat(opened.document.modifiedAtMs).isEqualTo(1_700_000_000_000L)
+        assertThat(opened.document.sources.single().displayName).isEqualTo("clip.mp4")
+        assertThat(opened.document.sources.single().hasAudio).isTrue()
+        assertThat(opened.document.clipById("clip-b")?.speed).isEqualTo(2f)
+    }
+
+    @Test
+    fun `an old file with no clips opens with the empty video lane a new project has`() {
+        // Not every v1 file has clips: one made and then emptied is still a project, and it must open
+        // rather than fail on the way through the migration.
+        val opened = ProjectCodec.decode(V1_FILE_EMPTY)!!
+
+        assertThat(opened.document.schemaVersion).isEqualTo(EditDocument.SCHEMA_VERSION)
+        assertThat(opened.document.tracks).isEqualTo(listOf(Track.MAIN))
+        assertThat(opened.document.clips).isEmpty()
+    }
+
+    @Test
+    fun `a file this build wrote is not migrated a second time`() {
+        // The round trip above proves equality; this proves the RULE — a v2 document keeps its tracks and
+        // its stamp, so opening a project twice cannot fold its lanes into one on the second open.
+        val before = project()
+
+        val after = ProjectCodec.decode(ProjectCodec.encode(before))!!
+
+        assertThat(after.document.schemaVersion).isEqualTo(EditDocument.SCHEMA_VERSION)
+        assertThat(after.document.tracks).isEqualTo(before.document.tracks)
     }
 
     @Test

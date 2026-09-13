@@ -181,6 +181,15 @@ internal fun DrawScope.drawClip(
                 size = Size(rect.widthPx, track.height),
                 style = Stroke(width = SELECTION_BORDER_PX),
             )
+            // A stripe along the top as well as the outline. The device pass asked for a clearer
+            // indicator, and the reason the outline was not enough is worth writing down: a clip is
+            // mostly a thumbnail, so a 3 px border on a bright frame reads as part of the picture, and
+            // "which clip am I editing?" is the one question this has to answer at a glance.
+            drawRect(
+                color = paint.selectionBorder,
+                topLeft = Offset(left, track.top),
+                size = Size(rect.widthPx, SELECTION_STRIPE_PX),
+            )
         }
         // The edge being dragged, drawn INSIDE the clip's own clipping: the moment a trim shortens a
         // clip to nothing, its edge line would otherwise scribble over the neighbour.
@@ -254,6 +263,7 @@ internal fun DrawScope.drawPlayhead(geometry: TimelineGeometry, playheadUs: Long
 
 private const val RULER_TICK_WIDTH_PX = 1f
 private const val SELECTION_BORDER_PX = 3f
+private const val SELECTION_STRIPE_PX = 6f
 private const val PLAYHEAD_WIDTH_PX = 2f
 private const val TRIM_EDGE_PX = 4f
 private const val REORDER_MARKER_PX = 6f

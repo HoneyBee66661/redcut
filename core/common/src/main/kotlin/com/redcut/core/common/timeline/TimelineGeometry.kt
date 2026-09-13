@@ -111,7 +111,14 @@ sealed interface TimelineHit {
     /** Nothing: the empty area past the end of the last clip, or a gap. */
     data object None : TimelineHit
 
-    /** The clip's body: a tap selects it, a drag moves the playhead. */
+    /**
+     * The clip's body: a TAP seeks the playhead to that point and selects the clip, while a DRAG
+     * scrolls the timeline (and a long press picks the clip up to reorder, FR-2.7).
+     *
+     * The body is the whole of a clip that is not within reach of an edge, and the two must not be
+     * confused: see `edgeReach` for the cap that guarantees a body exists at every zoom, which is what
+     * makes "a drag on a clip scrolls" true rather than almost true.
+     */
     data class Body(val clipId: String) : TimelineHit
 
     /**
@@ -233,18 +240,18 @@ data class TimelineGeometry(
         val target = edgeTouchTargetPx
 
         rects.forEachIndexed { index, rect ->
-            val leftReach = minOf(target, rects.getOrNull(index - 1)?.halfWidth() ?: target)
+            val leftReach = minOf(target, rects.getOrNull(index - 1)?.edgeReach() ?: target)
             if (x >= rect.startPx - leftReach && x < rect.startPx) {
                 return TimelineHit.Edge(rect.clipId, EdgeSide.LEFT, withinClip = false)
             }
-            val rightReach = minOf(target, rects.getOrNull(index + 1)?.halfWidth() ?: target)
+            val rightReach = minOf(target, rects.getOrNull(index + 1)?.edgeReach() ?: target)
             if (x > rect.endPx && x <= rect.endPx + rightReach) {
                 return TimelineHit.Edge(rect.clipId, EdgeSide.RIGHT, withinClip = false)
             }
         }
 
         rects.forEach { rect ->
-            val zone = minOf(target, rect.halfWidth())
+            val zone = rect.edgeReach()
             if (x in rect.startPx..(rect.startPx + zone)) {
                 return TimelineHit.Edge(rect.clipId, EdgeSide.LEFT, withinClip = true)
             }
@@ -258,7 +265,21 @@ data class TimelineGeometry(
             ?: TimelineHit.None
     }
 
-    private fun ClipRect.halfWidth(): Float = widthPx / 2f
+    /**
+     * How far a clip's edge target reaches, which is the touch target BOUNDED BY THE CLIP ITSELF.
+     *
+     * The bound is a fraction of the clip rather than half of it, and the difference is a bug the device
+     * pass found: at 48 dp a target is about 2.5 mm, and a clip drawn narrower than twice that — a short
+     * clip, or any clip at a low zoom, which is exactly what a freshly imported clip is — had its left
+     * target and its right target meet in the middle. Every drag inside it was then an edge drag, so the
+     * clip TRIMMED when the user meant to move the playhead, and shrank under their finger.
+     *
+     * A third per side leaves a third that can only ever be the body, at every zoom. Narrow clips are
+     * still trimmable (a 3 px sliver gets a 1 px target at each end); what they no longer are is
+     * untouchable in the middle.
+     */
+    private fun ClipRect.edgeReach(): Float =
+        minOf(edgeTouchTargetPx, widthPx * EDGE_TARGET_MAX_CLIP_FRACTION)
 
     /**
      * The same timeline at a new zoom, with the moment under [anchorScreenX] staying put.
@@ -339,6 +360,15 @@ data class TimelineGeometry(
 
         /** The spec's touch target around a clip edge (§7.1), in dp. */
         const val EDGE_TOUCH_TARGET_DP = 48f
+
+        /**
+         * The most of a clip's own width an edge target may claim, per side.
+         *
+         * See `edgeReach`: at a half per side the two targets met in the middle of any clip narrower
+         * than twice the touch target, so the whole clip trimmed and nothing inside it could be dragged
+         * to move the playhead. A third leaves a body at every zoom.
+         */
+        const val EDGE_TARGET_MAX_CLIP_FRACTION = 1f / 3f
 
         /** Room past the last clip, so the end of the timeline is not flush with the frame. */
         const val END_PADDING_PX = 24f

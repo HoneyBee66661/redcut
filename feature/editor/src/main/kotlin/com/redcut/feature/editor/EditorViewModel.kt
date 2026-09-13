@@ -394,6 +394,12 @@ class EditorViewModel @Inject constructor(
 
             if (plan.hasImports) {
                 history.execute(CompoundCommand(IMPORT_LABEL, plan.commands))
+                // The clip just imported becomes the SELECTED one. After an import the user's next act is
+                // almost always about the clip they added, and the timeline's indicator is what answers
+                // "which one am I working on?" — the device pass asked for exactly that.
+                history.current.clips.lastOrNull()?.let { appended ->
+                    _state.value = _state.value.copy(selection = Selection.Clip(appended.id))
+                }
             }
 
             val report = ImportReport(

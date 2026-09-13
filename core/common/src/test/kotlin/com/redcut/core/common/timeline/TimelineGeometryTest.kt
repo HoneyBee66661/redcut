@@ -240,18 +240,38 @@ class TimelineGeometryTest {
     }
 
     @Test
-    fun `a very short clip is all edge, and that is stated rather than hidden`() {
-        // A 100 ms clip at minimum zoom is 3 px wide with a 48 px target. There is no arithmetic
-        // in which its centre is a "body"; the honest behaviour is the edge, and the user zooms
-        // in. What the cap on the zone DOES buy: it cannot reach past its own half-width, so a
-        // neighbour's body is never stolen by it.
+    fun `a clip narrower than two touch targets still has a body to drag the playhead in`() {
+        // The device pass's bug, as a test. A freshly imported clip is drawn short at the default zoom,
+        // and its two 48 dp edge targets met in the MIDDLE: every drag inside it trimmed, so the clip
+        // shrank under the user's finger when they meant to move the playhead.
+        //
+        // A 2 s clip at 60 px/s is 120 px wide, so a third per side is 40 px — the cap bites before the
+        // touch target does, and the middle 40 px can only be the body.
+        val spans = listOf(ClipSpan("short", 0, 2 * oneSecond))
+        val geometry = geometry(spans = spans, zoom = TimelineZoom(60f))
+
+        assertThat(geometry.hitTest(5f))
+            .isEqualTo(TimelineHit.Edge("short", EdgeSide.LEFT, withinClip = true))
+        assertThat(geometry.hitTest(60f)).isEqualTo(TimelineHit.Body("short"))
+        assertThat(geometry.hitTest(115f))
+            .isEqualTo(TimelineHit.Edge("short", EdgeSide.RIGHT, withinClip = true))
+    }
+
+    @Test
+    fun `a very short clip keeps a third of itself for the body`() {
+        // 100 ms at minimum zoom is 3 px wide, the minimum drawn width. The old rule gave each end half
+        // of that and called the clip "all edge, and that is stated rather than hidden" — honest, and
+        // still wrong: nobody trims from the middle of a 3 px sliver on purpose, and they CAN zoom in.
+        // What they could not do was drag the playhead across it.
         val sliver = geometry(
             spans = listOf(ClipSpan("tiny", 0, 100_000)),
             zoom = TimelineZoom.MINIMUM,
         )
 
-        assertThat(sliver.hitTest(1.5f))
-            .isEqualTo(TimelineHit.Edge(clipId = "tiny", side = EdgeSide.LEFT, withinClip = true))
+        // Each end reaches a third of 3 px; the middle is the body.
+        assertThat(sliver.hitTest(1.5f)).isEqualTo(TimelineHit.Body("tiny"))
+        assertThat(sliver.hitTest(0.5f))
+            .isEqualTo(TimelineHit.Edge("tiny", EdgeSide.LEFT, withinClip = true))
     }
 
     // --- Zoom --------------------------------------------------------------

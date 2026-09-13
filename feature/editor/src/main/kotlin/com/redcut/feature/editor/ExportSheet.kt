@@ -132,7 +132,7 @@ private fun ResolutionRow(choice: CanvasSpec, selected: Boolean, onSelect: () ->
  */
 private fun CanvasSpec.exportLabel(): String {
     val shortSide = minOf(width, height)
-    return "${shortSide}p · ${width}×${height}"
+    return "${shortSide}p · $width×$height"
 }
 
 /** The gap between the sheet's rows. */

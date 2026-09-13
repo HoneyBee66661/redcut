@@ -1,5 +1,8 @@
 package com.redcut.feature.editor
 
+import android.content.Context
+import android.view.SurfaceView
+import android.view.View
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -9,7 +12,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -17,11 +22,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
+import com.redcut.core.media.PreviewRenderer
+import com.redcut.core.media.PreviewState
 import com.redcut.domain.document.ClipEdge
-import com.redcut.domain.document.PreviewTarget
-import com.redcut.domain.document.previewTargetAt
+import com.redcut.domain.render.RenderGraph
+import com.redcut.domain.render.TimelineCompiler
+import kotlinx.coroutines.delay
 
 /**
  * The stage: what the editor shows the user of their own video.
@@ -34,20 +44,26 @@ import com.redcut.domain.document.previewTargetAt
  * The three states a stage can be in, in priority order:
  *
  * 1. a trim in flight — the frame at the edge being dragged ([EdgeFrame], FR-2.1);
- * 2. something under the playhead — the frame the playhead maps to ([PlayheadFrame], FR-2's "correct
- *    preview");
+ * 2. something on the timeline — the edit, rendered at the playhead ([PlayheadSurface], FR-2's
+ *    "correct preview");
  * 3. neither — a sentence describing the stage, which is what a document with no clips gets.
  */
+
+/** The debounce §8.1 puts between a revision change and rebuilding the preview. */
+private const val PREVIEW_REBUILD_DEBOUNCE_MS = 120L
 
 /**
  * The stage's body, which takes the room the timeline does not.
  *
- * the reason this cannot be a plain composable.
+ * The reason this cannot be a plain composable: it compiles the document. `TimelineCompiler.compile`
+ * is pure and, in §8.1's words, cheap enough to run *"on every revision change without debouncing"* —
+ * so the graph is derived here, from the document the screen already has, rather than passed down from
+ * the ViewModel as a second copy of state.
  */
 @Composable
 internal fun StageBody(
     state: EditorUiState,
-    onThumbnail: suspend (sourceId: String, uri: String, positionUs: Long) -> ImageBitmap?,
+    renderer: PreviewRenderer,
     onPreviewFrame: suspend (uri: String, positionUs: Long) -> ImageBitmap?,
     modifier: Modifier = Modifier,
 ) {
@@ -61,16 +77,19 @@ internal fun StageBody(
         contentAlignment = Alignment.Center,
     ) {
         val trimming = state.tool as? ToolState.Trimming
-        val preview = remember(state.document, state.playheadUs) {
-            state.document.previewTargetAt(state.playheadUs)
-        }
+        // The document is the key, and that is §8.1's recompilation trigger rather than a cache
+        // heuristic: every edit produces a new revision, so a new graph, so a new preview.
+        val graph = remember(state.document) { TimelineCompiler.compile(state.document) }
+
         when {
             trimming != null -> EdgeFrame(
                 state = state,
                 trimming = trimming,
-                onThumbnail = onThumbnail,
+                onPreviewFrame = onPreviewFrame,
             )
-            preview != null -> PlayheadFrame(target = preview, onPreviewFrame = onPreviewFrame)
+            // An empty document has nothing to play, and a renderer attached to nothing would be a
+            // black rectangle where the sentence should be.
+            graph.videoLayers.isNotEmpty() -> PlayheadSurface(renderer = renderer, graph = graph)
             else -> Text(
                 text = state.stage.detail,
                 style = MaterialTheme.typography.bodyLarge,
@@ -81,38 +100,98 @@ internal fun StageBody(
 }
 
 /**
- * The frame at the playhead (FR-2's "correct preview").
+ * The edit, rendered at the playhead (FR-2's "correct preview").
  *
- * `previewTargetAt` did the hard part: it mapped the playhead's TIMELINE position to a frame in the
- * SOURCE file, honouring the clip's trims, speed and direction. All that is left here is to ask for it
- * and to show it — and to re-ask when the playhead moves, which `LaunchedEffect(target)` does by
- * cancelling the previous request when the target changes: scrubbing fast leaves one decode in flight
- * rather than a queue of frames the user has already scrubbed past.
+ * The frame is the **renderer's**, drawn onto a `SurfaceView` — never a `Bitmap` handed through
+ * Compose. That is §6.8 rule D5 stated as code: *"Preview is surface/texture-based from day one —
+ * `SurfaceView` + `SurfaceTexture`, never `Bitmap` or Canvas rendering... You cannot retrofit a GL
+ * pipeline onto a Canvas-based preview."* It is also what makes playback possible at all: a still per
+ * playhead position is not a video, and `PreviewRenderer.play` is what turns the same surface into one.
  *
- * A missing frame (still decoding, or a file that cannot be read) shows nothing rather than the last
- * frame: a stale frame under a moved playhead is a wrong answer, where a blank one is merely an
- * incomplete one.
+ * ### Which frame it shows
  *
- * ### What this is not
+ * The playhead is a position on the TIMELINE, and the frame it refers to lives in a SOURCE file — the
+ * journey between them crosses everything the Cut stage can change. That mapping is not computed here,
+ * nor anywhere else in the UI: the graph's layers already carry it (`sourceRange` against `timeRange`,
+ * with each clip's speed and direction applied by the compiler), so the renderer is handed a timeline
+ * position and the graph and resolves the rest (§8.1). A trim, a split or a speed change therefore
+ * moves the frame by changing the graph the preview is built from, rather than by changing an
+ * arithmetic that two layers could disagree about.
  *
- * It is a still per playhead position, not playback. Continuous playback needs the composition path of
- * spec §8.4 (Phase 4.2) — this is what satisfies the exit criterion's word "scrub".
+ * ### When it is rebuilt, and when it is let go
+ *
+ * §8.1: *"Preview rebuild is debounced at 120 ms during drags to avoid thrashing the player."* The
+ * debounce is the `delay` below, and `LaunchedEffect` cancelling the previous attempt is what makes it
+ * a debounce rather than a queue of rebuilds that each arrive late.
+ *
+ * §9.1 asks for the decoder back when it is not in use, and `onWindowVisibilityChanged` is where this
+ * reads "the app went to the background": the platform dispatches it down the view tree when the
+ * hosting window stops being visible, so a backgrounded editor releases its decoder and takes a new one
+ * when the user returns. That matters because §9.1's rule is that *"preview and export cannot run
+ * simultaneously"* — a preview holding a codec behind an export is exactly the exhaustion the broker
+ * exists to prevent.
  */
 @Composable
-private fun PlayheadFrame(
-    target: PreviewTarget,
-    onPreviewFrame: suspend (uri: String, positionUs: Long) -> ImageBitmap?,
-) {
-    var frame by remember { mutableStateOf<ImageBitmap?>(null) }
-    LaunchedEffect(target) {
-        frame = onPreviewFrame(target.uri, target.sourceTimeUs)
+private fun PlayheadSurface(renderer: PreviewRenderer, graph: RenderGraph) {
+    val context = LocalContext.current
+    val surfaceView = remember(context) { PreviewSurfaceView(context) }
+    val preview by renderer.state.collectAsState()
+    var windowVisible by remember(surfaceView) { mutableStateOf(true) }
+
+    DisposableEffect(surfaceView) {
+        surfaceView.onWindowVisibility = { visible -> windowVisible = visible }
+        onDispose {
+            // Leaving the stage is leaving the preview: the renderer goes back to holding nothing, and
+            // the next visitor to this screen attaches again.
+            surfaceView.onWindowVisibility = null
+            renderer.release()
+        }
     }
-    frame?.let { image ->
-        Image(
-            bitmap = image,
-            contentDescription = null,
-            modifier = Modifier.fillMaxWidth(),
-        )
+
+    LaunchedEffect(graph.revision, windowVisible) {
+        if (!windowVisible) {
+            renderer.release()
+            return@LaunchedEffect
+        }
+        delay(PREVIEW_REBUILD_DEBOUNCE_MS)
+        renderer.attach(surfaceView, graph)
+    }
+
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        AndroidView(factory = { surfaceView }, modifier = Modifier.fillMaxSize())
+        // A renderer that cannot draw says why, in place of the frame it cannot show: a file whose
+        // codec this device does not have is a real answer the user can act on, and a silent black
+        // stage is not.
+        (preview as? PreviewState.Unavailable)?.let { unavailable ->
+            Text(
+                text = unavailable.reason,
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.Center,
+            )
+        }
+    }
+}
+
+/**
+ * The stage's surface, which says when its window stops being visible.
+ *
+ * A subclass rather than a plain `SurfaceView` because "the app is in the background" has to be
+ * readable here without a `Lifecycle` dependency this module does not declare, and because this is the
+ * platform's own signal for it: `onWindowVisibilityChanged` is dispatched down the view tree when the
+ * hosting window is hidden or shown — the same event that destroys the surface a video would have been
+ * rendered to.
+ *
+ * Nullable, and cleared from a `DisposableEffect`: a view that outlives the composition that made it
+ * must not call back into state nobody is holding any more.
+ */
+private class PreviewSurfaceView(context: Context) : SurfaceView(context) {
+
+    /** Called with `true` when the window hosting this view becomes visible. */
+    var onWindowVisibility: ((Boolean) -> Unit)? = null
+
+    override fun onWindowVisibilityChanged(visibility: Int) {
+        super.onWindowVisibilityChanged(visibility)
+        onWindowVisibility?.invoke(visibility == View.VISIBLE)
     }
 }
 
@@ -122,30 +201,35 @@ private fun PlayheadFrame(
  * While a trim is open the stage shows THE FRAME rather than a sentence about the stage — the user is
  * choosing an in- or out-point, and the only thing that answers "am I there yet" is the picture.
  *
- * ### The known cost
+ * ### Why this one is still a decode, and why that is not a shortcut around the renderer
  *
- * This asks for a frame per drag update, and each one is a fresh decode (the cache key includes the
- * time, so every position is a miss). The broker's semaphores bound how many decodes run at once and
- * the store's LRU keeps the recent ones, so the UI degrades to a lagging frame rather than to jank —
- * but a fast drag is doing more decoding than it needs to, and `LaunchedEffect` cancelling the previous
- * request is the only throttling here. The real answer is the composition path's player, already
- * holding decoded frames, rather than a decoder asked for one picture at a time.
+ * A trim edge is dragged into media the clip does NOT contain: pulling the in-point back re-includes
+ * frames that were trimmed away, and those are by definition not in the composition the renderer is
+ * playing. So the player cannot answer this question, and a still decode is the honest instrument —
+ * the same `MediaMetadataRetriever` the filmstrip uses, behind the same broker (§9.1), at the stage's
+ * size ([com.redcut.core.media.PreviewFrames.PREVIEW_WIDTH_PX]) rather than the filmstrip's.
+ *
+ * It is therefore the one `Bitmap` left in the preview path, and rule D5 is about the preview SURFACE
+ * rather than about this: the stage is a `SurfaceView` now, and a still of a frame the composition does
+ * not contain is a picture rather than a frame in the pipeline.
+ *
+ * The cost is real and unchanged: this asks for a frame per drag update, and each one is a fresh
+ * decode. The broker's semaphores bound how many run at once and the store's LRU keeps the recent ones,
+ * so the UI degrades to a lagging frame rather than to jank.
  */
 @Composable
 private fun EdgeFrame(
     state: EditorUiState,
     trimming: ToolState.Trimming,
-    onThumbnail: suspend (sourceId: String, uri: String, positionUs: Long) -> ImageBitmap?,
+    onPreviewFrame: suspend (uri: String, positionUs: Long) -> ImageBitmap?,
 ) {
     val clip = state.document.clips.firstOrNull { it.id == trimming.clipId }
     val uri = clip?.let { c -> state.document.sources.firstOrNull { it.id == c.sourceId }?.uri }
     var frame by remember { mutableStateOf<ImageBitmap?>(null) }
     LaunchedEffect(clip?.sourceId, uri, trimming.sourceTimeUs) {
-        frame = if (clip != null && uri != null) {
-            onThumbnail(clip.sourceId, uri, trimming.sourceTimeUs)
-        } else {
-            null
-        }
+        // `sourceTimeUs` is already the edge's position in the SOURCE file — the drag is reported in
+        // source time (ToolState.Trimming), so nothing has to be mapped back here.
+        frame = if (uri != null) onPreviewFrame(uri, trimming.sourceTimeUs) else null
     }
 
     Column(horizontalAlignment = Alignment.CenterHorizontally) {

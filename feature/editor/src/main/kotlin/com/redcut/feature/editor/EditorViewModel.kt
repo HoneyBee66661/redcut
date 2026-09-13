@@ -7,6 +7,7 @@ import com.redcut.core.common.IdSource
 import com.redcut.core.common.di.IoDispatcher
 import com.redcut.core.common.logging.RedcutLogger
 import com.redcut.core.media.MediaSourceReader
+import com.redcut.core.media.PreviewRenderer
 import com.redcut.core.media.SourceReadResult
 import com.redcut.domain.document.Clip
 import com.redcut.domain.document.CompoundCommand
@@ -66,6 +67,17 @@ class EditorViewModel @Inject constructor(
     private val images: EditorImages,
     private val projects: ProjectStore,
     private val ids: IdSource,
+    /**
+     * The preview's renderer (spec §8.4).
+     *
+     * Public because the screen has to hold it too: §6.8 rule D6 is *"the UI holds the interface"*, and
+     * the composable that owns the `SurfaceView` is the only place that knows when that surface appears
+     * and when the app goes to the background. The ViewModel owns the LIFETIME — it is the thing whose
+     * end means "this screen is gone" — and the screen owns the binding. That split is also why the
+     * renderer is not a field of [EditorUiState]: it is a resource with a lifetime, not a value to
+     * render, and §7.2's one-state rule is about the values the UI draws.
+     */
+    val previewRenderer: PreviewRenderer,
     // `@param:` for the same reason as in :core:media — Kotlin 2.2 warns that a bare
     // annotation on a constructor property will also apply to the field, and CI compiles
     // with `-Werror`. Stating the target we mean costs one token and cannot regress.
@@ -131,6 +143,19 @@ class EditorViewModel @Inject constructor(
 
     /** The single source of truth the UI renders. */
     val state: StateFlow<EditorUiState> = _state.asStateFlow()
+
+    /**
+     * Gives the preview's decoder back (spec §9.1).
+     *
+     * A renderer holds a `Media3` player, a player holds a hardware decoder, and the device's pool of
+     * them is small and shared — so the end of this screen is the end of the preview's claim on one. The
+     * screen releases its surface separately; between the two, no path out of the editor leaves a codec
+     * held.
+     */
+    override fun onCleared() {
+        previewRenderer.release()
+        super.onCleared()
+    }
 
     /**
      * The dispatcher, in two branches.
@@ -267,10 +292,7 @@ class EditorViewModel @Inject constructor(
                 publish()
             }
 
-            is EditorIntent.SetPlayhead -> {
-                val limit = history.current.timelineDurationUs
-                _state.value = _state.value.copy(playheadUs = intent.us.coerceIn(0L, limit))
-            }
+            is EditorIntent.SetPlayhead -> movePlayhead(intent.us)
 
             is EditorIntent.StepPlayhead -> stepPlayhead(intent.step)
 
@@ -303,8 +325,26 @@ class EditorViewModel @Inject constructor(
      * would be wrong by more the faster the clip plays.
      */
     private fun stepPlayhead(step: FrameStep) {
-        val moved = history.current.steppedPlayheadUs(_state.value.playheadUs, step)
-        _state.value = _state.value.copy(playheadUs = moved)
+        movePlayhead(history.current.steppedPlayheadUs(_state.value.playheadUs, step))
+    }
+
+    /**
+     * Puts the playhead at [us], and the preview with it (FR-2's "correct preview").
+     *
+     * One function for both playhead paths — a tap and a frame step — because they are one thing: the
+     * position the user is looking at, and the frame that position means. The preview is told the
+     * TIMELINE position and resolves the frame itself from the graph it was attached with, so nothing
+     * here maps a timeline position to a source position; that mapping has one owner and it is not the
+     * ViewModel.
+     *
+     * A seek with nothing attached is not lost: the renderer remembers it and applies it when the next
+     * composition is ready, which is exactly the state the user is in when they scrub while a rebuild is
+     * still opening.
+     */
+    private fun movePlayhead(us: Long) {
+        val next = us.coerceIn(0L, history.current.timelineDurationUs)
+        _state.value = _state.value.copy(playheadUs = next)
+        previewRenderer.seekTo(next)
     }
 
     /**
@@ -503,6 +543,11 @@ class EditorViewModel @Inject constructor(
             import = import,
             exportSheet = _state.value.exportSheet,
         )
+        // The preview follows the playhead this re-derived, for the same reason the re-derivation
+        // exists: a delete, a cut or an undo can move it, and a preview still showing the old position
+        // would be the one surface in the app disagreeing with the timeline. A seek is idempotent, so
+        // the common case — nothing moved — costs a comparison inside the renderer.
+        previewRenderer.seekTo(_state.value.playheadUs)
     }
 
     private companion object {

@@ -18,11 +18,15 @@ import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.redcut.core.media.PreviewRenderer
+import com.redcut.core.media.PreviewState
 import com.redcut.domain.document.FrameStep
 import com.redcut.feature.editor.timeline.TimelineCanvas
 
@@ -82,10 +86,10 @@ private const val TRACKS_HALF = 1f
 internal fun ColumnScope.PreviewHalf(
     state: EditorUiState,
     onIntent: (EditorIntent) -> Unit,
+    renderer: PreviewRenderer,
     onImportClick: () -> Unit,
     onBack: () -> Unit,
     onPreviewFrame: suspend (uri: String, positionUs: Long) -> ImageBitmap?,
-    onThumbnail: suspend (sourceId: String, uri: String, positionUs: Long) -> ImageBitmap?,
 ) {
     Column(modifier = Modifier.fillMaxWidth().weight(PREVIEW_HALF)) {
         TopBar(
@@ -97,8 +101,8 @@ internal fun ColumnScope.PreviewHalf(
         StagePreview(
             state = state,
             onIntent = onIntent,
+            renderer = renderer,
             onPreviewFrame = onPreviewFrame,
-            onThumbnail = onThumbnail,
             modifier = Modifier.fillMaxWidth().weight(1f),
         )
     }
@@ -158,12 +162,20 @@ private fun TopBar(
  * The transport strip: undo and redo flush left, the playhead's position and the play controls centred,
  * the keyframe placeholder flush right.
  *
- * Play is inert and says so, because the preview is a still frame until the composition player lands; a
- * button that looked live and did nothing would be worse than one that is visibly waiting. The keyframe
- * button is in its place and does nothing yet, tracked as its own task.
+ * Play is live now, and driven by the renderer rather than by an intent: playback is the player's own
+ * state (§8.4 gives `PreviewRenderer` a `StateFlow` for exactly this), so the button reads it there and
+ * asks the renderer to change it. Routing it through the ViewModel would mean a second copy of "is it
+ * playing" in `EditorUiState` and a synchronisation between the two — §7.2's sketch does give playback
+ * a field in the UI state, and the field is still owed; what is here is the player's answer, which
+ * cannot disagree with the player. The keyframe button is in its place and does nothing yet, tracked as
+ * its own task.
  */
 @Composable
-internal fun ColumnScope.TimelineControls(state: EditorUiState, onIntent: (EditorIntent) -> Unit) {
+internal fun ColumnScope.TimelineControls(
+    state: EditorUiState,
+    renderer: PreviewRenderer,
+    onIntent: (EditorIntent) -> Unit,
+) {
     val (canUndo, canRedo) = when (val history = state.history) {
         is HistoryState.Ready -> history.canUndo to history.canRedo
         HistoryState.Busy -> false to false
@@ -184,10 +196,30 @@ internal fun ColumnScope.TimelineControls(state: EditorUiState, onIntent: (Edito
         Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 FrameStepButtons(state = state, onIntent = onIntent)
-                TextButton(onClick = {}, enabled = false) { Text(PLAY_GLYPH) }
+                PlayPauseButton(renderer = renderer)
             }
         }
         TextButton(onClick = {}, enabled = false) { Text(KEYFRAME_GLYPH) }
+    }
+}
+
+/**
+ * Play / pause, and the state it shows comes from the player rather than from the tap.
+ *
+ * `enabled` follows `PreviewState.Ready` because a button that accepts a tap and produces nothing is
+ * worse than one that is visibly waiting — the same reasoning the strip's KDoc gives for the button
+ * being inert before the renderer existed. While a graph is `Preparing` or the document is empty there
+ * is nothing to play, and [PreviewState.Unavailable]'s reason is already on the stage.
+ */
+@Composable
+private fun PlayPauseButton(renderer: PreviewRenderer) {
+    val preview by renderer.state.collectAsState()
+    val playing = (preview as? PreviewState.Ready)?.isPlaying == true
+    TextButton(
+        onClick = { if (playing) renderer.pause() else renderer.play() },
+        enabled = preview is PreviewState.Ready,
+    ) {
+        Text(if (playing) PAUSE_GLYPH else PLAY_GLYPH)
     }
 }
 
@@ -289,18 +321,23 @@ internal fun FrameStepButtons(state: EditorUiState, onIntent: (EditorIntent) -> 
     }
 }
 
-/** The stage's own body: the preview frame, or the sentence that says what is missing. */
+/** The stage's own body: the rendered edit, the frame at a trim edge, or the sentence saying what is missing. */
 @Composable
 private fun StagePreview(
     state: EditorUiState,
     onIntent: (EditorIntent) -> Unit,
+    renderer: PreviewRenderer,
     onPreviewFrame: suspend (uri: String, positionUs: Long) -> ImageBitmap?,
-    onThumbnail: suspend (sourceId: String, uri: String, positionUs: Long) -> ImageBitmap?,
     modifier: Modifier = Modifier,
 ) {
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
+        // Both halves, and the reason they are both here rather than one replacing the other: the
+        // renderer is WHAT the edit is drawn on (the surface the player writes to), while
+        // EditorViewport is the frame AROUND it that handles zoom, pan and the selection. The
+        // stage's own thumbnail lambda is gone: a frame the renderer could not produce is a frame
+        // the stage no longer draws itself.
         EditorViewport(state = state, onIntent = onIntent) {
-            StageBody(state = state, onThumbnail = onThumbnail, onPreviewFrame = onPreviewFrame)
+            StageBody(state = state, renderer = renderer, onPreviewFrame = onPreviewFrame)
         }
     }
 }
@@ -317,5 +354,6 @@ internal fun Modifier.statusBarInset(): Modifier = windowInsetsPadding(WindowIns
 private const val UNDO_ARROW = "↶"
 private const val REDO_ARROW = "↷"
 private const val PLAY_GLYPH = "▶"
+private const val PAUSE_GLYPH = "❚❚"
 private const val KEYFRAME_GLYPH = "◇"
 private const val MICROS_PER_MILLI = 1_000L

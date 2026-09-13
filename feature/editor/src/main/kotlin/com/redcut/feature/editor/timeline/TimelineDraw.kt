@@ -377,6 +377,7 @@ internal fun DrawScope.drawPlayhead(
 private const val RULER_TICK_WIDTH_PX = 1f
 private const val SELECTION_BORDER_PX = 3f
 private const val SELECTION_STRIPE_PX = 6f
+
 /** How far a clip's top-edge tick reaches down the clip (task A3). A mark, not a division. */
 private const val CLIP_TOP_TICK_PX = 6f
 private const val PLAYHEAD_WIDTH_PX = 3f

@@ -48,7 +48,7 @@ class ClipMergeTest {
         )
 
     private fun EditDocument.reasonFor(clipId: String): String =
-        (mergeAvailability(clipId) as CutAvailability.Unavailable).reason
+        (mergeAvailability(VIDEO, clipId) as CutAvailability.Unavailable).reason
 
     // --- The run ------------------------------------------------------------
 
@@ -62,8 +62,8 @@ class ClipMergeTest {
             clip("c", 4 * oneSecond, 6 * oneSecond),
         )
 
-        assertThat(doc.mergeRunFrom("a").map { it.id }).containsExactly("a", "b", "c").inOrder()
-        assertThat(doc.mergeAvailability("a")).isEqualTo(CutAvailability.Available)
+        assertThat(doc.mergeRunFrom(VIDEO, "a").map { it.id }).containsExactly("a", "b", "c").inOrder()
+        assertThat(doc.mergeAvailability(VIDEO, "a")).isEqualTo(CutAvailability.Available)
     }
 
     @Test
@@ -75,8 +75,8 @@ class ClipMergeTest {
         )
 
         // b joins a; c does not join b, so the run is a and b — and c is not dragged along by force.
-        assertThat(doc.mergeRunFrom("a").map { it.id }).containsExactly("a", "b").inOrder()
-        assertThat(doc.mergeRunFrom("c").map { it.id }).containsExactly("c")
+        assertThat(doc.mergeRunFrom(VIDEO, "a").map { it.id }).containsExactly("a", "b").inOrder()
+        assertThat(doc.mergeRunFrom(VIDEO, "c").map { it.id }).containsExactly("c")
     }
 
     // --- The four reasons ---------------------------------------------------
@@ -170,7 +170,7 @@ class ClipMergeTest {
         )
 
         documents.forEach { doc ->
-            val available = doc.mergeAvailability("a") is CutAvailability.Available
+            val available = doc.mergeAvailability(VIDEO, "a") is CutAvailability.Available
             val command = doc.commandFor(CutTool.MERGE, 0L) { "unused" }
             assertThat(command != null).isEqualTo(available)
 

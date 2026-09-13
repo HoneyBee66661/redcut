@@ -137,7 +137,12 @@ internal fun TimelineCanvas(
                 draggedEdge = (tool as? ToolState.Trimming)?.edge,
                 draggedClipId = reorderDrag?.clipId,
                 markerUs = reorderDrag?.let { drag ->
-                    document.reorderMarkerUs(drag.clipId, drag.targetIndex)
+                    // A drag is a position within ONE lane's own order, so the marker is asked for on
+                    // the lane the dragged clip is on. Until the gesture layer carries a (track, clip)
+                    // pair of its own, that lane is looked up here, from the clip id it does carry.
+                    document.trackIdOf(drag.clipId)?.let { trackId ->
+                        document.reorderMarkerUs(trackId, drag.clipId, drag.targetIndex)
+                    }
                 },
             ),
         )
@@ -228,8 +233,13 @@ private fun buildReorderGestures(
     setDrag: (ReorderDrag?) -> Unit,
     onIntent: (EditorIntent) -> Unit,
 ): ReorderGestures {
-    fun targetAt(clipId: String, screenX: Float): Int =
-        document.reorderTargetIndex(clipId, geometry.usFor(geometry.contentPxFor(screenX)))
+    fun targetAt(clipId: String, screenX: Float): Int {
+        // The same lane lookup the marker uses, and for the same reason: a drop lands in one track's
+        // order. A clip id no track holds has no slot to land in, so the answer is 0 and the drop is a
+        // no-op rather than a guess.
+        val trackId = document.trackIdOf(clipId) ?: return 0
+        return document.reorderTargetIndex(trackId, clipId, geometry.usFor(geometry.contentPxFor(screenX)))
+    }
 
     return ReorderGestures(
         start = { clipId, screenX ->

@@ -37,13 +37,17 @@ internal fun mergeBlocker(left: Clip, right: Clip): String? = when {
 }
 
 /**
- * The maximal run starting at [clipId] that could fuse, in timeline order.
+ * The maximal run starting at [clipId] that could fuse, in timeline order, ON ONE TRACK.
  *
  * Walking forwards rather than asking for a fixed selection is what makes FR-2.4's "two or more"
  * work: a clip split into five pieces and never retrimmed fuses back in one action, and the first
  * clip that cannot join stops the run.
+ *
+ * The walk never leaves [trackId]: a run is a stretch of one lane, so the clip after the last one on
+ * a track is nothing, not the first clip of the next track.
  */
-fun EditDocument.mergeRunFrom(clipId: String): List<Clip> {
+fun EditDocument.mergeRunFrom(trackId: String, clipId: String): List<Clip> {
+    val clips = trackById(trackId)?.clips ?: return emptyList()
     val start = clips.indexOfFirst { it.id == clipId }
     if (start < 0) return emptyList()
     val run = mutableListOf(clips[start])
@@ -56,13 +60,15 @@ fun EditDocument.mergeRunFrom(clipId: String): List<Clip> {
 }
 
 /**
- * May the clip at the playhead be merged with what follows it?
+ * May the clip at the playhead be merged with what follows it on [trackId]?
  *
  * Separate reasons for the three ways it can fail, because they have nothing in common from the user's
- * side: there is no clip, there is nothing after it, or the next clip cannot join and the specific
- * clause above says why.
+ * side: there is no clip on that lane, there is nothing after it, or the next clip cannot join and the
+ * specific clause above says why. An unknown track reads as the first of those: there is nothing there
+ * to merge, which is what the toolbar's disabled button should say.
  */
-fun EditDocument.mergeAvailability(clipId: String): CutAvailability {
+fun EditDocument.mergeAvailability(trackId: String, clipId: String): CutAvailability {
+    val clips = trackById(trackId)?.clips ?: return CutAvailability.Unavailable(NOTHING_TO_MERGE)
     if (clips.isEmpty()) return CutAvailability.Unavailable(NOTHING_TO_MERGE)
     val start = clips.indexOfFirst { it.id == clipId }
     if (start < 0) return CutAvailability.Unavailable(NOTHING_TO_MERGE)
@@ -75,20 +81,21 @@ fun EditDocument.mergeAvailability(clipId: String): CutAvailability {
 }
 
 /**
- * The run [ids] selects, or null when the selection is not a legal merge (FR-2.4).
+ * The run [ids] selects on [trackId], or null when the selection is not a legal merge (FR-2.4).
  *
  * Two steps, named and separate, because they are two different questions: WHERE the clips are (a
- * contiguous run of real clips) and whether the PICTURE allows them to fuse (source-adjacent, same
- * speed and direction). The command and the toolbar both read the answer — which is the whole point
- * of the file, and why the two steps are not inlined into one block of guards.
+ * contiguous run of real clips on ONE lane) and whether the PICTURE allows them to fuse
+ * (source-adjacent, same speed and direction). The command and the toolbar both read the answer —
+ * which is the whole point of the file, and why the two steps are not inlined into one block of guards.
  */
-internal fun EditDocument.mergeRunOf(ids: List<String>): MergeRun? {
-    val run = contiguousRun(ids) ?: return null
+internal fun EditDocument.mergeRunOf(trackId: String, ids: List<String>): MergeRun? {
+    val run = contiguousRun(trackId, ids) ?: return null
     return if (run.isMergeable()) run else null
 }
 
-/** The contiguous run [ids] selects, or null when the selection is not the run it claims to be. */
-private fun EditDocument.contiguousRun(ids: List<String>): MergeRun? {
+/** The contiguous run [ids] selects on [trackId], or null when the selection is not the run it claims. */
+private fun EditDocument.contiguousRun(trackId: String, ids: List<String>): MergeRun? {
+    val clips = trackById(trackId)?.clips ?: return null
     val unique = ids.distinct()
     if (unique.size < 2 || unique.size != ids.size) return null
 

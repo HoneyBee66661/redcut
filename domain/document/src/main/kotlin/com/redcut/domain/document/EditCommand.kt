@@ -23,6 +23,18 @@ package com.redcut.domain.document
  * Commands address clips by *source* time, never timeline time, because timeline
  * position is derived ([EditDocument.timeline]). Callers holding a playhead
  * position convert once at the edge via [EditDocument.slotAt].
+ *
+ * ### Every clip command names its track
+ *
+ * A command that touches a clip carries the `trackId` of the lane it expects to find it on, and
+ * refuses when the clip is not there. That is not bookkeeping: clip ids are unique, so a command could
+ * look a clip up without a lane and still find it — and then apply a trim, a delete or a ripple to a
+ * lane the user is not looking at, because the id came from a frame the timeline has since moved past.
+ * Naming the lane turns that class of bug into a no-op, and turns "which track was this meant for?"
+ * into a question the CALLER has to answer rather than one the command guesses.
+ *
+ * The lane is therefore a precondition, exactly like "the clip exists": unmet, the command returns the
+ * document unchanged. Nothing here creates a track, and nothing moves a clip between tracks.
  */
 sealed interface EditCommand {
     /** Human-readable, shown as "Undo <label>" (spec §7.3). */
@@ -79,11 +91,15 @@ data class AddSource(val source: SourceRef) : EditCommand {
  * Appends a clip to the end of the timeline (FR-1.2).
  *
  * Append rather than insert-at-index: import always lands last on the lane it
- * targets, and reordering is a separate explicit command. WHICH lane that is
- * becomes a parameter of this command when the commands name their track; today
- * it lands on the document's first track, like every other write.
+ * targets, and reordering is a separate explicit command.
+ *
+ * [trackId] is the lane it targets, and it must be a lane the document already
+ * has — this command adds a clip, never a track. An unknown id is a no-op, which
+ * is what keeps a stale `(track, clip)` pair from a frame the user has already
+ * scrolled past out of the document.
  */
 data class AppendClip(
+    val trackId: String,
     val clipId: String,
     val sourceId: String,
     val sourceInUs: Long,
@@ -92,8 +108,11 @@ data class AppendClip(
     override val label: String get() = "Add clip"
 
     override fun apply(doc: EditDocument): EditDocument {
+        val track = doc.trackById(trackId) ?: return doc
         // A clip must point at a live source, or the document stops being renderable.
         if (doc.sourceById(sourceId) == null) return doc
+        // Clip ids are unique across the DOCUMENT, not per track: an id that already exists on another
+        // lane would make `clipById` ambiguous, and every effect names a clip by id alone.
         if (doc.clipById(clipId) != null) return doc
         if (sourceOutUs - sourceInUs < Clip.MIN_DURATION_US) return doc
         val clip = Clip(
@@ -102,7 +121,7 @@ data class AppendClip(
             sourceInUs = sourceInUs,
             sourceOutUs = sourceOutUs,
         )
-        return doc.withClips(doc.clips + clip)
+        return doc.withTrackClips(trackId, track.clips + clip)
     }
 }
 
@@ -117,8 +136,12 @@ data class AppendClip(
  * Clamps to `[0, source.durationUs]` and to [Clip.MIN_DURATION_US]. Clamping rather
  * than rejecting is right for a drag gesture: the UI sends the raw finger position
  * every frame and expects the clip to stop at its limit rather than refuse to move.
+ *
+ * [trackId] must be the lane the clip is on: a trim is a change to one clip's edges, so a caller that
+ * names the wrong lane gets a refusal rather than a clip on a lane the user is not looking at.
  */
 data class TrimClip(
+    val trackId: String,
     val clipId: String,
     val sourceInUs: Long,
     val sourceOutUs: Long,
@@ -126,7 +149,7 @@ data class TrimClip(
     override val label: String get() = "Trim"
 
     override fun apply(doc: EditDocument): EditDocument {
-        val clip = doc.clipById(clipId) ?: return doc
+        val clip = doc.trackById(trackId)?.clipById(clipId) ?: return doc
         val source = doc.sourceById(clip.sourceId) ?: return doc
 
         // Fall back to the clip's own bounds when the probe did not report a
@@ -140,7 +163,7 @@ data class TrimClip(
         val newOut = sourceOutUs.coerceIn(newIn + Clip.MIN_DURATION_US, ceiling)
 
         if (newIn == clip.sourceInUs && newOut == clip.sourceOutUs) return doc
-        return doc.withClip(clip.copy(sourceInUs = newIn, sourceOutUs = newOut))
+        return doc.withClip(trackId, clip.copy(sourceInUs = newIn, sourceOutUs = newOut))
     }
 }
 
@@ -152,6 +175,7 @@ data class TrimClip(
  * be compared, replayed, or asserted on.
  */
 data class SplitClip(
+    val trackId: String,
     val clipId: String,
     val atSourceUs: Long,
     val newClipId: String,
@@ -159,7 +183,9 @@ data class SplitClip(
     override val label: String get() = "Split"
 
     override fun apply(doc: EditDocument): EditDocument {
-        val clip = doc.clipById(clipId) ?: return doc
+        // A split produces TWO clips on the SAME lane: the halves are two pieces of one clip's place in
+        // the timeline, so a split that named the wrong lane could not be applied at all.
+        val clip = doc.trackById(trackId)?.clipById(clipId) ?: return doc
         // The new id must be fresh; otherwise the split would overwrite a clip.
         if (newClipId == clipId || doc.clipById(newClipId) != null) return doc
         // Outside the clip's own source range there is nothing to split. Guarding
@@ -173,7 +199,7 @@ data class SplitClip(
         if (left.sourceDurationUs < Clip.MIN_DURATION_US) return doc
         if (right.sourceDurationUs < Clip.MIN_DURATION_US) return doc
 
-        return doc.replaceClip(clipId, listOf(left, right))
+        return doc.replaceClip(trackId, clipId, listOf(left, right))
     }
 }
 
@@ -189,35 +215,35 @@ data class SplitClip(
  * pointing at this clip and drops the UI's current selection. The arithmetic is
  * shared; the identity is preserved on purpose.
  */
-data class CutLeft(val clipId: String, val atSourceUs: Long) : EditCommand {
+data class CutLeft(val trackId: String, val clipId: String, val atSourceUs: Long) : EditCommand {
     override val label: String get() = "Cut left"
 
     override fun apply(doc: EditDocument): EditDocument {
-        val clip = doc.clipById(clipId) ?: return doc
+        val clip = doc.trackById(trackId)?.clipById(clipId) ?: return doc
         // Nothing before the playhead to remove.
         if (atSourceUs <= clip.sourceInUs) return doc
         // The surviving tail would be shorter than the minimum: delete instead, as
         // FR-2 specifies for a clip that would go below the floor.
         if (clip.sourceOutUs - atSourceUs < Clip.MIN_DURATION_US) {
-            return DeleteClip(clipId).apply(doc)
+            return DeleteClip(trackId, clipId).apply(doc)
         }
         val (_, tail) = clip.splitAtSource(atSourceUs, clip.id)
-        return doc.withClip(tail)
+        return doc.withClip(trackId, tail)
     }
 }
 
 /** Remove everything in the active clip after the playhead (FR-2.3). See [CutLeft]. */
-data class CutRight(val clipId: String, val atSourceUs: Long) : EditCommand {
+data class CutRight(val trackId: String, val clipId: String, val atSourceUs: Long) : EditCommand {
     override val label: String get() = "Cut right"
 
     override fun apply(doc: EditDocument): EditDocument {
-        val clip = doc.clipById(clipId) ?: return doc
+        val clip = doc.trackById(trackId)?.clipById(clipId) ?: return doc
         if (atSourceUs >= clip.sourceOutUs) return doc
         if (atSourceUs - clip.sourceInUs < Clip.MIN_DURATION_US) {
-            return DeleteClip(clipId).apply(doc)
+            return DeleteClip(trackId, clipId).apply(doc)
         }
         val (head, _) = clip.splitAtSource(atSourceUs, clip.id)
-        return doc.withClip(head)
+        return doc.withClip(trackId, head)
     }
 }
 
@@ -228,18 +254,20 @@ data class CutRight(val clipId: String, val atSourceUs: Long) : EditCommand {
  * invariant that every `EffectScope.Clip` references a live clip (spec §7.2), and
  * the failure would surface much later as effects that never render.
  *
- * Refuses to empty the timeline: an empty document cannot be rendered and cannot
- * be recovered from by undo in any way the UI exposes, so the invariant
- * `clips.size >= 1` is held here rather than left to callers.
+ * Refuses to empty the DOCUMENT: an empty document cannot be rendered and cannot be recovered from by
+ * undo in any way the UI exposes, so the invariant `clips.size >= 1` is held here rather than left to
+ * callers. Emptying one LANE is a different thing and is allowed — the audio workstream's document is
+ * one whose video lane has nothing in it, and a guard per track would forbid exactly that.
  */
-data class DeleteClip(val clipId: String) : EditCommand {
+data class DeleteClip(val trackId: String, val clipId: String) : EditCommand {
     override val label: String get() = "Delete"
 
     override fun apply(doc: EditDocument): EditDocument {
-        if (doc.clipById(clipId) == null) return doc
+        val track = doc.trackById(trackId) ?: return doc
+        if (track.clipById(clipId) == null) return doc
         if (doc.clips.size <= 1) return doc
         return doc
-            .withClips(doc.clips.filterNot { it.id == clipId })
+            .withTrackClips(trackId, track.clips.filterNot { it.id == clipId })
             .copy(effects = doc.effects.filterNot { it.scope.isScopedTo(clipId) })
     }
 }
@@ -262,18 +290,22 @@ data class DeleteClip(val clipId: String) : EditCommand {
  * The merged clip inherits the *first* clip's properties and spans the union of
  * the source ranges.
  */
-data class MergeClips(val clipIds: List<String>) : EditCommand {
+data class MergeClips(val trackId: String, val clipIds: List<String>) : EditCommand {
     override val label: String get() = "Merge"
 
     override fun apply(doc: EditDocument): EditDocument {
-        val run = doc.mergeRunOf(clipIds) ?: return doc
+        // The run is looked for ON [trackId] and nothing else: "the clips between these two" is a
+        // question about one lane, and asking it of the whole document would let a video clip merge
+        // with an audio one that happens to sit next to it in the flattened reading.
+        val run = doc.mergeRunOf(trackId, clipIds) ?: return doc
+        val track = doc.trackById(trackId) ?: return doc
 
         val merged = run.clips.first().copy(sourceOutUs = run.clips.last().sourceOutUs)
         // Replace the whole run with the merged clip, preserving position.
-        val mergedClips = doc.clips.toMutableList()
+        val mergedClips = track.clips.toMutableList()
         repeat(run.clips.size) { mergedClips.removeAt(run.startIndex) }
         mergedClips.add(run.startIndex, merged)
-        return doc.withClips(mergedClips)
+        return doc.withTrackClips(trackId, mergedClips)
     }
 }
 
@@ -282,33 +314,49 @@ data class MergeClips(val clipIds: List<String>) : EditCommand {
  *
  * Ripple is implicit: every other clip's timeline position is derived, so moving
  * one clip is the entire operation.
+ *
+ * The index is a position ON ONE LANE. A drag along the timeline is a drag along
+ * one track's own order, and a clip can no more jump lanes by being dragged than it
+ * can by being cut — moving a clip between tracks is a different operation, and one
+ * the schema does not offer yet.
  */
-data class ReorderClip(val clipId: String, val toIndex: Int) : EditCommand {
+data class ReorderClip(val trackId: String, val clipId: String, val toIndex: Int) : EditCommand {
     override val label: String get() = "Reorder"
 
     override fun apply(doc: EditDocument): EditDocument {
-        val from = doc.clips.indexOfFirst { it.id == clipId }
+        val track = doc.trackById(trackId) ?: return doc
+        val from = track.clips.indexOfFirst { it.id == clipId }
         if (from < 0) return doc
-        val to = toIndex.coerceIn(0, doc.clips.lastIndex)
+        val to = toIndex.coerceIn(0, track.clips.lastIndex)
         if (from == to) return doc
-        val reordered = doc.clips.toMutableList()
+        val reordered = track.clips.toMutableList()
         reordered.add(to, reordered.removeAt(from))
-        return doc.withClips(reordered)
+        return doc.withTrackClips(trackId, reordered)
     }
 }
 
-/** Duplicate a clip immediately after itself (FR-2.8). */
-data class DuplicateClip(val clipId: String, val newClipId: String) : EditCommand {
+/**
+ * Duplicate a clip immediately after itself (FR-2.8).
+ *
+ * The copy lands on the SAME lane as the original, at the position right after it: a duplicate is
+ * "that shot again", and a copy that appeared on another track would be a different edit.
+ */
+data class DuplicateClip(
+    val trackId: String,
+    val clipId: String,
+    val newClipId: String,
+) : EditCommand {
     override val label: String get() = "Duplicate"
 
     override fun apply(doc: EditDocument): EditDocument {
-        val index = doc.clips.indexOfFirst { it.id == clipId }
+        val track = doc.trackById(trackId) ?: return doc
+        val index = track.clips.indexOfFirst { it.id == clipId }
         if (index < 0) return doc
         if (newClipId == clipId || doc.clipById(newClipId) != null) return doc
-        val duplicate = doc.clips[index].copy(id = newClipId)
-        val clips = doc.clips.toMutableList()
+        val duplicate = track.clips[index].copy(id = newClipId)
+        val clips = track.clips.toMutableList()
         clips.add(index + 1, duplicate)
-        return doc.withClips(clips)
+        return doc.withTrackClips(trackId, clips)
     }
 }
 
@@ -330,24 +378,30 @@ data class DuplicateClip(val clipId: String, val newClipId: String) : EditComman
 private fun Clip.splitAtSource(atSourceUs: Long, rightClipId: String): Pair<Clip, Clip> =
     copy(sourceOutUs = atSourceUs) to copy(id = rightClipId, sourceInUs = atSourceUs)
 
-/** Replaces the clip with [clipId], in place, with [replacements]. */
-private fun EditDocument.replaceClip(clipId: String, replacements: List<Clip>): EditDocument {
+/** Replaces the clip with [clipId], in place ON ITS OWN TRACK, with [replacements]. */
+private fun EditDocument.replaceClip(
+    trackId: String,
+    clipId: String,
+    replacements: List<Clip>,
+): EditDocument {
+    val clips = trackById(trackId)?.clips ?: return this
     val index = clips.indexOfFirst { it.id == clipId }
     if (index < 0) return this
     val updated = clips.toMutableList()
     updated.removeAt(index)
     updated.addAll(index, replacements)
-    return withClips(updated)
+    return withTrackClips(trackId, updated)
 }
 
 /**
- * Replaces the clip with one that has the same id, or leaves the document alone.
+ * Replaces the clip with one that has the same id, on [trackId], or leaves the document alone.
  *
  * `internal` rather than private-to-this-file: the Edit stage's commands (AdjustCommands.kt) replace a
  * clip the same way the Cut stage's do, and a second copy of "swap one clip by id" is a second place
  * for the id-matching rule to be got wrong.
  */
-internal fun EditDocument.withClip(clip: Clip): EditDocument = replaceClip(clip.id, listOf(clip))
+internal fun EditDocument.withClip(trackId: String, clip: Clip): EditDocument =
+    replaceClip(trackId, clip.id, listOf(clip))
 
 /** True when this scope targets [clipId]. */
 internal fun EffectScope.isScopedTo(clipId: String): Boolean =

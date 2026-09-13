@@ -168,7 +168,7 @@ class CutToolsTest {
 
         val command = doc.commandFor(CutTool.SPLIT, 2 * oneSecond, ids)
 
-        assertThat(command).isEqualTo(SplitClip("clip-a", 2 * oneSecond, "clip-new"))
+        assertThat(command).isEqualTo(SplitClip(VIDEO, "clip-a", 2 * oneSecond, "clip-new"))
         assertThat(minted).isEqualTo(1)
 
         // Past the end: no command, and no id invented for one either.
@@ -181,7 +181,7 @@ class CutToolsTest {
         // clip-b reads 8 s..12 s of its source; two seconds into it is source 10 s.
         val command = twoClips().commandFor(CutTool.CUT_LEFT, 6 * oneSecond) { "unused" }
 
-        assertThat(command).isEqualTo(CutLeft("clip-b", 10 * oneSecond))
+        assertThat(command).isEqualTo(CutLeft(VIDEO, "clip-b", 10 * oneSecond))
     }
 
     @Test
@@ -215,7 +215,7 @@ class CutToolsTest {
         val doc = twoClips()
         val split = doc.commandFor(CutTool.SPLIT, 2 * oneSecond) { "clip-new" }!!
         val afterSplit = split.apply(doc)
-        val afterDeleteLeft = DeleteClip("clip-a").apply(afterSplit)
+        val afterDeleteLeft = DeleteClip(VIDEO, "clip-a").apply(afterSplit)
 
         // The ripple closes the gap: clip-b (the one that was never touched) follows the second half
         // of the split immediately.

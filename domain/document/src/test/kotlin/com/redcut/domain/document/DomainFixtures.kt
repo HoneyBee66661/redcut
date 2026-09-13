@@ -6,6 +6,15 @@ import org.junit.jupiter.api.Assertions.assertTrue
 
 internal const val SEC = 1_000_000L
 
+/**
+ * The lane the fixtures put their clips on.
+ *
+ * Every command now names the track it touches, so a test that means "the clip on the timeline"
+ * has to say which lane that is. `Track.MAIN_ID` rather than a literal, so a test cannot pass while
+ * naming a track the fixture never built.
+ */
+internal const val VIDEO = Track.MAIN_ID
+
 internal fun source(id: String, durationUs: Long = 10 * SEC): SourceRef = SourceRef(
     id = id,
     // Deliberately not a real Uri: the domain must never learn about android.net.Uri

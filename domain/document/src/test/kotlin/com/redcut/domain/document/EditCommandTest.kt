@@ -24,7 +24,7 @@ class EditCommandTest {
     @Test
     fun `trim clamps the out point to the source duration`() {
         val doc = sampleDocument()
-        val trimmed = TrimClip("c1", 0L, 99 * SEC).apply(doc)
+        val trimmed = TrimClip(VIDEO, "c1", 0L, 99 * SEC).apply(doc)
         val clip = trimmed.clipById("c1")!!
         assertEquals(10 * SEC, clip.sourceOutUs, "out point should stop at the source end")
     }
@@ -32,7 +32,7 @@ class EditCommandTest {
     @Test
     fun `trim clamps to the minimum clip duration rather than producing a zero-length clip`() {
         val doc = sampleDocument()
-        val trimmed = TrimClip("c1", 500_000L, 500_001L).apply(doc)
+        val trimmed = TrimClip(VIDEO, "c1", 500_000L, 500_001L).apply(doc)
         val clip = trimmed.clipById("c1")!!
         assertTrue(clip.sourceDurationUs >= Clip.MIN_DURATION_US) {
             "trim collapsed the clip to ${clip.sourceDurationUs}us"
@@ -42,21 +42,21 @@ class EditCommandTest {
     @Test
     fun `trim never produces a negative in point`() {
         val doc = sampleDocument()
-        val trimmed = TrimClip("c1", -5 * SEC, 1 * SEC).apply(doc)
+        val trimmed = TrimClip(VIDEO, "c1", -5 * SEC, 1 * SEC).apply(doc)
         assertEquals(0L, trimmed.clipById("c1")!!.sourceInUs)
     }
 
     @Test
     fun `trim extends outward as well as shrinking`() {
         val doc = sampleDocument()
-        val trimmed = TrimClip("c1", 0L, 4 * SEC).apply(doc)
+        val trimmed = TrimClip(VIDEO, "c1", 0L, 4 * SEC).apply(doc)
         assertEquals(4 * SEC, trimmed.clipById("c1")!!.sourceOutUs)
     }
 
     @Test
     fun `trim is a no-op when the range is unchanged`() {
         val doc = sampleDocument()
-        assertSame(doc, TrimClip("c1", 0L, 2 * SEC).apply(doc))
+        assertSame(doc, TrimClip(VIDEO, "c1", 0L, 2 * SEC).apply(doc))
     }
 
     @Test
@@ -65,7 +65,7 @@ class EditCommandTest {
         val doc = sampleDocument().let {
             it.copy(sources = listOf(source("s1", durationUs = 0L)))
         }
-        val trimmed = TrimClip("c1", 0L, 2 * SEC).apply(doc)
+        val trimmed = TrimClip(VIDEO, "c1", 0L, 2 * SEC).apply(doc)
         assertInvariants(trimmed, "zero-duration probe")
     }
 
@@ -74,7 +74,7 @@ class EditCommandTest {
     @Test
     fun `split produces two contiguous clips covering the original range`() {
         val doc = sampleDocument()
-        val split = SplitClip("c1", 1 * SEC, "c1b").apply(doc)
+        val split = SplitClip(VIDEO, "c1", 1 * SEC, "c1b").apply(doc)
         val left = split.clipById("c1")!!
         val right = split.clipById("c1b")!!
         assertEquals(0L, left.sourceInUs)
@@ -91,13 +91,13 @@ class EditCommandTest {
     @Test
     fun `split refuses a point that would leave a sub-minimum half`() {
         val doc = sampleDocument()
-        assertSame(doc, SplitClip("c1", 50_000L, "c1b").apply(doc))
+        assertSame(doc, SplitClip(VIDEO, "c1", 50_000L, "c1b").apply(doc))
     }
 
     @Test
     fun `split refuses to reuse an existing clip id`() {
         val doc = sampleDocument()
-        assertSame(doc, SplitClip("c1", 1 * SEC, "c2").apply(doc))
+        assertSame(doc, SplitClip(VIDEO, "c1", 1 * SEC, "c2").apply(doc))
     }
 
     @Test
@@ -105,8 +105,8 @@ class EditCommandTest {
         // c1 is 0L..2*SEC. A split point outside that range has no halves to make,
         // and must return the document untouched rather than throw.
         val doc = sampleDocument()
-        assertSame(doc, SplitClip("c1", 0L, "c1b").apply(doc), "at the in point")
-        assertSame(doc, SplitClip("c1", 2 * SEC, "c1b").apply(doc), "at the out point")
+        assertSame(doc, SplitClip(VIDEO, "c1", 0L, "c1b").apply(doc), "at the in point")
+        assertSame(doc, SplitClip(VIDEO, "c1", 2 * SEC, "c1b").apply(doc), "at the out point")
     }
 
     // --- Cut left / right (FR-2.2, FR-2.3) --------------------------------
@@ -114,7 +114,7 @@ class EditCommandTest {
     @Test
     fun `cut left keeps the tail and preserves the clip identity`() {
         val doc = sampleDocument()
-        val cut = CutLeft("c1", 1 * SEC).apply(doc)
+        val cut = CutLeft(VIDEO, "c1", 1 * SEC).apply(doc)
         val clip = cut.clipById("c1")
         assertNotNull(clip, "the surviving tail must keep the original clip id")
         assertEquals(1 * SEC, clip!!.sourceInUs)
@@ -124,7 +124,7 @@ class EditCommandTest {
     @Test
     fun `cut right keeps the head and preserves the clip identity`() {
         val doc = sampleDocument()
-        val cut = CutRight("c2", 3 * SEC).apply(doc)
+        val cut = CutRight(VIDEO, "c2", 3 * SEC).apply(doc)
         val clip = cut.clipById("c2")
         assertNotNull(clip, "the surviving head must keep the original clip id")
         assertEquals(2 * SEC, clip!!.sourceInUs)
@@ -134,25 +134,25 @@ class EditCommandTest {
     @Test
     fun `cut left at or before the in point changes nothing`() {
         val doc = sampleDocument()
-        assertSame(doc, CutLeft("c1", 0L).apply(doc))
-        assertSame(doc, CutLeft("c1", -1 * SEC).apply(doc))
+        assertSame(doc, CutLeft(VIDEO, "c1", 0L).apply(doc))
+        assertSame(doc, CutLeft(VIDEO, "c1", -1 * SEC).apply(doc))
     }
 
     @Test
     fun `cut right at or past the out point changes nothing`() {
         val doc = sampleDocument()
-        assertSame(doc, CutRight("c2", 5 * SEC).apply(doc))
-        assertSame(doc, CutRight("c2", 6 * SEC).apply(doc))
+        assertSame(doc, CutRight(VIDEO, "c2", 5 * SEC).apply(doc))
+        assertSame(doc, CutRight(VIDEO, "c2", 6 * SEC).apply(doc))
     }
 
     @Test
     fun `a cut that would leave a sub-minimum clip deletes it instead`() {
         // FR-2: "a clip that would go below it is deleted instead".
         val doc = sampleDocument()
-        val cutLeft = CutLeft("c1", 2 * SEC - 1_000L).apply(doc)
+        val cutLeft = CutLeft(VIDEO, "c1", 2 * SEC - 1_000L).apply(doc)
         assertNull(cutLeft.clipById("c1"), "clip should have been deleted, not clamped")
 
-        val cutRight = CutRight("c1", 1_000L).apply(doc)
+        val cutRight = CutRight(VIDEO, "c1", 1_000L).apply(doc)
         assertNull(cutRight.clipById("c1"), "clip should have been deleted, not clamped")
     }
 
@@ -163,9 +163,9 @@ class EditCommandTest {
         // than the ids -- see the CutLeft kdoc.
         val doc = sampleDocument()
         val at = 700_000L
-        val viaCut = CutLeft("c1", at).apply(doc)
-        val viaSplitDelete = DeleteClip("c1")
-            .apply(SplitClip("c1", at, "scratch").apply(doc))
+        val viaCut = CutLeft(VIDEO, "c1", at).apply(doc)
+        val viaSplitDelete = DeleteClip(VIDEO, "c1")
+            .apply(SplitClip(VIDEO, "c1", at, "scratch").apply(doc))
 
         assertEquals(
             viaSplitDelete.clips.map { it.sourceInUs to it.sourceOutUs },
@@ -177,9 +177,9 @@ class EditCommandTest {
     fun `cut right is arithmetically equivalent to split then delete the tail`() {
         val doc = sampleDocument()
         val at = 700_000L
-        val viaCut = CutRight("c1", at).apply(doc)
-        val viaSplitDelete = DeleteClip("scratch")
-            .apply(SplitClip("c1", at, "scratch").apply(doc))
+        val viaCut = CutRight(VIDEO, "c1", at).apply(doc)
+        val viaSplitDelete = DeleteClip(VIDEO, "scratch")
+            .apply(SplitClip(VIDEO, "c1", at, "scratch").apply(doc))
 
         assertEquals(
             viaSplitDelete.clips.map { it.sourceInUs to it.sourceOutUs },
@@ -192,7 +192,7 @@ class EditCommandTest {
     @Test
     fun `delete ripples the gap closed`() {
         val doc = sampleDocument()
-        val after = DeleteClip("c1").apply(doc)
+        val after = DeleteClip(VIDEO, "c1").apply(doc)
         assertEquals(doc.durationUs - 2 * SEC, after.durationUs)
         assertEquals(0L, after.timeline.first().startUs, "c2 should now start at zero")
     }
@@ -217,7 +217,7 @@ class EditCommandTest {
                 ),
             )
         }
-        val after = DeleteClip("c1").apply(doc)
+        val after = DeleteClip(VIDEO, "c1").apply(doc)
         assertEquals(listOf("e-doc"), after.effects.map { it.id })
         assertInvariants(after, "delete with scoped effects")
     }
@@ -230,7 +230,7 @@ class EditCommandTest {
             sources = listOf(source("s1")),
             tracks = listOf(videoTrack(clip("only", "s1", 0L, SEC))),
         )
-        assertSame(single, DeleteClip("only").apply(single))
+        assertSame(single, DeleteClip(VIDEO, "only").apply(single))
     }
 
     // --- Merge (FR-2.4) ---------------------------------------------------
@@ -238,7 +238,7 @@ class EditCommandTest {
     @Test
     fun `merge joins source-adjacent clips into one`() {
         val doc = sampleDocument()
-        val merged = MergeClips(listOf("c1", "c2")).apply(doc)
+        val merged = MergeClips(VIDEO, listOf("c1", "c2")).apply(doc)
         assertEquals(1, merged.clips.size)
         assertEquals(0L, merged.clips[0].sourceInUs)
         assertEquals(5 * SEC, merged.clips[0].sourceOutUs)
@@ -258,7 +258,7 @@ class EditCommandTest {
                 ),
             )
         }
-        assertSame(short, MergeClips(listOf("a", "b")).apply(short))
+        assertSame(short, MergeClips(VIDEO, listOf("a", "b")).apply(short))
     }
 
     @Test
@@ -271,7 +271,7 @@ class EditCommandTest {
                 videoTrack(clip("a", "s1", 0L, 2 * SEC), clip("b", "s2", 2 * SEC, 4 * SEC)),
             ),
         )
-        assertSame(twoSources, MergeClips(listOf("a", "b")).apply(twoSources))
+        assertSame(twoSources, MergeClips(VIDEO, listOf("a", "b")).apply(twoSources))
     }
 
     @Test
@@ -288,7 +288,7 @@ class EditCommandTest {
                 ),
             )
         }
-        assertSame(mixed, MergeClips(listOf("a", "b")).apply(mixed))
+        assertSame(mixed, MergeClips(VIDEO, listOf("a", "b")).apply(mixed))
     }
 
     @Test
@@ -305,7 +305,7 @@ class EditCommandTest {
                 ),
             )
         }
-        assertSame(mixed, MergeClips(listOf("a", "b")).apply(mixed))
+        assertSame(mixed, MergeClips(VIDEO, listOf("a", "b")).apply(mixed))
     }
 
     @Test
@@ -321,15 +321,15 @@ class EditCommandTest {
                 ),
             )
         }
-        assertSame(separated, MergeClips(listOf("a", "b")).apply(separated))
+        assertSame(separated, MergeClips(VIDEO, listOf("a", "b")).apply(separated))
     }
 
     @Test
     fun `merge needs at least two distinct clips`() {
         val doc = sampleDocument()
-        assertSame(doc, MergeClips(listOf("c1")).apply(doc))
-        assertSame(doc, MergeClips(listOf("c1", "c1")).apply(doc))
-        assertSame(doc, MergeClips(emptyList()).apply(doc))
+        assertSame(doc, MergeClips(VIDEO, listOf("c1")).apply(doc))
+        assertSame(doc, MergeClips(VIDEO, listOf("c1", "c1")).apply(doc))
+        assertSame(doc, MergeClips(VIDEO, emptyList()).apply(doc))
     }
 
     // --- Reorder / Duplicate (FR-2.7, FR-2.8) -----------------------------
@@ -340,15 +340,15 @@ class EditCommandTest {
         // commands: an index past the end clamps to lastIndex (99 -> 1) and a
         // negative index clamps to 0 (-5 -> 0). Neither end is a silent no-op.
         val doc = sampleDocument()
-        assertEquals(listOf("c2", "c1"), ReorderClip("c1", 1).apply(doc).clips.map { it.id })
-        assertEquals(listOf("c2", "c1"), ReorderClip("c1", 99).apply(doc).clips.map { it.id })
-        assertEquals(listOf("c2", "c1"), ReorderClip("c2", -5).apply(doc).clips.map { it.id })
+        assertEquals(listOf("c2", "c1"), ReorderClip(VIDEO, "c1", 1).apply(doc).clips.map { it.id })
+        assertEquals(listOf("c2", "c1"), ReorderClip(VIDEO, "c1", 99).apply(doc).clips.map { it.id })
+        assertEquals(listOf("c2", "c1"), ReorderClip(VIDEO, "c2", -5).apply(doc).clips.map { it.id })
     }
 
     @Test
     fun `duplicate inserts the copy immediately after the original`() {
         val doc = sampleDocument()
-        val after = DuplicateClip("c1", "c1copy").apply(doc)
+        val after = DuplicateClip(VIDEO, "c1", "c1copy").apply(doc)
         assertEquals(listOf("c1", "c1copy", "c2"), after.clips.map { it.id })
         assertInvariants(after, "duplicate")
     }
@@ -356,7 +356,7 @@ class EditCommandTest {
     @Test
     fun `duplicate refuses to reuse an existing id`() {
         val doc = sampleDocument()
-        assertSame(doc, DuplicateClip("c1", "c2").apply(doc))
+        assertSame(doc, DuplicateClip(VIDEO, "c1", "c2").apply(doc))
     }
 
     // --- Totality ---------------------------------------------------------
@@ -365,24 +365,24 @@ class EditCommandTest {
     fun `every command is a no-op on an unknown clip id`() {
         val doc = sampleDocument()
         val unknown = "does-not-exist"
-        assertSame(doc, TrimClip(unknown, 0L, SEC).apply(doc))
-        assertSame(doc, SplitClip(unknown, SEC, "n1").apply(doc))
-        assertSame(doc, CutLeft(unknown, SEC).apply(doc))
-        assertSame(doc, CutRight(unknown, SEC).apply(doc))
-        assertSame(doc, DeleteClip(unknown).apply(doc))
-        assertSame(doc, MergeClips(listOf(unknown, "c1")).apply(doc))
-        assertSame(doc, ReorderClip(unknown, 0).apply(doc))
-        assertSame(doc, DuplicateClip(unknown, "n2").apply(doc))
+        assertSame(doc, TrimClip(VIDEO, unknown, 0L, SEC).apply(doc))
+        assertSame(doc, SplitClip(VIDEO, unknown, SEC, "n1").apply(doc))
+        assertSame(doc, CutLeft(VIDEO, unknown, SEC).apply(doc))
+        assertSame(doc, CutRight(VIDEO, unknown, SEC).apply(doc))
+        assertSame(doc, DeleteClip(VIDEO, unknown).apply(doc))
+        assertSame(doc, MergeClips(VIDEO, listOf(unknown, "c1")).apply(doc))
+        assertSame(doc, ReorderClip(VIDEO, unknown, 0).apply(doc))
+        assertSame(doc, DuplicateClip(VIDEO, unknown, "n2").apply(doc))
     }
 
     @Test
     fun `append requires a live source and a fresh id`() {
         val doc = sampleDocument()
-        assertSame(doc, AppendClip("new", "missing-source", 0L, SEC).apply(doc))
-        assertSame(doc, AppendClip("c1", "s1", 0L, SEC).apply(doc))
-        assertSame(doc, AppendClip("new", "s1", 0L, 50_000L).apply(doc))
+        assertSame(doc, AppendClip(VIDEO, "new", "missing-source", 0L, SEC).apply(doc))
+        assertSame(doc, AppendClip(VIDEO, "c1", "s1", 0L, SEC).apply(doc))
+        assertSame(doc, AppendClip(VIDEO, "new", "s1", 0L, 50_000L).apply(doc))
 
-        val appended = AppendClip("new", "s1", 0L, SEC).apply(doc)
+        val appended = AppendClip(VIDEO, "new", "s1", 0L, SEC).apply(doc)
         assertEquals(listOf("c1", "c2", "new"), appended.clips.map { it.id })
     }
 
@@ -397,15 +397,15 @@ class EditCommandTest {
         // than only for today's data classes.
 
         // (a) Equality and hashCode are structural.
-        assertEquals(TrimClip("c1", 0L, SEC), TrimClip("c1", 0L, SEC))
+        assertEquals(TrimClip(VIDEO, "c1", 0L, SEC), TrimClip(VIDEO, "c1", 0L, SEC))
         assertEquals(
-            TrimClip("c1", 0L, SEC).hashCode(),
-            TrimClip("c1", 0L, SEC).hashCode(),
+            TrimClip(VIDEO, "c1", 0L, SEC).hashCode(),
+            TrimClip(VIDEO, "c1", 0L, SEC).hashCode(),
             "equal commands must hash alike, or they cannot key a log or a command set",
         )
         assertNotEquals(
-            TrimClip("c1", 0L, SEC),
-            TrimClip("c1", 0L, 2 * SEC),
+            TrimClip(VIDEO, "c1", 0L, SEC),
+            TrimClip(VIDEO, "c1", 0L, 2 * SEC),
             "commands differing in an argument must not compare equal",
         )
 
@@ -414,23 +414,23 @@ class EditCommandTest {
         // The command is chosen to actually change the document, so the equality
         // below cannot pass merely because both applies were no-ops.
         val doc = sampleDocument()
-        val first = TrimClip("c1", 0L, 3 * SEC)
-        val second = TrimClip("c1", 0L, 3 * SEC)
+        val first = TrimClip(VIDEO, "c1", 0L, 3 * SEC)
+        val second = TrimClip(VIDEO, "c1", 0L, 3 * SEC)
         assertNotEquals(doc, first.apply(doc), "this command must actually change the document")
         assertEquals(first.apply(doc), second.apply(doc))
 
         // (c) Every command type carries a label: this is what "Undo <label>" shows.
         val everyCommandType = listOf<EditCommand>(
             AddSource(source("s1")),
-            AppendClip("new", "s1", 0L, SEC),
-            TrimClip("c1", 0L, SEC),
-            SplitClip("c1", SEC, "c1b"),
-            CutLeft("c1", SEC),
-            CutRight("c1", SEC),
-            DeleteClip("c1"),
-            MergeClips(listOf("c1", "c2")),
-            ReorderClip("c1", 1),
-            DuplicateClip("c1", "c1b"),
+            AppendClip(VIDEO, "new", "s1", 0L, SEC),
+            TrimClip(VIDEO, "c1", 0L, SEC),
+            SplitClip(VIDEO, "c1", SEC, "c1b"),
+            CutLeft(VIDEO, "c1", SEC),
+            CutRight(VIDEO, "c1", SEC),
+            DeleteClip(VIDEO, "c1"),
+            MergeClips(VIDEO, listOf("c1", "c2")),
+            ReorderClip(VIDEO, "c1", 1),
+            DuplicateClip(VIDEO, "c1", "c1b"),
         )
         assertEquals(10, everyCommandType.size, "one instance per command type")
         everyCommandType.forEach { command ->

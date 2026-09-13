@@ -31,26 +31,26 @@ object ClipRanges {
 }
 
 /** FR-3.1: set a clip's playback speed. Affects its TIMELINE duration, so the ripple re-flows. */
-data class SetSpeed(val clipId: String, val speed: Float) : EditCommand {
+data class SetSpeed(val trackId: String, val clipId: String, val speed: Float) : EditCommand {
     override val label: String get() = "Speed"
 
     override fun apply(doc: EditDocument): EditDocument {
-        val clip = doc.clipById(clipId) ?: return doc
+        val clip = doc.trackById(trackId)?.clipById(clipId) ?: return doc
         // Clamped, not rejected: a slider dragged past its end asks for the end, and `Clip` requires
         // speed > 0 (a zero or negative speed has no meaning in the timeline arithmetic).
         val clamped = speed.coerceIn(ClipRanges.SPEED_MIN, ClipRanges.SPEED_MAX)
-        return doc.withClip(clip.copy(speed = clamped))
+        return doc.withClip(trackId, clip.copy(speed = clamped))
     }
 }
 
 /** FR-3.2: set a clip's volume, 0 %–200 %. */
-data class SetVolume(val clipId: String, val volume: Float) : EditCommand {
+data class SetVolume(val trackId: String, val clipId: String, val volume: Float) : EditCommand {
     override val label: String get() = "Volume"
 
     override fun apply(doc: EditDocument): EditDocument {
-        val clip = doc.clipById(clipId) ?: return doc
+        val clip = doc.trackById(trackId)?.clipById(clipId) ?: return doc
         val clamped = volume.coerceIn(ClipRanges.VOLUME_MIN, ClipRanges.VOLUME_MAX)
-        return doc.withClip(clip.copy(volume = clamped))
+        return doc.withClip(trackId, clip.copy(volume = clamped))
     }
 }
 
@@ -61,12 +61,12 @@ data class SetVolume(val clipId: String, val volume: Float) : EditCommand {
  * the user had set, and a command that overwrote volume with zero would lose it — the difference
  * between a toggle and a destructive edit.
  */
-data class SetMuted(val clipId: String, val muted: Boolean) : EditCommand {
+data class SetMuted(val trackId: String, val clipId: String, val muted: Boolean) : EditCommand {
     override val label: String get() = if (muted) "Mute" else "Unmute"
 
     override fun apply(doc: EditDocument): EditDocument {
-        val clip = doc.clipById(clipId) ?: return doc
-        return doc.withClip(clip.copy(muted = muted))
+        val clip = doc.trackById(trackId)?.clipById(clipId) ?: return doc
+        return doc.withClip(trackId, clip.copy(muted = muted))
     }
 }
 
@@ -80,6 +80,7 @@ data class SetMuted(val clipId: String, val muted: Boolean) : EditCommand {
  * holds one value per property and is the only place that knows how VideoCompositor blends them.
  */
 data class SetFades(
+    val trackId: String,
     val clipId: String,
     val fadeInMs: Long,
     val fadeOutMs: Long,
@@ -87,10 +88,11 @@ data class SetFades(
     override val label: String get() = "Fade"
 
     override fun apply(doc: EditDocument): EditDocument {
-        val clip = doc.clipById(clipId) ?: return doc
+        val clip = doc.trackById(trackId)?.clipById(clipId) ?: return doc
         val clipMs = clip.timelineDurationUs / MICROS_PER_MILLI
         val ceiling = if (clipMs < ClipRanges.FADE_MAX_MS) clipMs else ClipRanges.FADE_MAX_MS
         return doc.withClip(
+            trackId,
             clip.copy(
                 fadeInMs = fadeInMs.coerceIn(0L, ceiling),
                 fadeOutMs = fadeOutMs.coerceIn(0L, ceiling),
@@ -106,12 +108,12 @@ data class SetFades(
  * preview, the filmstrip and the trim gesture all keep reading the right frame when this flips —
  * the property was designed to be the single place direction lives.
  */
-data class SetReverse(val clipId: String, val reverse: Boolean) : EditCommand {
+data class SetReverse(val trackId: String, val clipId: String, val reverse: Boolean) : EditCommand {
     override val label: String get() = if (reverse) "Reverse" else "Un-reverse"
 
     override fun apply(doc: EditDocument): EditDocument {
-        val clip = doc.clipById(clipId) ?: return doc
-        return doc.withClip(clip.copy(reverse = reverse))
+        val clip = doc.trackById(trackId)?.clipById(clipId) ?: return doc
+        return doc.withClip(trackId, clip.copy(reverse = reverse))
     }
 }
 

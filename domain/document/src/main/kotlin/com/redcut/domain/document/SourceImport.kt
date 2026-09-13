@@ -215,11 +215,17 @@ data class ImportPlan(
  * the same rule the rest of [EditCommand] follows, because a command that invents its own
  * id cannot be compared, replayed, or asserted on.
  *
+ * [trackId] is the lane every clip of this import lands on, supplied by the caller for the
+ * same reason the ids are: which lane an imported file belongs on is a decision about the
+ * DOCUMENT ("the video lane", and later "the audio one"), and a planner that guessed it could
+ * not be told otherwise. It is one track for the whole batch because one import is one act.
+ *
  * Refused files yield no commands at all, and are reported instead: silently dropping one
  * of five selected videos is how a user concludes the import button is broken.
  */
 fun planImport(
     probed: List<ProbedSource>,
+    trackId: String,
     sourceId: (index: Int) -> String,
     clipId: (index: Int) -> String,
 ): ImportPlan {
@@ -234,6 +240,7 @@ fun planImport(
                 accepted += source
                 commands += AddSource(source)
                 commands += AppendClip(
+                    trackId = trackId,
                     clipId = clipId(index),
                     sourceId = source.id,
                     sourceInUs = 0L,

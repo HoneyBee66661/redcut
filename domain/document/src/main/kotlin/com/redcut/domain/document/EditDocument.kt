@@ -130,6 +130,18 @@ data class EditDocument(
     /** The id of the track holding [clipId], or null. The answer [EditCommand]s need to be built. */
     fun trackIdOf(clipId: String): String? = trackOf(clipId)?.id
 
+    /**
+     * The lane a video import lands on: the document's first VIDEO track, or the default one.
+     *
+     * A derived default rather than a stored field, because it is not a decision the user made — it is
+     * what "import" means today: a new clip joins the video lane. It is the fallback that matters when
+     * a document has no video lane at all (an audio-only project, which the audio workstream makes
+     * legal): importing video into one is a question that workstream answers, and until then the
+     * planner is handed the id of the lane that a document of this shape would have.
+     */
+    val importTrackId: String
+        get() = tracks.firstOrNull { it.kind == TrackKind.VIDEO }?.id ?: Track.MAIN_ID
+
     fun sourceById(sourceId: String): SourceRef? = sources.firstOrNull { it.id == sourceId }
 
     /** True when this document is safe to hand to the render pipeline. */
@@ -151,25 +163,19 @@ data class EditDocument(
 }
 
 /**
- * Replaces the document's clips, as the one flat list the commands still edit.
+ * Replaces the clips of the track [trackId], leaving every other lane exactly as it was.
  *
- * ### Why this exists, and why it goes away
+ * The one write path the commands share. [EditDocument.clips] is derived — and `get`-only — so the
+ * compiler names every writer, and what a writer must supply is the lane it is writing to: a tracked
+ * rewrite cannot move a clip between lanes by accident, which is the whole reason the clips moved
+ * inside a [Track] rather than staying a flat list beside one.
  *
- * [EditDocument.clips] is derived, so every `copy(clips = …)` in the command layer stopped compiling
- * the moment the clips moved into a track — which is the point of deriving it: the compiler names every
- * writer, and a writer that is not told which lane it edits is a clip that can land in the wrong one.
- *
- * Writing the whole list back is the honest step for THIS task and no more: a document has one track
- * here (nothing seeds a second until the audio workstream), so "the flat list" and "the track's clips"
- * are the same list, and every command keeps its shape while the model underneath changes. The next
- * task gives each command the `trackId` it writes to and deletes this function, because a second lane
- * is exactly what the flat rewrite cannot express — [clips] would then be the union of two lanes and
- * this would put all of it on the first one.
+ * A track id the document does not have leaves the document untouched, the same way every other
+ * unmet precondition in a command does. Nothing is created here: a lane is the document's own
+ * structure, and a command that invented one would be editing a timeline the user cannot see.
  */
-internal fun EditDocument.withClips(clips: List<Clip>): EditDocument {
-    val first = tracks.firstOrNull() ?: return this
-    return copy(tracks = tracks.map { if (it.id == first.id) it.copy(clips = clips) else it })
-}
+internal fun EditDocument.withTrackClips(trackId: String, clips: List<Clip>): EditDocument =
+    copy(tracks = tracks.map { if (it.id == trackId) it.copy(clips = clips) else it })
 
 /**
  * A clip as placed on the timeline: the clip plus where it lands.

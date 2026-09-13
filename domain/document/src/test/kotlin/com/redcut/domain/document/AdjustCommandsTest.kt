@@ -64,17 +64,17 @@ class AdjustCommandsTest {
     fun `speed is clamped to the spec's range, not rejected`() {
         val base = clip()
 
-        assertThat(base.after(SetSpeed("clip-a", 0.1f)).speed).isEqualTo(ClipRanges.SPEED_MIN)
-        assertThat(base.after(SetSpeed("clip-a", 9f)).speed).isEqualTo(ClipRanges.SPEED_MAX)
-        assertThat(base.after(SetSpeed("clip-a", 1.5f)).speed).isEqualTo(1.5f)
+        assertThat(base.after(SetSpeed(VIDEO, "clip-a", 0.1f)).speed).isEqualTo(ClipRanges.SPEED_MIN)
+        assertThat(base.after(SetSpeed(VIDEO, "clip-a", 9f)).speed).isEqualTo(ClipRanges.SPEED_MAX)
+        assertThat(base.after(SetSpeed(VIDEO, "clip-a", 1.5f)).speed).isEqualTo(1.5f)
     }
 
     @Test
     fun `a zero speed clamps instead of throwing, because Clip refuses a non-positive speed`() {
         // The interesting one: `Clip` has `require(speed > 0)`, so a UI that computed 0 (a division, a
         // slider at its floor) would crash the document rather than set a legal value.
-        assertThat(clip().after(SetSpeed("clip-a", 0f)).speed).isEqualTo(ClipRanges.SPEED_MIN)
-        assertThat(clip().after(SetSpeed("clip-a", -2f)).speed).isEqualTo(ClipRanges.SPEED_MIN)
+        assertThat(clip().after(SetSpeed(VIDEO, "clip-a", 0f)).speed).isEqualTo(ClipRanges.SPEED_MIN)
+        assertThat(clip().after(SetSpeed(VIDEO, "clip-a", -2f)).speed).isEqualTo(ClipRanges.SPEED_MIN)
     }
 
     @Test
@@ -83,7 +83,7 @@ class AdjustCommandsTest {
         // `timelineDurationUs`, so doubling the speed halves the clip's footprint by itself. This is
         // the property §5.1 buys, and it is asserted here so a future refactor that stored positions
         // would fail a test rather than silently produce gaps.
-        val fast = clip().after(SetSpeed("clip-a", 2f))
+        val fast = clip().after(SetSpeed(VIDEO, "clip-a", 2f))
 
         assertThat(fast.timelineDurationUs).isEqualTo(2 * oneSecond)
     }
@@ -94,27 +94,27 @@ class AdjustCommandsTest {
     fun `volume is clamped to 0-200 percent`() {
         val base = clip(volume = 1f)
 
-        assertThat(base.after(SetVolume("clip-a", 2.5f)).volume).isEqualTo(ClipRanges.VOLUME_MAX)
-        assertThat(base.after(SetVolume("clip-a", -1f)).volume).isEqualTo(ClipRanges.VOLUME_MIN)
-        assertThat(base.after(SetVolume("clip-a", 0.4f)).volume).isEqualTo(0.4f)
+        assertThat(base.after(SetVolume(VIDEO, "clip-a", 2.5f)).volume).isEqualTo(ClipRanges.VOLUME_MAX)
+        assertThat(base.after(SetVolume(VIDEO, "clip-a", -1f)).volume).isEqualTo(ClipRanges.VOLUME_MIN)
+        assertThat(base.after(SetVolume(VIDEO, "clip-a", 0.4f)).volume).isEqualTo(0.4f)
     }
 
     @Test
     fun `muting leaves the volume alone, so unmuting restores the level`() {
         // Mute as its own flag rather than "volume = 0" — the difference between a toggle and an edit
         // that quietly loses the value the user set.
-        val muted = clip(volume = 0.35f).after(SetMuted("clip-a", true))
+        val muted = clip(volume = 0.35f).after(SetMuted(VIDEO, "clip-a", true))
 
         assertThat(muted.muted).isTrue()
         assertThat(muted.volume).isEqualTo(0.35f)
-        assertThat(muted.after(SetMuted("clip-a", false)).volume).isEqualTo(0.35f)
+        assertThat(muted.after(SetMuted(VIDEO, "clip-a", false)).volume).isEqualTo(0.35f)
     }
 
     // --- Fades (FR-3.4) ----------------------------------------------------
 
     @Test
     fun `a fade longer than the spec allows is clamped to three seconds`() {
-        val faded = clip(sourceOutUs = 20 * oneSecond).after(SetFades("clip-a", 9_000L, 9_000L))
+        val faded = clip(sourceOutUs = 20 * oneSecond).after(SetFades(VIDEO, "clip-a", 9_000L, 9_000L))
 
         assertThat(faded.fadeInMs).isEqualTo(ClipRanges.FADE_MAX_MS)
         assertThat(faded.fadeOutMs).isEqualTo(ClipRanges.FADE_MAX_MS)
@@ -126,7 +126,7 @@ class AdjustCommandsTest {
         // whole clip" the natural maximum a user reaches by dragging to the end.
         val twoSeconds = clip(sourceOutUs = 2 * oneSecond)
 
-        val faded = twoSeconds.after(SetFades("clip-a", 9_000L, 1_500L))
+        val faded = twoSeconds.after(SetFades(VIDEO, "clip-a", 9_000L, 1_500L))
 
         assertThat(faded.fadeInMs).isEqualTo(2_000L)
         assertThat(faded.fadeOutMs).isEqualTo(1_500L)
@@ -139,7 +139,7 @@ class AdjustCommandsTest {
         val fast = clip(
             sourceOutUs = 4 * oneSecond,
             speed = 4f,
-        ).after(SetFades("clip-a", 3_000L, 0L))
+        ).after(SetFades(VIDEO, "clip-a", 3_000L, 0L))
 
         assertThat(fast.timelineDurationUs).isEqualTo(oneSecond)
         assertThat(fast.fadeInMs).isEqualTo(1_000L)
@@ -147,7 +147,7 @@ class AdjustCommandsTest {
 
     @Test
     fun `a negative fade is zero, not a wrapped value`() {
-        val faded = clip().after(SetFades("clip-a", -500L, -500L))
+        val faded = clip().after(SetFades(VIDEO, "clip-a", -500L, -500L))
 
         assertThat(faded.fadeInMs).isEqualTo(0L)
         assertThat(faded.fadeOutMs).isEqualTo(0L)
@@ -161,7 +161,7 @@ class AdjustCommandsTest {
         // preview, the filmstrip, the trim gesture and the frame-step all follow this flip without
         // knowing it happened.
         val forward = clip(sourceInUs = 2 * oneSecond, sourceOutUs = 6 * oneSecond)
-        val backward = forward.after(SetReverse("clip-a", true))
+        val backward = forward.after(SetReverse(VIDEO, "clip-a", true))
 
         assertThat(forward.sourceTimeFor(0L)).isEqualTo(2 * oneSecond)
         assertThat(backward.sourceTimeFor(0L)).isEqualTo(6 * oneSecond)
@@ -193,12 +193,12 @@ class AdjustCommandsTest {
         val doc = document()
 
         val commands = listOf(
-            SetSpeed("nope", 2f),
-            SetVolume("nope", 1f),
-            SetMuted("nope", true),
-            SetFades("nope", 100L, 100L),
-            SetReverse("nope", true),
-            SetTransform("nope", TransformSpec(cropLeft = 0.1f, cropRight = 0.9f)),
+            SetSpeed(VIDEO, "nope", 2f),
+            SetVolume(VIDEO, "nope", 1f),
+            SetMuted(VIDEO, "nope", true),
+            SetFades(VIDEO, "nope", 100L, 100L),
+            SetReverse(VIDEO, "nope", true),
+            SetTransform(VIDEO, "nope", TransformSpec(cropLeft = 0.1f, cropRight = 0.9f)),
         )
 
         commands.forEach { command ->

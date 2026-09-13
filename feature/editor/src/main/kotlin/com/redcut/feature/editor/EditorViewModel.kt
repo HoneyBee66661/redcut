@@ -155,7 +155,17 @@ class EditorViewModel @Inject constructor(
                 // what surfaced it, and a name with no logic behind it is a name a reader follows for
                 // nothing.
                 logger.d(TAG, "reorder ${intent.clipId} -> ${intent.toIndex}")
-                history.execute(ReorderClip(clipId = intent.clipId, toIndex = intent.toIndex))
+                // The lane the dragged clip is on, asked of the document: the intent carries a clip id
+                // because the SELECTION still does, and a (track, clip) pair is the timeline work's
+                // next step. A clip no lane holds has nothing to reorder, so this is a no-op.
+                val trackId = history.current.trackIdOf(intent.clipId) ?: return
+                history.execute(
+                    ReorderClip(
+                        trackId = trackId,
+                        clipId = intent.clipId,
+                        toIndex = intent.toIndex,
+                    ),
+                )
                 _state.value = _state.value.copy(selection = Selection.Clip(intent.clipId))
                 autosave()
                 publish()
@@ -358,8 +368,9 @@ class EditorViewModel @Inject constructor(
      */
     private fun beginTrim(clipId: String, edge: ClipEdge, sourceTimeUs: Long) {
         val clip = clipOf(clipId) ?: return
+        val command = trimCommandFor(clip, edge, sourceTimeUs) ?: return
         logger.d(TAG, "trim ${edge.name.lowercase()} of $clipId to $sourceTimeUs")
-        history.preview(trimCommandFor(clip, edge, sourceTimeUs))
+        history.preview(command)
         _state.value = _state.value.copy(
             tool = ToolState.Trimming(clipId = clipId, edge = edge, sourceTimeUs = sourceTimeUs),
         )
@@ -373,7 +384,8 @@ class EditorViewModel @Inject constructor(
         // Rebuilt from the CURRENT clip on every frame. That is what makes the held edge invariant:
         // the drag value only ever moves the edge the gesture started on, and the other end keeps
         // whatever the last preview put there.
-        history.preview(trimCommandFor(clip, trimming.edge, sourceTimeUs))
+        val command = trimCommandFor(clip, trimming.edge, sourceTimeUs) ?: return
+        history.preview(command)
         _state.value = _state.value.copy(tool = trimming.copy(sourceTimeUs = sourceTimeUs))
         publish()
     }
@@ -385,9 +397,18 @@ class EditorViewModel @Inject constructor(
      * the end of the source is recorded as the user's intent and applied as the limit. The UI learns
      * what it actually got by reading the document back, not by duplicating the rule.
      */
-    private fun trimCommandFor(clip: Clip, edge: ClipEdge, sourceTimeUs: Long): TrimClip {
+    private fun trimCommandFor(clip: Clip, edge: ClipEdge, sourceTimeUs: Long): TrimClip? {
         val (inUs, outUs) = clip.trimmedTo(edge, sourceTimeUs)
-        return TrimClip(clipId = clip.id, sourceInUs = inUs, sourceOutUs = outUs)
+        // Null for a clip no track holds: the drag arrived with a clip id, and the command it means
+        // needs the lane too. Unreachable for a document built by the commands (clips are derived from
+        // tracks), and null rather than a `!!` because a gesture must not be able to crash the editor.
+        val trackId = history.current.trackIdOf(clip.id) ?: return null
+        return TrimClip(
+            trackId = trackId,
+            clipId = clip.id,
+            sourceInUs = inUs,
+            sourceOutUs = outUs,
+        )
     }
 
     private fun clipOf(clipId: String): Clip? =
@@ -490,6 +511,10 @@ class EditorViewModel @Inject constructor(
 
             val plan = planImport(
                 probed = probed,
+                // Which lane an imported file belongs on is a decision about the document, and with
+                // one video lane per project there is nothing to decide: the clips join it. The audio
+                // workstream is where a second lane (and so a per-file choice) arrives.
+                trackId = history.current.importTrackId,
                 sourceId = { "src-${ids.next()}" },
                 clipId = { "clip-${ids.next()}" },
             )

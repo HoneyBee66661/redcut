@@ -118,20 +118,27 @@ fun EditDocument.currentValueOf(clipId: String, adjustment: ClipAdjustment): Flo
  */
 fun EditDocument.adjust(clipId: String, adjustment: ClipAdjustment, value: Float): EditCommand? {
     val clip = clipById(clipId) ?: return null
+    // The lane comes from the document rather than from the caller: an inspector row knows the clip it
+    // is showing and nothing else, and every command below now names the track it writes to. Resolving
+    // it here — where the clip was just looked up — is what keeps the two answers from drifting.
+    val trackId = trackIdOf(clipId) ?: return null
     return when (adjustment) {
-        ClipAdjustment.SPEED -> SetSpeed(clipId, value)
-        ClipAdjustment.VOLUME -> SetVolume(clipId, value)
+        ClipAdjustment.SPEED -> SetSpeed(trackId, clipId, value)
+        ClipAdjustment.VOLUME -> SetVolume(trackId, clipId, value)
         ClipAdjustment.FADE_IN -> SetFades(
+            trackId,
             clipId,
             fadeInMs = value.toLong(),
             fadeOutMs = clip.fadeOutMs,
         )
         ClipAdjustment.FADE_OUT -> SetFades(
+            trackId,
             clipId,
             fadeInMs = clip.fadeInMs,
             fadeOutMs = value.toLong(),
         )
-        ClipAdjustment.MUTE -> SetMuted(clipId, value >= ClipAdjustment.SWITCH_THRESHOLD)
-        ClipAdjustment.REVERSE -> SetReverse(clipId, value >= ClipAdjustment.SWITCH_THRESHOLD)
+        ClipAdjustment.MUTE -> SetMuted(trackId, clipId, value >= ClipAdjustment.SWITCH_THRESHOLD)
+        ClipAdjustment.REVERSE ->
+            SetReverse(trackId, clipId, value >= ClipAdjustment.SWITCH_THRESHOLD)
     }
 }

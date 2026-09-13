@@ -50,6 +50,11 @@ sealed interface CutAvailability {
  * own durations, and this is where that sum lives. It used to exist only in the editor's projection,
  * which meant the domain's frame-stepping could not ask how far the timeline went — a rule with two
  * homes is a rule that disagrees with itself eventually.
+ *
+ * Still the FLAT reading across [EditDocument.clips]: a second track's clips are summed after the
+ * first track's rather than alongside them, so this is the length of the timeline as one lane. Per-lane
+ * spans are the timeline's own next step; what matters to the commands here is that the playhead
+ * arithmetic below and the render graph agree, and they read the same list.
  */
 val EditDocument.timelineDurationUs: Long get() = clips.sumOf { it.timelineDurationUs }
 
@@ -59,6 +64,11 @@ val EditDocument.timelineDurationUs: Long get() = clips.sumOf { it.timelineDurat
  * Boundaries belong to the clip on their RIGHT, the same rule the timeline's hit-testing uses for a
  * clip edge: at a boundary the cut lands on the clip that is about to start, which is what a playhead
  * parked on a cut point means when the user presses "cut right".
+ *
+ * Reads the flattened clip list, so with more than one track it answers about the timeline as ONE lane
+ * — which is the same reading [timelineDurationUs] and the render graph take, and therefore the one the
+ * commands must agree with. The clip it returns is the clip a tool at that position means; WHICH lane
+ * that clip is on is answered by [EditDocument.trackIdOf], and that is what the commands are built with.
  */
 fun EditDocument.clipAt(playheadUs: Long): Clip? {
     var start = 0L
@@ -99,11 +109,15 @@ fun EditDocument.offsetIntoClip(clipId: String, playheadUs: Long): Long? {
  * The rules are the commands' own, read back: a split needs two halves that both survive the 100 ms
  * floor (which is why [SplitClip] refuses without saying so), and delete needs something left to
  * render, because an empty document cannot be played and undo is the only way back ([DeleteClip]
- * refuses to empty the timeline).
+ * refuses to empty the document).
  */
 fun EditDocument.availabilityFor(tool: CutTool, playheadUs: Long): CutAvailability {
     if (clips.isEmpty()) return CutAvailability.Unavailable(NOTHING_TO_CUT)
     val clip = clipAt(playheadUs) ?: return CutAvailability.Unavailable(PLAYHEAD_PAST_END)
+    // A clip always belongs to a track — `clips` is DERIVED from them — so this cannot fail for a
+    // document built by the commands. It is here because the alternative is a `!!` in a tool path, and
+    // the honest refusal for "this clip is on no lane I can name" is the same one as "there is no clip".
+    val trackId = trackIdOf(clip.id) ?: return CutAvailability.Unavailable(PLAYHEAD_PAST_END)
 
     return when (tool) {
         CutTool.SPLIT -> splitAvailability(clip, playheadUs)
@@ -117,8 +131,9 @@ fun EditDocument.availabilityFor(tool: CutTool, playheadUs: Long): CutAvailabili
             }
 
         // Merge asks a different question (is the NEXT clip fusable?) and has its own four reasons,
-        // which is why its rule lives in MergeRun.kt and this just forwards the clip at the playhead.
-        CutTool.MERGE -> mergeAvailability(clip.id)
+        // which is why its rule lives in MergeRun.kt and this just forwards the clip at the playhead —
+        // together with the lane it is on, because "what follows it" is a question about that lane.
+        CutTool.MERGE -> mergeAvailability(trackId, clip.id)
 
         // Duplicate needs only a clip to copy, and reaching this line means the playhead is on one.
         // Its command refuses nothing else: the id comes from the same source as a split's, so a
@@ -169,22 +184,29 @@ fun EditDocument.commandFor(
 ): EditCommand? {
     if (availabilityFor(tool, playheadUs) !is CutAvailability.Available) return null
     val clip = clipAt(playheadUs) ?: return null
+    val trackId = trackIdOf(clip.id) ?: return null
     val offsetUs = offsetIntoClip(clip.id, playheadUs) ?: return null
     val atSourceUs = clip.sourceTimeFor(offsetUs)
 
     return when (tool) {
         CutTool.SPLIT -> SplitClip(
+            trackId = trackId,
             clipId = clip.id,
             atSourceUs = atSourceUs,
             newClipId = newClipId(),
         )
-        CutTool.CUT_LEFT -> CutLeft(clipId = clip.id, atSourceUs = atSourceUs)
-        CutTool.CUT_RIGHT -> CutRight(clipId = clip.id, atSourceUs = atSourceUs)
-        CutTool.DELETE -> DeleteClip(clipId = clip.id)
+        CutTool.CUT_LEFT -> CutLeft(trackId = trackId, clipId = clip.id, atSourceUs = atSourceUs)
+        CutTool.CUT_RIGHT -> CutRight(trackId = trackId, clipId = clip.id, atSourceUs = atSourceUs)
+        CutTool.DELETE -> DeleteClip(trackId = trackId, clipId = clip.id)
         // The whole run, not just the next clip: FR-2.4 says "two or more", and a clip split into
-        // five pieces comes back in one action. mergeRunFrom stops at the first clip that cannot join.
-        CutTool.MERGE -> MergeClips(mergeRunFrom(clip.id).map { it.id })
-        CutTool.DUPLICATE -> DuplicateClip(clipId = clip.id, newClipId = newClipId())
+        // five pieces comes back in one action. mergeRunFrom stops at the first clip that cannot join,
+        // and never leaves the lane the clip at the playhead is on.
+        CutTool.MERGE -> MergeClips(trackId, mergeRunFrom(trackId, clip.id).map { it.id })
+        CutTool.DUPLICATE -> DuplicateClip(
+            trackId = trackId,
+            clipId = clip.id,
+            newClipId = newClipId(),
+        )
     }
 }
 

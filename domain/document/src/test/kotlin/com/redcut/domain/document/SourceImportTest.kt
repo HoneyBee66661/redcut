@@ -168,6 +168,7 @@ class SourceImportTest {
                     probe = probe(durationUs = 2_000_000L),
                 ),
             ),
+            trackId = VIDEO,
             sourceId = { "src-$it" },
             clipId = { "clip-$it" },
         )
@@ -179,6 +180,7 @@ class SourceImportTest {
         assertThat(plan.commands[0]).isEqualTo(AddSource(plan.accepted[0]))
         assertThat(plan.commands[1]).isEqualTo(
             AppendClip(
+                trackId = VIDEO,
                 clipId = "clip-0",
                 sourceId = "src-0",
                 sourceInUs = 0L,
@@ -188,6 +190,7 @@ class SourceImportTest {
         assertThat(plan.commands[2]).isEqualTo(AddSource(plan.accepted[1]))
         assertThat(plan.commands[3]).isEqualTo(
             AppendClip(
+                trackId = VIDEO,
                 clipId = "clip-1",
                 sourceId = "src-1",
                 sourceInUs = 0L,
@@ -207,6 +210,7 @@ class SourceImportTest {
                     probe = probe(videoCodec = "video/mp4v-es"),
                 ),
             ),
+            trackId = VIDEO,
             sourceId = { "src-$it" },
             clipId = { "clip-$it" },
         )
@@ -227,6 +231,7 @@ class SourceImportTest {
                 probed(name = "a.m4a", probe = probe(width = 0, height = 0, videoCodec = "")),
                 probed(name = "b.m4a", probe = probe(width = 0, height = 0, videoCodec = "")),
             ),
+            trackId = VIDEO,
             sourceId = { "src-$it" },
             clipId = { "clip-$it" },
         )
@@ -239,7 +244,12 @@ class SourceImportTest {
     @Test
     fun `an empty selection plans nothing`() {
         val plan =
-            planImport(probed = emptyList(), sourceId = { "src-$it" }, clipId = { "clip-$it" })
+            planImport(
+                probed = emptyList(),
+                trackId = VIDEO,
+                sourceId = { "src-$it" },
+                clipId = { "clip-$it" },
+            )
 
         assertThat(plan.isEmpty).isTrue()
         assertThat(plan.rejected).isEmpty()
@@ -265,6 +275,7 @@ class SourceImportTest {
                     probe = probe(durationUs = 3_000_000L),
                 ),
             ),
+            trackId = VIDEO,
             sourceId = { "src-$it" },
             clipId = { "clip-$it" },
         )

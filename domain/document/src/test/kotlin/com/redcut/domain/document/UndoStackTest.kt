@@ -31,7 +31,7 @@ class UndoStackTest {
         val stack = UndoStack(sampleDocument())
         val before = stack.current
 
-        stack.execute(DeleteClip("c1"))
+        stack.execute(DeleteClip(VIDEO, "c1"))
         assertNotEquals(before, stack.current)
 
         stack.undo()
@@ -42,7 +42,7 @@ class UndoStackTest {
     @Test
     fun `redo reapplies an undone command`() {
         val stack = UndoStack(sampleDocument())
-        stack.execute(DeleteClip("c1"))
+        stack.execute(DeleteClip(VIDEO, "c1"))
         val after = stack.current
 
         stack.undo()
@@ -54,11 +54,11 @@ class UndoStackTest {
     @Test
     fun `a new command clears the redo stack`() {
         val stack = UndoStack(sampleDocument())
-        stack.execute(DeleteClip("c1"))
+        stack.execute(DeleteClip(VIDEO, "c1"))
         stack.undo()
         assertTrue(stack.canRedo)
 
-        stack.execute(ReorderClip("c1", 1))
+        stack.execute(ReorderClip(VIDEO, "c1", 1))
         assertFalse(stack.canRedo, "branching must discard the abandoned future")
     }
 
@@ -75,7 +75,7 @@ class UndoStackTest {
     @Test
     fun `labels name the command for the undo affordance`() {
         val stack = UndoStack(sampleDocument())
-        stack.execute(DeleteClip("c1"))
+        stack.execute(DeleteClip(VIDEO, "c1"))
         assertEquals("Delete", stack.undoLabel)
 
         stack.undo()
@@ -90,7 +90,7 @@ class UndoStackTest {
         val original = stack.current
 
         // Fails the distinct-operands precondition, so it is a no-op.
-        stack.execute(MergeClips(listOf("c1", "c1")))
+        stack.execute(MergeClips(VIDEO, listOf("c1", "c1")))
         assertEquals(0, stack.undoDepth, "a no-op must not consume one of the 50 slots")
         assertSame(original, stack.current)
     }
@@ -104,7 +104,7 @@ class UndoStackTest {
 
         // A trim drag emits a delta per frame.
         repeat(10) { frame ->
-            stack.preview(TrimClip("c1", 0L, SEC + frame * 10_000L))
+            stack.preview(TrimClip(VIDEO, "c1", 0L, SEC + frame * 10_000L))
         }
         assertTrue(stack.isPreviewing)
         assertEquals(0, stack.undoDepth, "preview must not touch history")
@@ -122,8 +122,8 @@ class UndoStackTest {
     fun `a drag that ends where it started records nothing`() {
         val stack = UndoStack(sampleDocument())
         // Out to 1s, then back to the original 2s.
-        stack.preview(TrimClip("c1", 0L, SEC))
-        stack.preview(TrimClip("c1", 0L, 2 * SEC))
+        stack.preview(TrimClip(VIDEO, "c1", 0L, SEC))
+        stack.preview(TrimClip(VIDEO, "c1", 0L, 2 * SEC))
         stack.commit()
         assertEquals(0, stack.undoDepth)
         assertFalse(stack.canUndo)
@@ -134,7 +134,7 @@ class UndoStackTest {
         val stack = UndoStack(sampleDocument())
         val original = stack.current
 
-        stack.preview(TrimClip("c1", 0L, SEC))
+        stack.preview(TrimClip(VIDEO, "c1", 0L, SEC))
         assertNotEquals(original, stack.current)
 
         stack.abortPreview()
@@ -146,9 +146,9 @@ class UndoStackTest {
     @Test
     fun `a second gesture is a second history entry`() {
         val stack = UndoStack(sampleDocument())
-        stack.preview(TrimClip("c1", 0L, 1_500_000L))
+        stack.preview(TrimClip(VIDEO, "c1", 0L, 1_500_000L))
         stack.commit()
-        stack.preview(TrimClip("c1", 0L, 1_200_000L))
+        stack.preview(TrimClip(VIDEO, "c1", 0L, 1_200_000L))
         stack.commit()
         assertEquals(2, stack.undoDepth)
     }
@@ -160,7 +160,7 @@ class UndoStackTest {
         val stack = UndoStack(sampleDocument(), limit = 5)
         val original = stack.current
 
-        repeat(20) { i -> stack.execute(AppendClip("n$i", "s1", 0L, SEC)) }
+        repeat(20) { i -> stack.execute(AppendClip(VIDEO, "n$i", "s1", 0L, SEC)) }
 
         assertEquals(5, stack.undoDepth, "history must respect the bound")
         repeat(5) { stack.undo() }
@@ -182,7 +182,7 @@ class UndoStackTest {
     @Test
     fun `reset replaces the document and drops history`() {
         val stack = UndoStack(sampleDocument())
-        stack.execute(DeleteClip("c1"))
+        stack.execute(DeleteClip(VIDEO, "c1"))
 
         val replacement = sampleDocument().copy(id = "doc-2")
         val before = stack.current.revision
@@ -282,7 +282,7 @@ class UndoStackTest {
         val stack = UndoStack(sampleDocument())
         val before = stack.current
 
-        stack.execute(DeleteClip("c1"))
+        stack.execute(DeleteClip(VIDEO, "c1"))
 
         assertEquals(before.revision + 1, stack.current.revision)
     }
@@ -293,7 +293,7 @@ class UndoStackTest {
         val before = stack.current.revision
 
         // Fails the distinct-operands precondition, so it is a no-op.
-        stack.execute(MergeClips(listOf("c1", "c1")))
+        stack.execute(MergeClips(VIDEO, listOf("c1", "c1")))
 
         assertEquals(before, stack.current.revision, "a no-op is not a new state")
         assertEquals(0, stack.undoDepth)
@@ -303,11 +303,11 @@ class UndoStackTest {
     fun `each preview frame that changes the document advances the revision`() {
         val stack = UndoStack(sampleDocument())
 
-        stack.preview(TrimClip("c1", 0L, 1_800_000L))
+        stack.preview(TrimClip(VIDEO, "c1", 0L, 1_800_000L))
         val first = stack.current.revision
-        stack.preview(TrimClip("c1", 0L, 1_600_000L))
+        stack.preview(TrimClip(VIDEO, "c1", 0L, 1_600_000L))
         val second = stack.current.revision
-        stack.preview(TrimClip("c1", 0L, 1_400_000L))
+        stack.preview(TrimClip(VIDEO, "c1", 0L, 1_400_000L))
         val third = stack.current.revision
 
         assertTrue(first > 0L, "the first frame that changes content must stamp")
@@ -315,15 +315,15 @@ class UndoStackTest {
         assertTrue(third > second, "§8.1 debounces the preview rebuild, not the revision")
 
         // The current values, so there is no content change and nothing to stamp.
-        stack.preview(TrimClip("c1", 0L, 1_400_000L))
+        stack.preview(TrimClip(VIDEO, "c1", 0L, 1_400_000L))
         assertEquals(third, stack.current.revision)
     }
 
     @Test
     fun `commit advances the revision once more and records one entry`() {
         val stack = UndoStack(sampleDocument())
-        stack.preview(TrimClip("c1", 0L, 1_800_000L))
-        stack.preview(TrimClip("c1", 0L, 1_500_000L))
+        stack.preview(TrimClip(VIDEO, "c1", 0L, 1_800_000L))
+        stack.preview(TrimClip(VIDEO, "c1", 0L, 1_500_000L))
         val lastPreview = stack.current.revision
 
         stack.commit()
@@ -339,8 +339,8 @@ class UndoStackTest {
         val before = original.revision
 
         // Out to 1s, then back to the original 2s.
-        stack.preview(TrimClip("c1", 0L, SEC))
-        stack.preview(TrimClip("c1", 0L, 2 * SEC))
+        stack.preview(TrimClip(VIDEO, "c1", 0L, SEC))
+        stack.preview(TrimClip(VIDEO, "c1", 0L, 2 * SEC))
         stack.commit()
 
         assertEquals(0, stack.undoDepth)
@@ -355,7 +355,7 @@ class UndoStackTest {
         val before = stack.current
         val revisionBefore = before.revision
 
-        stack.execute(DeleteClip("c1"))
+        stack.execute(DeleteClip(VIDEO, "c1"))
         val after = stack.current
         assertEquals(revisionBefore + 1, after.revision)
 
@@ -371,7 +371,7 @@ class UndoStackTest {
     @Test
     fun `reset advances the revision past the document it replaced`() {
         val stack = UndoStack(sampleDocument())
-        stack.execute(DeleteClip("c1"))
+        stack.execute(DeleteClip(VIDEO, "c1"))
         val replaced = stack.current.revision
 
         stack.reset(sampleDocument().copy(id = "doc-2"))
@@ -386,7 +386,7 @@ class UndoStackTest {
         val stack = UndoStack(sampleDocument())
         val before = stack.current.revision
 
-        stack.preview(TrimClip("c1", 0L, SEC))
+        stack.preview(TrimClip(VIDEO, "c1", 0L, SEC))
         stack.abortPreview()
 
         assertEquals(before, stack.current.revision, "not one more")
@@ -408,15 +408,18 @@ class UndoStackTest {
         val clip = clips[index]
 
         return when (rng.nextInt(9)) {
-            0 -> TrimClip(clip.id, rng.nextLong(0L, 3 * SEC), rng.nextLong(0L, 3 * SEC))
-            1 -> SplitClip(clip.id, rng.nextLong(0L, 6 * SEC), "split-$suffix")
-            2 -> CutLeft(clip.id, rng.nextLong(0L, 6 * SEC))
-            3 -> CutRight(clip.id, rng.nextLong(0L, 6 * SEC))
-            4 -> DeleteClip(clip.id)
-            5 -> MergeClips(listOfNotNull(clip.id, clips.getOrNull(index + 1)?.id))
-            6 -> ReorderClip(clip.id, rng.nextInt(-2, clips.size + 2))
-            7 -> DuplicateClip(clip.id, "dup-$suffix")
+            0 -> TrimClip(VIDEO, clip.id, rng.nextLong(0L, 3 * SEC), rng.nextLong(0L, 3 * SEC))
+            1 -> SplitClip(VIDEO, clip.id, rng.nextLong(0L, 6 * SEC), "split-$suffix")
+            2 -> CutLeft(VIDEO, clip.id, rng.nextLong(0L, 6 * SEC))
+            3 -> CutRight(VIDEO, clip.id, rng.nextLong(0L, 6 * SEC))
+            4 -> DeleteClip(VIDEO, clip.id)
+            5 -> MergeClips(VIDEO, listOfNotNull(clip.id, clips.getOrNull(index + 1)?.id))
+            6 -> ReorderClip(VIDEO, clip.id, rng.nextInt(-2, clips.size + 2))
+            7 -> DuplicateClip(VIDEO, clip.id, "dup-$suffix")
+            // The neighbour is taken from the FLATTENED list, which is the track's own neighbour while
+            // a document has one lane — the fixture's shape, and the shape every project has today.
             else -> AppendClip(
+                VIDEO,
                 "app-$suffix",
                 doc.sources.first().id,
                 0L,

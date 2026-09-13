@@ -46,18 +46,18 @@ class ReorderTargetTest {
 
         // Dragging a out of the way leaves b (0..2 s, midpoint 1 s) then c (2..5 s, midpoint 3.5 s),
         // laid out contiguously because the timeline has no gaps.
-        assertThat(doc.reorderTargetIndex("a", 0L)).isEqualTo(0)
-        assertThat(doc.reorderTargetIndex("a", 900_000L)).isEqualTo(0) // before b's midpoint
-        assertThat(doc.reorderTargetIndex("a", 1_400_000L)).isEqualTo(1) // past it, before c's
-        assertThat(doc.reorderTargetIndex("a", 4_000_000L)).isEqualTo(2) // past c's as well
+        assertThat(doc.reorderTargetIndex(VIDEO, "a", 0L)).isEqualTo(0)
+        assertThat(doc.reorderTargetIndex(VIDEO, "a", 900_000L)).isEqualTo(0) // before b's midpoint
+        assertThat(doc.reorderTargetIndex(VIDEO, "a", 1_400_000L)).isEqualTo(1) // past it, before c's
+        assertThat(doc.reorderTargetIndex(VIDEO, "a", 4_000_000L)).isEqualTo(2) // past c's as well
     }
 
     @Test
     fun `dropping past the end lands last, however far past it is`() {
         val doc = document()
 
-        assertThat(doc.reorderTargetIndex("a", 6 * oneSecond)).isEqualTo(2)
-        assertThat(doc.reorderTargetIndex("a", 999 * oneSecond)).isEqualTo(2)
+        assertThat(doc.reorderTargetIndex(VIDEO, "a", 6 * oneSecond)).isEqualTo(2)
+        assertThat(doc.reorderTargetIndex(VIDEO, "a", 999 * oneSecond)).isEqualTo(2)
     }
 
     @Test
@@ -67,8 +67,8 @@ class ReorderTargetTest {
         // position.
         val doc = document()
 
-        assertThat(doc.reorderTargetIndex("b", 0L)).isEqualTo(0)
-        assertThat(doc.reorderTargetIndex("b", 5 * oneSecond)).isEqualTo(2)
+        assertThat(doc.reorderTargetIndex(VIDEO, "b", 0L)).isEqualTo(0)
+        assertThat(doc.reorderTargetIndex(VIDEO, "b", 5 * oneSecond)).isEqualTo(2)
     }
 
     @Test
@@ -80,8 +80,8 @@ class ReorderTargetTest {
             tracks = listOf(videoTrack(clip("a", 1))),
         )
 
-        assertThat(one.reorderTargetIndex("a", 0L)).isEqualTo(0)
-        assertThat(one.reorderTargetIndex("a", 9 * oneSecond)).isEqualTo(0)
+        assertThat(one.reorderTargetIndex(VIDEO, "a", 0L)).isEqualTo(0)
+        assertThat(one.reorderTargetIndex(VIDEO, "a", 9 * oneSecond)).isEqualTo(0)
     }
 
     @Test
@@ -90,8 +90,8 @@ class ReorderTargetTest {
 
         // The arithmetic treats an unknown id as "removing nothing", so its answer is merely a slot;
         // what matters is that the COMMAND refuses, so nothing moves and the document is untouched.
-        assertThat(ReorderClip("nope", 1).apply(doc)).isEqualTo(doc)
-        assertThat(ReorderClip("nope", 1).apply(doc).ids()).containsExactly("a", "b", "c").inOrder()
+        assertThat(ReorderClip(VIDEO, "nope", 1).apply(doc)).isEqualTo(doc)
+        assertThat(ReorderClip(VIDEO, "nope", 1).apply(doc).ids()).containsExactly("a", "b", "c").inOrder()
     }
 
     @Test
@@ -99,9 +99,9 @@ class ReorderTargetTest {
         val doc = document()
 
         // Index 0 -> at the start; 1 -> after a (1 s); 2 -> after a and b (3 s).
-        assertThat(doc.reorderMarkerUs("c", 0)).isEqualTo(0L)
-        assertThat(doc.reorderMarkerUs("c", 1)).isEqualTo(1 * oneSecond)
-        assertThat(doc.reorderMarkerUs("c", 2)).isEqualTo(3 * oneSecond)
+        assertThat(doc.reorderMarkerUs(VIDEO, "c", 0)).isEqualTo(0L)
+        assertThat(doc.reorderMarkerUs(VIDEO, "c", 1)).isEqualTo(1 * oneSecond)
+        assertThat(doc.reorderMarkerUs(VIDEO, "c", 2)).isEqualTo(3 * oneSecond)
     }
 
     @Test
@@ -113,8 +113,8 @@ class ReorderTargetTest {
         doc.clips.forEach { dragged ->
             var drop = 0L
             while (drop <= 7 * oneSecond) {
-                val target = doc.reorderTargetIndex(dragged.id, drop)
-                val after = ReorderClip(dragged.id, target).apply(doc)
+                val target = doc.reorderTargetIndex(VIDEO, dragged.id, drop)
+                val after = ReorderClip(VIDEO, dragged.id, target).apply(doc)
 
                 assertThat(after.ids()).containsExactly("a", "b", "c")
                 assertThat(after.clips.indexOfFirst { it.id == dragged.id }).isEqualTo(target)

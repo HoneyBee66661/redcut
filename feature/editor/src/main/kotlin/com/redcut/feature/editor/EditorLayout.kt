@@ -60,18 +60,21 @@ private const val TRACKS_HALF = 1f
  *
  * ```
  * +--------------------------------------+   <- status bar inset
- * | Exit  untitled 1     [Resolution][Export] |  BAR_HEIGHT
+ * | Exit  untitled 1        [Import][Export]  |  BAR_HEIGHT
  * |              the preview                  |  weight 1
  * +--------------------------------------+
  * | ↶ ↷    ◀ 412 ms ▶ (play)          ◇  |  TRANSPORT_HEIGHT
- * | +----------------------------------+  |
- * | |      the tracks, outlined        |  |  weight 1, inset 10% left / 4dp top
- * | +----------------------------------+  |
+ * |     the tracks, flush to both edges   |  weight 1
  * +--------------------------------------+
  * | stage tabs                            |  wraps content
  * | Cut tools / inspector                 |
  * +--------------------------------------+
  * ```
+ *
+ * The tracks row is drawn with no frame and no inset, which is the point of UI revision 2 rather than a
+ * simplification of the diagram: *"hilangkan outline container"*, *"body track mentok kiri"*. A drawing of
+ * a border that the code no longer draws is how a reader ends up looking for the padding that sets it —
+ * [TracksSlice] carries the rest of the reason.
  */
 
 /** The top half: the preview, with the bar that exits, imports and exports. */

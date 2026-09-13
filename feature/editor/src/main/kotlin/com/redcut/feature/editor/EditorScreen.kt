@@ -4,11 +4,13 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -187,7 +189,11 @@ internal fun CutTools(state: EditorUiState, onIntent: (EditorIntent) -> Unit) {
     }.distinct()
 
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
-        Row {
+        // Horizontally scrollable, CapCut-style, and that is a fix rather than a style choice: six tool
+        // buttons at roughly 72 dp each are ~432 dp of row, and a phone is 360 dp wide, so a plain `Row`
+        // overflows and drops the last tools off the edge. A tool strip that cannot show all its tools is
+        // the same class of bug as a strip too short to render them — the one the device pass just found.
+        Row(modifier = Modifier.horizontalScroll(rememberScrollState())) {
             rows.forEach { (tool, availability) ->
                 TextButton(
                     onClick = { onIntent(EditorIntent.ApplyCut(tool)) },

@@ -38,14 +38,14 @@ import com.redcut.feature.editor.timeline.TimelineCanvas
  * hilang … tombol exit editor juga tidak ada … strip undo redo tidak ada"*. Nothing was mis-wired; the
  * slices were too short to render their buttons.
  *
- * So the two control strips and the toolbar are FIXED heights that fit their contents, and the preview and
- * the tracks share what is left with equal weights. On a 800 dp screen that is within a few percent of the
+ * So the two single-row strips are FIXED heights (a Material button is 48 dp, so 48 dp fits exactly one
+ * row), the toolbar WRAPS its content because it holds two rows and a reason line, and the preview and the
+ * tracks share what is left with equal weights. On a 800 dp screen that is within a few percent of the
  * revision's proportions AND every control is reachable; the percentages are documented rather than
  * transcribed, because a number that hides the buttons is not the requirement.
  */
 private val TRANSPORT_HEIGHT = 48.dp
 private val BAR_HEIGHT = 48.dp
-private val TOOLBAR_HEIGHT = 88.dp
 private val TRACKS_TOP_PADDING = 4.dp
 private const val TRACKS_LEFT_INSET_FRACTION = 0.10f
 private val TRACKS_OUTLINE = 1.dp
@@ -72,7 +72,7 @@ private const val TRACKS_HALF = 1f
  * | |      the tracks, outlined        |  |  weight 1, inset 10% left / 4dp top
  * | +----------------------------------+  |
  * +--------------------------------------+
- * | stage tabs                            |  TOOLBAR_HEIGHT
+ * | stage tabs                            |  wraps content
  * | Cut tools / inspector                 |
  * +--------------------------------------+
  * ```
@@ -225,10 +225,13 @@ internal fun ColumnScope.TracksSlice(
  */
 @Composable
 internal fun ColumnScope.BottomToolbar(state: EditorUiState, onIntent: (EditorIntent) -> Unit) {
+    // NO fixed height, and no weight: a toolbar that WRAPS its content cannot clip it. The first version
+    // gave it a fixed 88 dp while `CutTools` needs up to ~116 dp — a row of 48 dp buttons plus the line that
+    // explains why they are all disabled — so the Cut buttons would have been cut off in exactly the case the
+    // device pass had just complained about. Wrapping also means the toolbar costs only what it shows.
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .height(TOOLBAR_HEIGHT)
             .background(MaterialTheme.colorScheme.surfaceVariant),
     ) {
         TabRow(selectedTabIndex = state.stage.ordinal) {
@@ -241,7 +244,7 @@ internal fun ColumnScope.BottomToolbar(state: EditorUiState, onIntent: (EditorIn
             }
         }
         Box(
-            modifier = Modifier.fillMaxWidth().weight(1f),
+            modifier = Modifier.fillMaxWidth(),
             contentAlignment = Alignment.CenterStart,
         ) {
             when (state.stage) {

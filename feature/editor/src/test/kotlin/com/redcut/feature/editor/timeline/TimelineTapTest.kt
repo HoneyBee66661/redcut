@@ -1,10 +1,10 @@
 package com.redcut.feature.editor.timeline
 
 import com.google.common.truth.Truth.assertThat
+import com.redcut.core.common.timeline.ClipTiming
 import com.redcut.core.common.timeline.TimelineGeometry
 import com.redcut.core.common.timeline.TimelineZoom
 import com.redcut.core.common.timeline.spansOf
-import com.redcut.feature.editor.ClipTiming
 import com.redcut.feature.editor.EditorIntent
 import org.junit.Test
 

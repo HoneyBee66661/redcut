@@ -26,7 +26,6 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.redcut.domain.document.CutAvailability
 import com.redcut.domain.document.CutTool
 import com.redcut.domain.document.availabilityFor
-import com.redcut.feature.editor.timeline.TimelineCanvas
 
 /**
  * The editor destination: the ViewModel owner.
@@ -136,8 +135,9 @@ internal fun EditorScreen(
     onThumbnail: suspend (sourceId: String, uri: String, positionUs: Long) -> ImageBitmap?,
     onPreviewFrame: suspend (uri: String, positionUs: Long) -> ImageBitmap?,
 ) {
-    // One Column, four weights — see EditorLayout.kt for the diagram and why the percentages are weights.
-    Column(modifier = Modifier.fillMaxSize()) {
+    // The strips are fixed heights and the preview and tracks share what is left — see the note on the
+    // strip heights in EditorLayout.kt for why the revision's percentages cannot be transcribed directly.
+    Column(modifier = Modifier.fillMaxSize().statusBarInset()) {
         PreviewHalf(
             state = state,
             onImportClick = onImportClick,
@@ -149,18 +149,7 @@ internal fun EditorScreen(
 
         TimelineControls(state = state, onIntent = onIntent)
 
-        // The tracks, and the red line the revision fixed at the centre of them. The canvas fills its
-        // slice exactly: its own layout is the ruler plus the clip track, and a fixed height was the old
-        // layout's answer to a question the slices now answer.
-        TimelineCanvas(
-            document = state.document,
-            playheadUs = state.playheadUs,
-            selection = state.selection,
-            tool = state.tool,
-            onIntent = onIntent,
-            onThumbnail = onThumbnail,
-            modifier = Modifier.fillMaxWidth().weight(TRACKS_SLICE),
-        )
+        TracksSlice(state = state, onIntent = onIntent, onThumbnail = onThumbnail)
 
         BottomToolbar(state = state, onIntent = onIntent)
 

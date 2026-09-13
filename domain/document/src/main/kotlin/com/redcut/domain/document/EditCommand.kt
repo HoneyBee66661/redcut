@@ -340,8 +340,14 @@ private fun EditDocument.replaceClip(clipId: String, replacements: List<Clip>): 
     return copy(clips = updated)
 }
 
-/** Replaces the clip with one that has the same id, or leaves the document alone. */
-private fun EditDocument.withClip(clip: Clip): EditDocument = replaceClip(clip.id, listOf(clip))
+/**
+ * Replaces the clip with one that has the same id, or leaves the document alone.
+ *
+ * `internal` rather than private-to-this-file: the Edit stage's commands (AdjustCommands.kt) replace a
+ * clip the same way the Cut stage's do, and a second copy of "swap one clip by id" is a second place
+ * for the id-matching rule to be got wrong.
+ */
+internal fun EditDocument.withClip(clip: Clip): EditDocument = replaceClip(clip.id, listOf(clip))
 
 /** True when this scope targets [clipId]. */
 internal fun EffectScope.isScopedTo(clipId: String): Boolean =

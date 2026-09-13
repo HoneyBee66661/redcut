@@ -196,7 +196,12 @@ private fun rememberTimelineLayer(
  *
  * One call rather than an inline chain, so the composable above reads as "state, then draw" and the
  * gesture ORDER stays stated in exactly one place ([timelineGestures]).
+ *
+ * `@Composable` because [timelineGestures] is one now: it reads the live mapping through
+ * `rememberUpdatedState`, and reading a state is a composable act. The first version of this helper was
+ * plain and CI said so — this is the kind of annotation a compiler enforces rather than a reviewer.
  */
+@Composable
 private fun Modifier.timelineSurface(
     geometry: TimelineGeometry,
     rulerHeightPx: Float,

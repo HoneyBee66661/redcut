@@ -306,9 +306,9 @@ data class TimelineGeometry(
      * A lane clamped to the content would instead leave the area past the last clip looking like a hole in
      * the timeline, and that edge is one the user drags a clip towards.
      *
-     * One entry today: the document is still a flat clip list, so its clips occupy one lane. The return type
-     * is a list rather than a single rect because workstream C gives each track its own — and a draw pass
-     * that already loops over lanes is the one that will not have to change when it does.
+     * One entry today: this geometry knows nothing about the document's tracks, so every clip it is given
+     * occupies one lane. The return type is a list rather than a single rect because each track gets its own
+     * — and a draw pass that already loops over lanes is the one that will not have to change when it does.
      */
     fun laneRects(): List<LaneRect> = listOf(LaneRect(visibleStartPx, visibleEndPx))
 

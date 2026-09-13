@@ -4,6 +4,7 @@ import com.google.common.truth.Truth.assertThat
 import com.redcut.domain.document.Clip
 import com.redcut.domain.document.EditDocument
 import com.redcut.domain.document.SourceRef
+import com.redcut.domain.document.videoTrack
 import org.junit.jupiter.api.Test
 
 /**
@@ -38,14 +39,18 @@ class ProjectSummaryTest {
                     height = 1080,
                 ),
             ),
-            clips = List(clips) { index ->
-                Clip(
-                    id = "clip-$index",
-                    sourceId = "src-1",
-                    sourceInUs = index * oneSecond,
-                    sourceOutUs = (index + 1) * oneSecond,
-                )
-            },
+            tracks = listOf(
+                videoTrack(
+                    List(clips) { index ->
+                        Clip(
+                            id = "clip-$index",
+                            sourceId = "src-1",
+                            sourceInUs = index * oneSecond,
+                            sourceOutUs = (index + 1) * oneSecond,
+                        )
+                    },
+                ),
+            ),
         ),
         updatedAtMs = updatedAtMs,
     )

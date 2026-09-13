@@ -228,7 +228,7 @@ class EditCommandTest {
             id = "d",
             name = "one",
             sources = listOf(source("s1")),
-            clips = listOf(clip("only", "s1", 0L, SEC)),
+            tracks = listOf(videoTrack(clip("only", "s1", 0L, SEC))),
         )
         assertSame(single, DeleteClip("only").apply(single))
     }
@@ -250,9 +250,11 @@ class EditCommandTest {
         // Merging these would silently drop the footage between 2s and 3s.
         val short = sampleDocument().let {
             it.copy(
-                clips = listOf(
-                    clip("a", "s1", 0L, 2 * SEC),
-                    clip("b", "s1", 3 * SEC, 5 * SEC),
+                tracks = listOf(
+                    videoTrack(
+                        clip("a", "s1", 0L, 2 * SEC),
+                        clip("b", "s1", 3 * SEC, 5 * SEC),
+                    ),
                 ),
             )
         }
@@ -265,7 +267,9 @@ class EditCommandTest {
             id = "d",
             name = "two sources",
             sources = listOf(source("s1"), source("s2")),
-            clips = listOf(clip("a", "s1", 0L, 2 * SEC), clip("b", "s2", 2 * SEC, 4 * SEC)),
+            tracks = listOf(
+                videoTrack(clip("a", "s1", 0L, 2 * SEC), clip("b", "s2", 2 * SEC, 4 * SEC)),
+            ),
         )
         assertSame(twoSources, MergeClips(listOf("a", "b")).apply(twoSources))
     }
@@ -276,9 +280,11 @@ class EditCommandTest {
         // how much timeline one of them occupies.
         val mixed = sampleDocument().let {
             it.copy(
-                clips = listOf(
-                    clip("a", "s1", 0L, 2 * SEC),
-                    clip("b", "s1", 2 * SEC, 4 * SEC, speed = 2f),
+                tracks = listOf(
+                    videoTrack(
+                        clip("a", "s1", 0L, 2 * SEC),
+                        clip("b", "s1", 2 * SEC, 4 * SEC, speed = 2f),
+                    ),
                 ),
             )
         }
@@ -291,9 +297,11 @@ class EditCommandTest {
         // directions would silently reverse one of them, so the run is left alone.
         val mixed = sampleDocument().let {
             it.copy(
-                clips = listOf(
-                    clip("a", "s1", 0L, 2 * SEC),
-                    clip("b", "s1", 2 * SEC, 4 * SEC, reverse = true),
+                tracks = listOf(
+                    videoTrack(
+                        clip("a", "s1", 0L, 2 * SEC),
+                        clip("b", "s1", 2 * SEC, 4 * SEC, reverse = true),
+                    ),
                 ),
             )
         }
@@ -304,10 +312,12 @@ class EditCommandTest {
     fun `merge refuses a run that is separated by another clip`() {
         val separated = sampleDocument().let {
             it.copy(
-                clips = listOf(
-                    clip("a", "s1", 0L, 2 * SEC),
-                    clip("middle", "s1", 2 * SEC, 3 * SEC),
-                    clip("b", "s1", 3 * SEC, 5 * SEC),
+                tracks = listOf(
+                    videoTrack(
+                        clip("a", "s1", 0L, 2 * SEC),
+                        clip("middle", "s1", 2 * SEC, 3 * SEC),
+                        clip("b", "s1", 3 * SEC, 5 * SEC),
+                    ),
                 ),
             )
         }

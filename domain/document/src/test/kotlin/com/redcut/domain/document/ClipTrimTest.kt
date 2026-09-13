@@ -44,7 +44,7 @@ class ClipTrimTest {
                 height = 1080,
             ),
         ),
-        clips = listOf(clip),
+        tracks = listOf(videoTrack(clip)),
     )
 
     // --- The intent --------------------------------------------------------

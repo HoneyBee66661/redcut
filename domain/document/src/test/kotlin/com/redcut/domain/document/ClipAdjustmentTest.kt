@@ -50,7 +50,7 @@ class ClipAdjustmentTest {
         id = "doc",
         name = "Doc",
         sources = listOf(source()),
-        clips = listOf(clip),
+        tracks = listOf(videoTrack(clip)),
     )
 
     private val allAdjustments = ClipAdjustment.entries.toList()

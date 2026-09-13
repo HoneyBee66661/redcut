@@ -218,8 +218,8 @@ object TimelineCompiler {
     /**
      * The index of the emitted layer a clip id refers to, or -1.
      *
-     * First match wins. `EditDocument.clips` is a plain list and does not forbid two
-     * clips sharing an id, but an effect names a single clip, so it must resolve to a
+     * First match wins. `EditDocument.clips` is the flattened list of every track's
+     * clips and does not forbid two sharing an id, but an effect names a single clip, so it must resolve to a
      * single layer — applying a Clip-scoped effect to every layer that happens to
      * share an id would turn one user action into N visible ones.
      */

@@ -52,7 +52,7 @@ class AdjustCommandsTest {
         id = "doc",
         name = "Doc",
         sources = listOf(source()),
-        clips = listOf(clip),
+        tracks = listOf(videoTrack(clip)),
     )
 
     private fun Clip.after(command: EditCommand): Clip =

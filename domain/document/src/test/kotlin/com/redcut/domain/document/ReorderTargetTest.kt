@@ -35,7 +35,7 @@ class ReorderTargetTest {
         id = "doc",
         name = "Doc",
         sources = listOf(source()),
-        clips = listOf(clip("a", 1), clip("b", 2), clip("c", 3)),
+        tracks = listOf(videoTrack(clip("a", 1), clip("b", 2), clip("c", 3))),
     )
 
     private fun EditDocument.ids() = clips.map { it.id }
@@ -77,7 +77,7 @@ class ReorderTargetTest {
             id = "doc",
             name = "Doc",
             sources = listOf(source()),
-            clips = listOf(clip("a", 1)),
+            tracks = listOf(videoTrack(clip("a", 1))),
         )
 
         assertThat(one.reorderTargetIndex("a", 0L)).isEqualTo(0)

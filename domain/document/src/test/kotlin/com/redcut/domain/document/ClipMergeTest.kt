@@ -44,7 +44,7 @@ class ClipMergeTest {
             id = "doc",
             name = "Doc",
             sources = sources,
-            clips = clips.toList(),
+            tracks = listOf(videoTrack(clips.toList())),
         )
 
     private fun EditDocument.reasonFor(clipId: String): String =

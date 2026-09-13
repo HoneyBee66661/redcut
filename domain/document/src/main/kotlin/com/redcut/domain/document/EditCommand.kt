@@ -78,9 +78,10 @@ data class AddSource(val source: SourceRef) : EditCommand {
 /**
  * Appends a clip to the end of the timeline (FR-1.2).
  *
- * Append rather than insert-at-index: the timeline is a single ordered track, so
- * "where" is always "last" on import, and reordering is a separate explicit
- * command.
+ * Append rather than insert-at-index: import always lands last on the lane it
+ * targets, and reordering is a separate explicit command. WHICH lane that is
+ * becomes a parameter of this command when the commands name their track; today
+ * it lands on the document's first track, like every other write.
  */
 data class AppendClip(
     val clipId: String,
@@ -101,7 +102,7 @@ data class AppendClip(
             sourceInUs = sourceInUs,
             sourceOutUs = sourceOutUs,
         )
-        return doc.copy(clips = doc.clips + clip)
+        return doc.withClips(doc.clips + clip)
     }
 }
 
@@ -237,10 +238,9 @@ data class DeleteClip(val clipId: String) : EditCommand {
     override fun apply(doc: EditDocument): EditDocument {
         if (doc.clipById(clipId) == null) return doc
         if (doc.clips.size <= 1) return doc
-        return doc.copy(
-            clips = doc.clips.filterNot { it.id == clipId },
-            effects = doc.effects.filterNot { it.scope.isScopedTo(clipId) },
-        )
+        return doc
+            .withClips(doc.clips.filterNot { it.id == clipId })
+            .copy(effects = doc.effects.filterNot { it.scope.isScopedTo(clipId) })
     }
 }
 
@@ -273,7 +273,7 @@ data class MergeClips(val clipIds: List<String>) : EditCommand {
         val mergedClips = doc.clips.toMutableList()
         repeat(run.clips.size) { mergedClips.removeAt(run.startIndex) }
         mergedClips.add(run.startIndex, merged)
-        return doc.copy(clips = mergedClips)
+        return doc.withClips(mergedClips)
     }
 }
 
@@ -293,7 +293,7 @@ data class ReorderClip(val clipId: String, val toIndex: Int) : EditCommand {
         if (from == to) return doc
         val reordered = doc.clips.toMutableList()
         reordered.add(to, reordered.removeAt(from))
-        return doc.copy(clips = reordered)
+        return doc.withClips(reordered)
     }
 }
 
@@ -308,7 +308,7 @@ data class DuplicateClip(val clipId: String, val newClipId: String) : EditComman
         val duplicate = doc.clips[index].copy(id = newClipId)
         val clips = doc.clips.toMutableList()
         clips.add(index + 1, duplicate)
-        return doc.copy(clips = clips)
+        return doc.withClips(clips)
     }
 }
 
@@ -337,7 +337,7 @@ private fun EditDocument.replaceClip(clipId: String, replacements: List<Clip>): 
     val updated = clips.toMutableList()
     updated.removeAt(index)
     updated.addAll(index, replacements)
-    return copy(clips = updated)
+    return withClips(updated)
 }
 
 /**

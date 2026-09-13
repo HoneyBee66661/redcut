@@ -17,6 +17,13 @@ import kotlinx.serialization.Serializable
  * Positions are NEVER stored. A clip records where it reads *from the source*;
  * where it sits *on the timeline* is derived by [timeline]. Storing both is the
  * classic source of "the timeline went stale after a ripple edit" bugs.
+ *
+ * ### Tracks, since schema v2
+ *
+ * The document is a list of [Track]s, and a clip belongs to exactly one of them. [clips] is a derived
+ * view over that list, so the many places that only need "every clip, in order" keep working — but it
+ * is a READ: a caller that wants to change a clip names the track it is changing (see [EditCommand]),
+ * because the one thing a flat rewrite cannot express is which lane a new clip belongs to.
  */
 @Serializable
 data class EditDocument(
@@ -24,7 +31,15 @@ data class EditDocument(
     val id: String,
     val name: String,
     val sources: List<SourceRef> = emptyList(),
-    val clips: List<Clip> = emptyList(),
+    /**
+     * The lanes of the timeline, in the order the body stacks them (index 0 is the lowest).
+     *
+     * The default is one empty VIDEO track rather than an empty list: a new document, and a document
+     * read from a file that predates tracks, is a project with a video lane waiting for its first clip
+     * — not a project with no timeline at all. An empty list is still legal (the audio-only document of
+     * the audio workstream is close to it), which is why the model does not require one either.
+     */
+    val tracks: List<Track> = listOf(Track.MAIN),
     val effects: List<AppliedEffect> = emptyList(),
     val canvas: CanvasSpec = CanvasSpec.PORTRAIT_1080,
     val createdAtMs: Long = 0L,
@@ -49,10 +64,20 @@ data class EditDocument(
      * content only (see [EditCommand]).
      *
      * Serialized with a default of `0`, so a document written before the field
-     * existed still loads unchanged. [SCHEMA_VERSION] stays `1`.
+     * existed still loads unchanged.
      */
     val revision: Long = 0L,
 ) {
+    /**
+     * Every clip the document holds, in track order and then in-track order.
+     *
+     * A VIEW, not a stored field: the clips live in their [Track], and this is the flattened reading of
+     * them that the timeline maths, the render compiler and the frame stepping were all written
+     * against. It is `get`-only on purpose — a caller that writes a plain list back has to say which
+     * track it is writing to, and the compiler is what enforces that.
+     */
+    val clips: List<Clip> get() = tracks.flatMap { it.clips }
+
     /**
      * Clips paired with their derived timeline positions, in playback order.
      *
@@ -60,6 +85,12 @@ data class EditDocument(
      * few dozen additions) and called on every compile, so it is deliberately
      * NOT cached — a cache here would be a correctness liability for no
      * measurable gain.
+     *
+     * Still the FLAT reading since v2: the sum runs across [clips], so a second track's clips are
+     * placed after the first track's rather than beside them. That is what a single-lane document has
+     * always meant and it is what keeps the render graph and the frame stepping unchanged while the
+     * lanes are introduced; a prefix sum PER track is the next step, and it is the one that makes the
+     * lanes overlap in time.
      */
     val timeline: List<TimelineSlot>
         get() {
@@ -80,7 +111,24 @@ data class EditDocument(
         timeline.firstOrNull { positionUs >= it.startUs && positionUs < it.endUs }
             ?: timeline.lastOrNull()?.takeIf { positionUs >= it.endUs }
 
+    /**
+     * The clip with [clipId], wherever it is.
+     *
+     * Document-wide rather than per-track, deliberately: clip ids are unique across the document
+     * (every command refuses an id that is already taken), so "which clip is this" has one answer and
+     * the reader does not have to know the lane to ask. A command is the opposite case — it must name
+     * the track it writes to — which is why [EditCommand]s carry a track id of their own.
+     */
     fun clipById(clipId: String): Clip? = clips.firstOrNull { it.id == clipId }
+
+    /** The track with [trackId], or null when this document has no such lane. */
+    fun trackById(trackId: String): Track? = tracks.firstOrNull { it.id == trackId }
+
+    /** The track holding [clipId], or null when no track does. */
+    fun trackOf(clipId: String): Track? = tracks.firstOrNull { it.clipById(clipId) != null }
+
+    /** The id of the track holding [clipId], or null. The answer [EditCommand]s need to be built. */
+    fun trackIdOf(clipId: String): String? = trackOf(clipId)?.id
 
     fun sourceById(sourceId: String): SourceRef? = sources.firstOrNull { it.id == sourceId }
 
@@ -92,9 +140,35 @@ data class EditDocument(
         /**
          * Written from day one. Retrofitting a version field after users have
          * projects on disk is not possible (spec §10.2).
+         *
+         * `2` is the tracks version: the clips moved inside [Track], so a file written by this build
+         * says `tracks` where the previous one said `clips`. That is not a compatible read, which is
+         * why :domain:project's codec migrates a v1 file on the way in rather than letting the old
+         * list fall on the floor.
          */
-        const val SCHEMA_VERSION = 1
+        const val SCHEMA_VERSION = 2
     }
+}
+
+/**
+ * Replaces the document's clips, as the one flat list the commands still edit.
+ *
+ * ### Why this exists, and why it goes away
+ *
+ * [EditDocument.clips] is derived, so every `copy(clips = …)` in the command layer stopped compiling
+ * the moment the clips moved into a track — which is the point of deriving it: the compiler names every
+ * writer, and a writer that is not told which lane it edits is a clip that can land in the wrong one.
+ *
+ * Writing the whole list back is the honest step for THIS task and no more: a document has one track
+ * here (nothing seeds a second until the audio workstream), so "the flat list" and "the track's clips"
+ * are the same list, and every command keeps its shape while the model underneath changes. The next
+ * task gives each command the `trackId` it writes to and deletes this function, because a second lane
+ * is exactly what the flat rewrite cannot express — [clips] would then be the union of two lanes and
+ * this would put all of it on the first one.
+ */
+internal fun EditDocument.withClips(clips: List<Clip>): EditDocument {
+    val first = tracks.firstOrNull() ?: return this
+    return copy(tracks = tracks.map { if (it.id == first.id) it.copy(clips = clips) else it })
 }
 
 /**

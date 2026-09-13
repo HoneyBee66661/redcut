@@ -30,9 +30,7 @@ class DocumentMigrationTest {
      * no clips anywhere, because v1's flat `clips` key is not a field of this build's document. The
      * clips arrive separately — that is the shape of the problem the migration solves.
      */
-    private fun v1Document(
-        effects: List<AppliedEffect> = emptyList(),
-    ) = EditDocument(
+    private fun v1Document(effects: List<AppliedEffect> = emptyList()) = EditDocument(
         schemaVersion = 1,
         id = "doc-1",
         name = "Holiday",

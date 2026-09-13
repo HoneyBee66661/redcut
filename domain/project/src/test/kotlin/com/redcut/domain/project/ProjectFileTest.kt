@@ -62,7 +62,12 @@ class ProjectFileTest {
         ),
         tracks = listOf(
             videoTrack(
-                Clip(id = "clip-a", sourceId = "src-1", sourceInUs = 0, sourceOutUs = 4 * oneSecond),
+                Clip(
+                    id = "clip-a",
+                    sourceId = "src-1",
+                    sourceInUs = 0,
+                    sourceOutUs = 4 * oneSecond,
+                ),
             ),
         ),
     )

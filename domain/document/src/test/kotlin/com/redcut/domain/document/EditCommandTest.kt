@@ -341,8 +341,14 @@ class EditCommandTest {
         // negative index clamps to 0 (-5 -> 0). Neither end is a silent no-op.
         val doc = sampleDocument()
         assertEquals(listOf("c2", "c1"), ReorderClip(VIDEO, "c1", 1).apply(doc).clips.map { it.id })
-        assertEquals(listOf("c2", "c1"), ReorderClip(VIDEO, "c1", 99).apply(doc).clips.map { it.id })
-        assertEquals(listOf("c2", "c1"), ReorderClip(VIDEO, "c2", -5).apply(doc).clips.map { it.id })
+        assertEquals(
+            listOf("c2", "c1"),
+            ReorderClip(VIDEO, "c1", 99).apply(doc).clips.map { it.id },
+        )
+        assertEquals(
+            listOf("c2", "c1"),
+            ReorderClip(VIDEO, "c2", -5).apply(doc).clips.map { it.id },
+        )
     }
 
     @Test

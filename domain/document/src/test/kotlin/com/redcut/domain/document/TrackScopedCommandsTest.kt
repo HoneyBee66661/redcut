@@ -22,7 +22,8 @@ import org.junit.jupiter.api.Test
 class TrackScopedCommandsTest {
 
     private fun document(
-        video: List<Clip> = listOf(clip("v1", "s1", 0L, 2 * SEC), clip("v2", "s1", 2 * SEC, 4 * SEC)),
+        video: List<Clip> =
+            listOf(clip("v1", "s1", 0L, 2 * SEC), clip("v2", "s1", 2 * SEC, 4 * SEC)),
         audio: List<Clip> = listOf(clip("a1", "s1", 0L, 4 * SEC)),
     ) = EditDocument(
         id = "doc",
@@ -116,7 +117,9 @@ class TrackScopedCommandsTest {
 
         val after = ReorderClip(VIDEO, "v1", 99).apply(doc)
 
-        assertThat(after.trackById(VIDEO)?.clips?.map { it.id }).containsExactly("v2", "v1").inOrder()
+        assertThat(
+            after.trackById(VIDEO)?.clips?.map { it.id },
+        ).containsExactly("v2", "v1").inOrder()
         assertThat(after.trackById(AUDIO)?.clips?.map { it.id }).containsExactly("a1")
     }
 
@@ -167,9 +170,9 @@ class TrackScopedCommandsTest {
     }
 
     @Test
-    fun `a clip id that already exists on another lane is refused, because ids are document-wide`() {
-        // Not a nicety: every effect names a clip by id alone, so two clips sharing one would make
-        // `clipById` — and therefore the effect — ambiguous.
+    fun `a clip id another lane already holds is refused`() {
+        // Not a nicety: ids are unique across the DOCUMENT, not per lane — every effect names a clip by
+        // id alone, so two clips sharing one would make `clipById`, and therefore the effect, ambiguous.
         val doc = document()
 
         assertSame(doc, AppendClip(AUDIO, "v1", "s1", 0L, SEC).apply(doc))

@@ -72,7 +72,12 @@ class ClipTrimTest {
         val (intentIn, intentOut) = clip().trimmedTo(ClipEdge.IN, -3 * oneSecond)
         assertThat(intentIn).isEqualTo(-3 * oneSecond)
 
-        val trimmed = TrimClip(VIDEO, "clip-1", intentIn, intentOut).apply(document()).clipById("clip-1")!!
+        val trimmed = TrimClip(
+            VIDEO,
+            "clip-1",
+            intentIn,
+            intentOut,
+        ).apply(document()).clipById("clip-1")!!
 
         assertThat(trimmed.sourceInUs).isEqualTo(0L)
         assertThat(trimmed.sourceOutUs).isEqualTo(16 * oneSecond)
@@ -82,7 +87,12 @@ class ClipTrimTest {
     fun `a drag past the end of the source clamps instead of running off it`() {
         val (intentIn, intentOut) = clip().trimmedTo(ClipEdge.OUT, 30 * oneSecond)
 
-        val trimmed = TrimClip(VIDEO, "clip-1", intentIn, intentOut).apply(document()).clipById("clip-1")!!
+        val trimmed = TrimClip(
+            VIDEO,
+            "clip-1",
+            intentIn,
+            intentOut,
+        ).apply(document()).clipById("clip-1")!!
 
         // The source is 20 s long: the clip cannot read past it however far the finger went.
         assertThat(trimmed.sourceOutUs).isEqualTo(20 * oneSecond)
@@ -95,7 +105,12 @@ class ClipTrimTest {
         // calculation that assumes out > in.
         val (intentIn, intentOut) = clip().trimmedTo(ClipEdge.OUT, 2 * oneSecond)
 
-        val trimmed = TrimClip(VIDEO, "clip-1", intentIn, intentOut).apply(document()).clipById("clip-1")!!
+        val trimmed = TrimClip(
+            VIDEO,
+            "clip-1",
+            intentIn,
+            intentOut,
+        ).apply(document()).clipById("clip-1")!!
 
         assertThat(trimmed.sourceOutUs - trimmed.sourceInUs).isEqualTo(Clip.MIN_DURATION_US)
     }
@@ -107,7 +122,12 @@ class ClipTrimTest {
         // finger went 20 ms too far would be unrecoverable mid-drag.
         val (intentIn, intentOut) = clip().trimmedTo(ClipEdge.IN, 16 * oneSecond - 20_000L)
 
-        val trimmed = TrimClip(VIDEO, "clip-1", intentIn, intentOut).apply(document()).clipById("clip-1")!!
+        val trimmed = TrimClip(
+            VIDEO,
+            "clip-1",
+            intentIn,
+            intentOut,
+        ).apply(document()).clipById("clip-1")!!
 
         assertThat(trimmed).isNotNull()
         assertThat(trimmed.timelineDurationUs).isEqualTo(Clip.MIN_DURATION_US)

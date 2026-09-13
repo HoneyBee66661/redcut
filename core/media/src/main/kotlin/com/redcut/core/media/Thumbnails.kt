@@ -252,8 +252,11 @@ class AndroidFrameSource(
  */
 @Singleton
 class AndroidThumbnailSource @Inject constructor(
-    // `@param:` states the target Kotlin 2.2 is warning about; see AndroidMediaProbe.
-    @param:ApplicationContext context: Context,
+    // No `@param:` here, and that is the point: this is a plain parameter, not a constructor property,
+    // so the annotation can only mean the parameter — and Kotlin 2.2 warns that the target is
+    // redundant. `@param:` is for the OTHER case (a `private val` parameter, where the bare annotation
+    // is ambiguous); see AndroidMediaProbe.
+    @ApplicationContext context: Context,
     broker: MediaResourceBroker,
     @IoDispatcher io: CoroutineDispatcher,
     logger: RedcutLogger,

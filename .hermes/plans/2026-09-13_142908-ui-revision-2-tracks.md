@@ -31,6 +31,7 @@ resolved here explicitly — with the reading I will build unless the user corre
 | 3 | *hilangkan outline container* | The `border(...)` added in the previous round goes. | no |
 | 4 | *body track mentok kiri, namun bisa off screen kanan* | The 10 % left gutter goes: the track body starts at x = 0. Content scrolls right-to-left freely; there is no right-hand clamp. | no |
 | 5 | *body track mentok kiri, namun bisa off screen kanan* + *left clip head saat clip discroll ke kanan, berhenti di playhead. jadi gak ilang ke off screen* | The 10 % left gutter goes: the track body starts at x = 0. Content scrolls right-to-left freely; there is no right-hand clamp. The content's LEFT EDGE (the head of the first clip, i.e. time 0) may travel right only as far as the playhead, so the beginning of the timeline never leaves the screen on the right. **This is already the model**: `scrollCentering(0) = -viewportWidth/2` puts time 0 under the playhead, and because a drag moves the PLAYHEAD (bounded to `0..duration`), the head cannot pass it. Only the gutter changes; the invariant gets its own test in A1. | **confirmed by the user** |
+| 5b | *left clip head bakal mentok mid playhead saat di scroll ke kanan dan sebaliknya bagi clip tail?* | **Symmetry confirmed, option a (2026-09-13)**: the line is the centre at BOTH ends — scrolling left, the last frame stops under the line too. The cost is accepted explicitly: half the viewport is empty past each end. Scope is the TIMELINE's first and last frame, NOT each clip (an interior clip's head/tail pass the line freely, or mid-timeline cuts would be impossible). Both halves are now tests: `TimelineGeometryTest` head + tail mirror, tail landed as PR #31 / `9d5aa82`, pinned for content longer *and* shorter than the viewport. | decided |
 | 6 | *beri opsi select track in case clipnya split banyak, tujuannya biar bisa merge dll* | A `Selection.Track(trackId)` alongside `Selection.Clip`; tapping the track's lane background selects the TRACK — DECIDED by the user: *"gue ikut rekomendasi lu"*, and the Cut tools then act across its clips (merge, delete all, …). | no |
 | 7 | *auto extract audio menjadi track 2* | On import, if the source has audio, a second track appears holding an audio clip spanning the same range. **Modelled as a reference to the source's audio stream, not a transcoded file** — DECIDED by the user: *"referensi aja"* (see §4.3). | decided |
 | 8 | *timeline body zone adalah quantisasi waktu sehingga ada stretch effect … applied independently on each clip instead of full track body* | The horizontal axis is time-per-pixel (a quantisation of time, `TimelineZoom.pixelsPerSecond`); a clip's WIDTH is derived from ITS OWN duration, so a clip stretched by speed/trim changes width on its own. Zooming scales the mapping, not a bitmap — which is why there is no image zoom in the body. | **yes** |
@@ -116,6 +117,11 @@ own height for the RULER only).
 **Step 5:** commit `Timeline: fixed track height, not a share of the canvas`.
 
 **Verification:** `./tools/verify.sh` green; 41 geometry tests.
+
+**Status (2026-09-13):** the fixed `trackHeightPx` and the head invariant are on `main`; the TAIL half of the
+invariant landed as PR #31 / `9d5aa82` (45 geometry tests, 0 failures; a clip shorter than the viewport is
+covered too). What is LEFT of A1 is the `:feature:editor` side — `TimelineDraw`'s `Track` rect taking the
+fixed height instead of the canvas height.
 
 ### Task A2: Remove the gutter and the container outline
 

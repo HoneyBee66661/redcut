@@ -60,7 +60,7 @@ private const val TRACKS_HALF = 1f
  *
  * ```
  * +--------------------------------------+   <- status bar inset
- * | Exit  untitled 1     [Resolution][Export] |  BAR_HEIGHT
+ * | Exit  untitled 1        [Import][Export]  |  BAR_HEIGHT
  * |              the preview                  |  weight 1
  * +--------------------------------------+
  * | ↶ ↷    ◀ 412 ms ▶ (play)          ◇  |  TRANSPORT_HEIGHT
@@ -105,7 +105,12 @@ internal fun ColumnScope.PreviewHalf(
  *
  * A fixed [BAR_HEIGHT] rather than a share of the half: see the note on the strip heights. Export is
  * disabled on an empty document — present rather than hidden, so the button does not appear the moment the
- * user does the thing it needs.
+ * user does the thing it needs. That is the only enablement rule HERE, and it is a fact about the DOCUMENT;
+ * every other control's rule lives with the thing it acts on.
+ *
+ * Extracted from `EditorScreen` when that file reached `detekt`'s function-length limit, and the limit was
+ * right again: the screen is "bar, banner, tabs, stage, tools, timeline" as a list of things, and a bar
+ * drawn inline makes that list harder to see rather than shorter to read.
  *
  * The `Resolution` toggle that briefly lived on the import button is GONE, by the user's word: *"tombol import
  * dan export kembali seperti desain awal, hilangkan tombol resolusi, karena relevan saat kita tekan tombol

@@ -70,10 +70,7 @@ internal fun EditorViewport(
  * Overlay rendering the viewport rectangle outline and snap lines over the preview.
  */
 @Composable
-internal fun ViewportOverlay(
-    rect: ViewportRect,
-    modifier: Modifier = Modifier,
-) {
+internal fun ViewportOverlay(rect: ViewportRect, modifier: Modifier = Modifier) {
     val colors = MaterialTheme.colorScheme
     val paint = remember(colors) {
         ViewportPaint(

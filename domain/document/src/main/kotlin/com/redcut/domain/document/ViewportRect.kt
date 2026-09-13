@@ -1,7 +1,7 @@
 package com.redcut.domain.document
 
-import kotlin.math.abs
 import kotlinx.serialization.Serializable
+import kotlin.math.abs
 
 /**
  * The preview viewport rectangle model (spec UI revision 2, §WS F / Task F1).
@@ -103,13 +103,12 @@ data class ViewportRect(
     /**
      * Converts this viewport into a [TransformSpec] crop, mapping to [0.0, 1.0].
      */
-    fun toTransformSpec(base: TransformSpec = TransformSpec()): TransformSpec =
-        base.copy(
-            cropLeft = left.coerceIn(0f, 1f),
-            cropTop = top.coerceIn(0f, 1f),
-            cropRight = right.coerceIn(0f, 1f),
-            cropBottom = bottom.coerceIn(0f, 1f),
-        )
+    fun toTransformSpec(base: TransformSpec = TransformSpec()): TransformSpec = base.copy(
+        cropLeft = left.coerceIn(0f, 1f),
+        cropTop = top.coerceIn(0f, 1f),
+        cropRight = right.coerceIn(0f, 1f),
+        cropBottom = bottom.coerceIn(0f, 1f),
+    )
 
     /**
      * Snaps [centerX] and [centerY] to the centre lines when within [thresholdPx]

@@ -1031,27 +1031,27 @@ class EditorViewModelTest {
     @Test
     fun `the viewport transform is stored on the clip and survives a reload`() =
         runTest(dispatcher) {
-        val projects = RecordingProjects()
-        val model = viewModel(reader = RecordingReader(listOf(video())), projects = projects)
+            val projects = RecordingProjects()
+            val model = viewModel(reader = RecordingReader(listOf(video())), projects = projects)
 
-        model.onIntent(EditorIntent.ImportMedia(listOf("content://media/1")))
-        advanceUntilIdle()
+            model.onIntent(EditorIntent.ImportMedia(listOf("content://media/1")))
+            advanceUntilIdle()
 
-        val clipId = model.state.value.document.clips.single().id
-        model.onIntent(EditorIntent.SelectClip(clipId))
+            val clipId = model.state.value.document.clips.single().id
+            model.onIntent(EditorIntent.SelectClip(clipId))
 
-        model.onIntent(EditorIntent.SetViewport(centerX = 0.6f, centerY = 0.4f, zoom = 2.0f))
-        advanceUntilIdle()
+            model.onIntent(EditorIntent.SetViewport(centerX = 0.6f, centerY = 0.4f, zoom = 2.0f))
+            advanceUntilIdle()
 
-        val expectedTransform = model.state.value.document.clips.single().transform
+            val expectedTransform = model.state.value.document.clips.single().transform
 
-        // Reopening the project in a new ViewModel session reloads the clip's persisted transform
-        val reloaded = viewModel(reader = RecordingReader(listOf(video())), projects = projects)
-        advanceUntilIdle()
+            // Reopening the project in a new ViewModel session reloads the clip's persisted transform
+            val reloaded = viewModel(reader = RecordingReader(listOf(video())), projects = projects)
+            advanceUntilIdle()
 
-        val reloadedClip = reloaded.state.value.document.clips.single()
-        assertThat(reloadedClip.transform).isEqualTo(expectedTransform)
-    }
+            val reloadedClip = reloaded.state.value.document.clips.single()
+            assertThat(reloadedClip.transform).isEqualTo(expectedTransform)
+        }
 
     private fun HistoryState.topLabelOrNull(): String? = (this as? HistoryState.Ready)?.topLabel
 }

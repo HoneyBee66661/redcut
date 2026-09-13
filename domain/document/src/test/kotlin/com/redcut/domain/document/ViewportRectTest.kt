@@ -94,8 +94,16 @@ class ViewportRectTest {
         val transform = original.toTransformSpec()
 
         val restored = ViewportRect.fromTransformSpec(transform)
-        assertThat(restored.centerX).isEqualTo(original.centerX)
-        assertThat(restored.centerY).isEqualTo(original.centerY)
+        // TransformSpec stores crop EDGES, so the centre is a derived value:
+        // fromTransformSpec recomputes it as cropLeft + (cropRight - cropLeft) / 2.
+        // The round trip is therefore lossy in the last float bits by construction
+        // (0.15f + 0.65f != 0.8f exactly). The error is ~2e-8 normalised, i.e.
+        // ~2e-5 px on a 1080 px frame, and 1e-5f normalised is ~1e-2 px: a bounds
+        // far below anything visible, but still tight enough to catch a real defect.
+        assertThat(restored.centerX).isWithin(1e-5f).of(original.centerX)
+        assertThat(restored.centerY).isWithin(1e-5f).of(original.centerY)
+        // Zoom is exact-safe: crop width is the difference of two edges carrying the
+        // same rounding offset, so 1 / cropW reproduces the original zoom bit for bit.
         assertThat(restored.zoom).isEqualTo(original.zoom)
     }
 

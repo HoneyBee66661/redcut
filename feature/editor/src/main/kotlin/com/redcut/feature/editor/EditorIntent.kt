@@ -1,5 +1,6 @@
 package com.redcut.feature.editor
 
+import com.redcut.domain.document.CanvasSpec
 import com.redcut.domain.document.ClipAdjustment
 import com.redcut.domain.document.ClipEdge
 import com.redcut.domain.document.CutTool
@@ -152,4 +153,24 @@ sealed interface EditorIntent {
      * worth reading, and one that disappears on its own is worth nothing.
      */
     data object DismissImport : View
+
+    /**
+     * Open the export sheet (FR-5.1).
+     *
+     * A [View] intent, and that is the whole point of the sheet: choosing a resolution changes what the user
+     * is about to DO, not what the document IS. On the history stack it would be an "edit" whose undo does
+     * nothing visible, which is the class of bug this file's split exists to prevent.
+     */
+    data object OpenExport : View
+
+    /** Close the export sheet without exporting. */
+    data object DismissExport : View
+
+    /**
+     * The frame size the user picked in the export sheet (FR-5.1).
+     *
+     * Carries the [CanvasSpec] rather than an index or a name, so the sheet and the document speak about a
+     * frame size in exactly the same terms — and so the state cannot hold a size the domain does not have.
+     */
+    data class SetExportResolution(val resolution: CanvasSpec) : View
 }

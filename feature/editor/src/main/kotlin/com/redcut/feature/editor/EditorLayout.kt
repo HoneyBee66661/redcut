@@ -83,7 +83,7 @@ internal fun ColumnScope.PreviewHalf(
     state: EditorUiState,
     onIntent: (EditorIntent) -> Unit,
     onImportClick: () -> Unit,
-    onExport: () -> Unit,
+    onIntent: (EditorIntent) -> Unit,
     onBack: () -> Unit,
     onPreviewFrame: suspend (uri: String, positionUs: Long) -> ImageBitmap?,
     onThumbnail: suspend (sourceId: String, uri: String, positionUs: Long) -> ImageBitmap?,
@@ -92,7 +92,7 @@ internal fun ColumnScope.PreviewHalf(
         TopBar(
             state = state,
             onImportClick = onImportClick,
-            onExport = onExport,
+            onIntent = onIntent,
             onBack = onBack,
         )
         StagePreview(
@@ -119,14 +119,14 @@ internal fun ColumnScope.PreviewHalf(
  *
  * The `Resolution` toggle that briefly lived on the import button is GONE, by the user's word: *"tombol import
  * dan export kembali seperti desain awal, hilangkan tombol resolusi, karena relevan saat kita tekan tombol
- * export kita setting resolusi dll di popup khusus"*. The setting belongs in the export sheet, where the user
- * is already choosing what to produce — tracked as task B2.
+ * export kita setting resolusi dll di popup khusus"*. Export now OPENS that popup — [ExportSheetDialog],
+ * where the resolution is a row the user picks — which is what keeps the deletion free of cost to them.
  */
 @Composable
 private fun TopBar(
     state: EditorUiState,
     onImportClick: () -> Unit,
-    onExport: () -> Unit,
+    onIntent: (EditorIntent) -> Unit,
     onBack: () -> Unit,
 ) {
     Row(
@@ -146,7 +146,10 @@ private fun TopBar(
         )
         Box(modifier = Modifier.weight(1f))
         TextButton(onClick = onImportClick) { Text("Import") }
-        TextButton(onClick = onExport, enabled = state.document.clips.isNotEmpty()) {
+        TextButton(
+            onClick = { onIntent(EditorIntent.OpenExport) },
+            enabled = state.document.clips.isNotEmpty(),
+        ) {
             Text("Export")
         }
     }

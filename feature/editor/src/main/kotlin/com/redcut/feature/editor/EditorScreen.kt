@@ -132,7 +132,7 @@ internal fun EditorScreen(
             state = state,
             onIntent = onIntent,
             onImportClick = onImportClick,
-            onExport = onExport,
+            onIntent = onIntent,
             onBack = onBack,
             onPreviewFrame = onPreviewFrame,
             onThumbnail = onThumbnail,
@@ -153,6 +153,20 @@ internal fun EditorScreen(
                     onDismiss = { onIntent(EditorIntent.DismissImport) },
                 )
             }
+
+        // The export sheet (FR-5.1), drawn here rather than in the route so the screen stays a pure
+        // function of state plus callbacks — which is what keeps it previewable and screenshot-testable.
+        // Its choices come from the DOCUMENT's canvas, so the sizes it offers are the project's own
+        // orientation, and `onExport` is the flow the sheet's (still inert) Start button leads into.
+        state.exportSheet?.let { sheet ->
+            ExportSheetDialog(
+                sheet = sheet,
+                choices = exportResolutionsFor(state.document.canvas),
+                onSelectResolution = { onIntent(EditorIntent.SetExportResolution(it)) },
+                onDismiss = { onIntent(EditorIntent.DismissExport) },
+                onStartExport = onExport,
+            )
+        }
     }
 }
 

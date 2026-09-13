@@ -1,6 +1,7 @@
 package com.redcut.feature.editor
 
 import com.redcut.core.common.timeline.EdgeSide
+import com.redcut.domain.document.ClipAdjustment
 import com.redcut.domain.document.ClipEdge
 
 /**
@@ -28,6 +29,23 @@ sealed interface ToolState {
         val clipId: String,
         val edge: ClipEdge,
         val sourceTimeUs: Long,
+    ) : ToolState
+
+    /**
+     * A slider or switch is being dragged (FR-3.1–3.4, 3.9).
+     *
+     * The Edit stage's equivalent of [Trimming], and here for the same reason: the document has already
+     * been changed by a preview, so a screen that did not know a gesture was open on it could not explain
+     * why the clip is suddenly at 2× while the finger is still down.
+     *
+     * One entry per CONTROL rather than per value: a slider drag emits a value per frame, and the only
+     * thing that has to be remembered between them is which control it was — the values are on their way
+     * to the document, and the round trip through [ClipAdjustment.currentValueOf] is what a re-drawn
+     * slider reads back from.
+     */
+    data class Adjusting(
+        val clipId: String,
+        val adjustment: ClipAdjustment,
     ) : ToolState
 }
 

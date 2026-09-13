@@ -160,8 +160,10 @@ private fun ClipAdjustment.label(): String = when (this) {
  * the same shape for two different measures.
  */
 private fun ClipAdjustment.readout(value: Float): String = when (this) {
-    ClipAdjustment.SPEED -> "${roundToInt(value * HUNDRED) / HUNDRED.toFloat()}×"
-    ClipAdjustment.VOLUME -> "${roundToInt(value * HUNDRED)} %"
+    // `roundToInt` is an EXTENSION on Float, not a free function — the first version of this called it
+    // as `roundToInt(x)` and CI caught it as an unresolved reference.
+    ClipAdjustment.SPEED -> "${(value * HUNDRED).roundToInt() / HUNDRED.toFloat()}×"
+    ClipAdjustment.VOLUME -> "${(value * HUNDRED).roundToInt()} %"
     ClipAdjustment.FADE_IN, ClipAdjustment.FADE_OUT -> "${value.roundToInt()} ms"
     ClipAdjustment.MUTE, ClipAdjustment.REVERSE -> {
         if (value >= ClipAdjustment.SWITCH_THRESHOLD) "on" else "off"

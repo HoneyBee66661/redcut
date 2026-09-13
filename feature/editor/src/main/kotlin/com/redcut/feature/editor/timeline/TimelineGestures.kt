@@ -5,6 +5,9 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.AwaitPointerEventScope
 import androidx.compose.ui.input.pointer.PointerInputChange
@@ -75,7 +78,7 @@ internal class ReorderGestures(
 internal class TimelineGestures(
     val scrub: (screenX: Float) -> Unit,
     val scroll: (deltaPx: Float) -> Unit,
-    val zoom: (anchorX: Float, factor: Float) -> Unit,
+    val zoom: (factor: Float) -> Unit,
     val tap: (screenX: Float) -> Unit,
     val trim: TrimGestures,
     val reorder: ReorderGestures,
@@ -186,7 +189,7 @@ internal fun timelineGestureHandlers(
     onIntent: (EditorIntent) -> Unit,
     clipsById: Map<String, Clip>,
     spansByClip: Map<String, ClipSpan>,
-    setScrollPx: (Float) -> Unit,
+    playheadUs: Long,
     setZoomPxPerSecond: (Float) -> Unit,
     reorder: ReorderGestures,
     selectedClipId: String? = null,
@@ -203,16 +206,23 @@ internal fun timelineGestureHandlers(
             onIntent(EditorIntent.SetPlayhead(geometry.usFor(geometry.contentPxFor(screenX))))
         },
         scroll = { deltaPx ->
-            setScrollPx(geometry.scrollClampedTo(geometry.visibleStartPx - deltaPx))
-        },
-        zoom = { anchorX, factor ->
-            // Zooming about the gesture's centroid, so the frame under the fingers stays put.
-            val zoomed = geometry.zoomedAround(
-                anchorScreenX = anchorX,
-                newZoom = TimelineZoom(geometry.zoom.pixelsPerSecond * factor).clamped(),
+            // A drag on the tracks MOVES THE PLAYHEAD (UI revision 1): the line is fixed at the centre and
+            // the content follows the finger, so "scroll the viewport" and "seek" are one gesture. Dragging
+            // right brings earlier material under the line, which is why the delta is subtracted.
+            val movedPx = geometry.pxFor(playheadUs) - deltaPx
+            onIntent(
+                EditorIntent.SetPlayhead(
+                    geometry.usFor(movedPx.coerceIn(0f, geometry.totalWidthPx)),
+                ),
             )
-            setZoomPxPerSecond(zoomed.zoom.pixelsPerSecond)
-            setScrollPx(zoomed.scrollPx)
+        },
+        zoom = { factor ->
+            // The anchor is ignored now, and that is the model rather than a shortcut: with the playhead
+            // fixed at the centre, a zoom necessarily happens ABOUT the playhead — there is no other point
+            // that could stay still, because the playhead is what the scroll offset is derived from.
+            setZoomPxPerSecond(
+                TimelineZoom(geometry.zoom.pixelsPerSecond * factor).clamped().pixelsPerSecond,
+            )
         },
         tap = { screenX -> onTimelineTap(screenX, geometry, onIntent, selectedClipId) },
         trim = TrimGestures(
@@ -230,77 +240,84 @@ internal fun timelineGestureHandlers(
 }
 
 /**
- * The four detectors, chained in priority order.
+ * The five detectors, chained in priority order.
  *
- * The keys are the geometry's zoom and scroll rather than the whole geometry: a pan, a pinch or a
- * trim must restart the detector with the CURRENT viewport, or a drag after a zoom would move from
- * the position the zoom started at.
+ * ### Why the keys changed with the revision (and why that is not a detail)
+ *
+ * The keys used to be the geometry's zoom and scroll, on the reasoning that a gesture must restart with
+ * the CURRENT viewport. Under the revision that reasoning inverts: the scroll is DERIVED from the playhead,
+ * so it changes on every playhead move — which means a drag that seeks would restart its own detector after
+ * its first pixel and die. A key that changes cancels the gesture in flight, so the fix is to key the
+ * detectors on things a gesture cannot change ([rulerHeightPx], and nothing else) and to read the live
+ * mapping through [rememberUpdatedState] instead. The callbacks then always see the current geometry, and
+ * the detector stays alive for the whole drag.
+ *
+ * The ORDER is the arbitration described at the top of the file: ruler, trim, reorder, pan/zoom, tap.
  */
+@Composable
 internal fun Modifier.timelineGestures(
     geometry: TimelineGeometry,
     rulerHeightPx: Float,
     actions: TimelineGestures,
-): Modifier = this
-    .pointerInput(geometry.zoom, geometry.visibleStartPx, rulerHeightPx) {
-        awaitEachGesture {
-            val down = awaitFirstDown(requireUnconsumed = false)
-            if (down.position.y > rulerHeightPx) return@awaitEachGesture
-            down.consume()
-            actions.scrub(down.position.x)
+): Modifier {
+    val currentGeometry by rememberUpdatedState(geometry)
+    val currentActions by rememberUpdatedState(actions)
 
-            // One event at a time until the finger lifts, written as a condition rather than a
-            // `while (true)` with breaks, so the exit is in a single place.
-            var pointer = nextPointer(down)
-            while (pointer != null && pointer.pressed) {
-                pointer.consume()
-                actions.scrub(pointer.position.x)
-                pointer = nextPointer(down)
+    return this
+        .pointerInput(rulerHeightPx) {
+            awaitEachGesture {
+                val callbacks = currentActions
+                val down = awaitFirstDown(requireUnconsumed = false)
+                if (down.position.y > rulerHeightPx) return@awaitEachGesture
+                down.consume()
+                callbacks.scrub(down.position.x)
+
+                // One event at a time until the finger lifts, written as a condition rather than a
+                // `while (true)` with breaks, so the exit is in a single place.
+                var pointer = nextPointer(down)
+                while (pointer != null && pointer.pressed) {
+                    pointer.consume()
+                    callbacks.scrub(pointer.position.x)
+                    pointer = nextPointer(down)
+                }
             }
         }
-    }
-    .pointerInput(geometry, rulerHeightPx) {
-        awaitEachGesture { trimGesture(geometry, rulerHeightPx, actions, actions.tap) }
-    }
-    .reorderGesture(geometry, rulerHeightPx, actions.reorder)
-    .pointerInput(geometry.zoom, geometry.visibleStartPx) {
-        detectTransformGestures { centroid, pan, gestureZoom, _ ->
-            if (gestureZoom == 1f) actions.scroll(pan.x) else actions.zoom(centroid.x, gestureZoom)
+        .pointerInput(rulerHeightPx) {
+            awaitEachGesture {
+                trimGesture(currentGeometry, rulerHeightPx, currentActions, currentActions.tap)
+            }
         }
-    }
-    .pointerInput(geometry, rulerHeightPx) {
-        detectTapGestures { offset ->
-            if (offset.y > rulerHeightPx) actions.tap(offset.x)
+        .pointerInput(rulerHeightPx) {
+            detectDragGesturesAfterLongPress(
+                onDragStart = { offset ->
+                    val geometryNow = currentGeometry
+                    if (offset.y <= rulerHeightPx) return@detectDragGesturesAfterLongPress
+                    val hit = geometryNow.hitTest(offset.x)
+                    val clipId = (hit as? TimelineHit.Body)?.clipId
+                        ?: return@detectDragGesturesAfterLongPress
+                    currentActions.reorder.start(clipId, offset.x)
+                },
+                onDrag = { change, _ -> currentActions.reorder.update(change.position.x) },
+                onDragEnd = { currentActions.reorder.end() },
+                onDragCancel = { currentActions.reorder.cancel() },
+            )
         }
-    }
-
-/**
- * Picking a clip up and moving it (FR-2.7).
- *
- * Long-press first, deliberately: see the order note at the top of the file. A plain horizontal drag
- * across a clip body SCROLLS the timeline, so reorder waits for the hold — and the wait is the
- * platform's, not a number invented here.
- *
- * The clip id is resolved here (the only thing this layer knows how to ask), and every position after
- * that is handed to the Canvas, which owns the drag state and the geometry needed to turn a finger
- * into a slot.
- */
-private fun Modifier.reorderGesture(
-    geometry: TimelineGeometry,
-    rulerHeightPx: Float,
-    actions: ReorderGestures,
-): Modifier = pointerInput(geometry, rulerHeightPx) {
-    detectDragGesturesAfterLongPress(
-        onDragStart = { offset ->
-            if (offset.y <= rulerHeightPx) return@detectDragGesturesAfterLongPress
-            val hit = geometry.hitTest(offset.x)
-            val clipId = (hit as? TimelineHit.Body)?.clipId
-                ?: return@detectDragGesturesAfterLongPress
-            actions.start(clipId, offset.x)
-        },
-        onDrag = { change, _ -> actions.update(change.position.x) },
-        onDragEnd = { actions.end() },
-        onDragCancel = { actions.cancel() },
-    )
+        .pointerInput(Unit) {
+            detectTransformGestures { _, pan, gestureZoom, _ ->
+                // A one-finger drag over the tracks seeks (the tracks move, the line does not); a pinch zooms
+                // about the playhead, which is the only point that can stay still under this model.
+                if (gestureZoom == 1f) {
+                    currentActions.scroll(pan.x)
+                } else {
+                    currentActions.zoom(gestureZoom)
+                }
+            }
+        }
+        .pointerInput(rulerHeightPx) {
+            detectTapGestures { offset ->
+                if (offset.y > rulerHeightPx) currentActions.tap(offset.x)
+            }
+        }
 }
 
 /** The next event for the pointer that started the gesture, or null when it is gone. */

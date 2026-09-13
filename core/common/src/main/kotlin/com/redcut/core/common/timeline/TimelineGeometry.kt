@@ -168,6 +168,35 @@ data class TimelineGeometry(
     /** The scroll position, held inside what the content can actually scroll to. */
     fun scrollClampedTo(px: Float): Float = px.coerceIn(0f, maxScrollPx)
 
+    /**
+     * The scroll offset that puts [us] under the horizontal centre of the viewport (UI revision 1).
+     *
+     * ### What changed, and why this is a function rather than a setter
+     *
+     * The editor used to draw the playhead wherever its time fell — `pxFor(playhead) - visibleStartPx` —
+     * and the user scrolled the viewport independently of it. The revision inverts that: the playhead is
+     * the FIXED line at the centre, and the scroll offset is what encodes it, so scrolling and seeking
+     * stop being two things. The scroll is therefore DERIVED from the playhead rather than stored, which is
+     * why this returns a value instead of mutating one.
+     *
+     * Clamped at both ends, and the clamp is honest rather than a compromise: with no padding the first
+     * and last moments cannot be centred, so [centredPlayheadPx] says where the line actually sits. (Real
+     * editors pad the ends by half a viewport to make the centre unconditionally reachable; that is a
+     * change to [totalWidthPx] and every position in the ruler, so it belongs with the layout work, not
+     * hidden in a scroll calculation.)
+     */
+    fun scrollCentering(us: Long): Float = scrollClampedTo(pxFor(us) - viewportWidthPx / 2f)
+
+    /**
+     * The playhead's screen x when the viewport is centred on it: the viewport's centre, unless the
+     * timeline is too short to scroll that far.
+     *
+     * The line is drawn here rather than at a hard-coded centre so that it stays glued to its own time:
+     * a line that claimed to be the centre while pointing at the wrong frame would be worse than one that
+     * drifts at the ends.
+     */
+    fun centredPlayheadPx(us: Long): Float = pxFor(us) - scrollCentering(us)
+
     /** Left edge of the visible window in content pixels. */
     val visibleStartPx: Float get() = scrollClampedTo(scrollPx)
 

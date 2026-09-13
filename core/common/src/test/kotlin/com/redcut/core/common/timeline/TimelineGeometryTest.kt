@@ -274,6 +274,64 @@ class TimelineGeometryTest {
             .isEqualTo(TimelineHit.Edge("tiny", EdgeSide.LEFT, withinClip = true))
     }
 
+    // --- The centred playhead (UI revision 1) ------------------------------
+
+    @Test
+    fun `centering puts the playhead at the middle of the viewport`() {
+        // 10 s at 60 px/s = 600 px of content in a 360 px viewport: the playhead can be centred from 3 s to
+        // 7 s, and 5 s is in that range.
+        val geometry = geometry(
+            spans = listOf(ClipSpan("a", 0, 10 * oneSecond)),
+            zoom = TimelineZoom(60f),
+        )
+
+        // 5 s is 300 px in; centred means the viewport starts 180 px earlier (half of 360).
+        assertThat(geometry.scrollCentering(5 * oneSecond)).isEqualTo(120f)
+        assertThat(geometry.centredPlayheadPx(5 * oneSecond)).isEqualTo(180f)
+    }
+
+    @Test
+    fun `the end cannot be scrolled past, so the line drifts there and not before`() {
+        val geometry =
+            geometry(spans = listOf(ClipSpan("a", 0, 10 * oneSecond)), zoom = TimelineZoom(60f))
+
+        // At 0 the viewport is already at its start; the line sits where the first frame is, which is the
+        // viewport's left edge, not its centre.
+        assertThat(geometry.scrollCentering(0)).isEqualTo(0f)
+        assertThat(geometry.centredPlayheadPx(0)).isEqualTo(0f)
+
+        // Past 7.5 s the scroll is at its maximum, so the line moves right of centre.
+        val latest = geometry.maxScrollPx
+        assertThat(geometry.scrollCentering(10 * oneSecond)).isEqualTo(latest)
+        assertThat(geometry.centredPlayheadPx(10 * oneSecond)).isEqualTo(600f - latest)
+    }
+
+    @Test
+    fun `a timeline shorter than the viewport never scrolls and the line tracks the time`() {
+        // 1 s at 60 px/s = 60 px inside a 300 px viewport: nothing to scroll, so the playhead's screen x is
+        // its own position. This is the case a hard-coded centre would get wrong — the line would sit in
+        // the middle while the clip is at the left.
+        val geometry =
+            geometry(spans = listOf(ClipSpan("a", 0, oneSecond)), zoom = TimelineZoom(60f))
+
+        assertThat(geometry.maxScrollPx).isEqualTo(0f)
+        assertThat(geometry.scrollCentering(oneSecond / 2)).isEqualTo(0f)
+        assertThat(geometry.centredPlayheadPx(oneSecond / 2)).isEqualTo(30f)
+    }
+
+    @Test
+    fun `the centred line is where the geometry's own mapping says the playhead is`() {
+        // The invariant the Canvas relies on, stated as an equality rather than as two similar formulas.
+        val geometry =
+            geometry(spans = listOf(ClipSpan("a", 0, 10 * oneSecond)), zoom = TimelineZoom(60f))
+        val us = 4 * oneSecond
+        val scrolled = geometry.copy(scrollPx = geometry.scrollCentering(us))
+
+        assertThat(
+            scrolled.centredPlayheadPx(us),
+        ).isEqualTo(geometry.pxFor(us) - scrolled.visibleStartPx)
+    }
+
     // --- Zoom --------------------------------------------------------------
 
     @Test

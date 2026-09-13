@@ -3,8 +3,7 @@ package com.redcut.feature.editor
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -42,19 +41,21 @@ import com.redcut.domain.document.previewTargetAt
 /**
  * The stage's body, which takes the room the timeline does not.
  *
- * An extension on `ColumnScope` because `Modifier.weight` only exists in a column or row: the weight is
  * the reason this cannot be a plain composable.
  */
 @Composable
-internal fun ColumnScope.StageBody(
+internal fun StageBody(
     state: EditorUiState,
     onThumbnail: suspend (sourceId: String, uri: String, positionUs: Long) -> ImageBitmap?,
     onPreviewFrame: suspend (uri: String, positionUs: Long) -> ImageBitmap?,
+    modifier: Modifier = Modifier,
 ) {
     Box(
-        modifier = Modifier
-            .weight(1f)
-            .fillMaxWidth()
+        // A `modifier` rather than a `ColumnScope` receiver: the stage now sits inside the TOP HALF's own
+        // box, and a scope-extension would only compile where the parent happens to be a Column. Filling
+        // whatever it is given is what this actually needs.
+        modifier = modifier
+            .fillMaxSize()
             .padding(24.dp),
         contentAlignment = Alignment.Center,
     ) {

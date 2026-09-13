@@ -135,4 +135,17 @@ data class RenameDocument(val name: String) : EditCommand {
     }
 }
 
+/**
+ * Set a clip's crop and zoom transform (spec UI revision 2, §WS F / Task F4).
+ */
+data class SetTransform(val clipId: String, val transform: TransformSpec) : EditCommand {
+    override val label: String get() = "Transform"
+
+    override fun apply(doc: EditDocument): EditDocument {
+        val clip = doc.clipById(clipId) ?: return doc
+        if (clip.transform == transform) return doc
+        return doc.withClip(clip.copy(transform = transform))
+    }
+}
+
 private const val MICROS_PER_MILLI = 1_000L

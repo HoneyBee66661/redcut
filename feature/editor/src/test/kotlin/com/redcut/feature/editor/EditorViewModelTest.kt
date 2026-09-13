@@ -988,5 +988,45 @@ class EditorViewModelTest {
             assertThat(projects.saved.last().name).isEqualTo("untitled")
         }
 
+    @Test
+    fun `SetViewport updates the selected clip transform and autosaves`() = runTest(dispatcher) {
+        val projects = RecordingProjects()
+        val model = viewModel(reader = RecordingReader(listOf(video())), projects = projects)
+
+        model.onIntent(EditorIntent.ImportMedia(listOf("content://media/1")))
+        advanceUntilIdle()
+
+        val clipId = model.state.value.document.clips.single().id
+        model.onIntent(EditorIntent.SelectClip(clipId))
+
+        model.onIntent(EditorIntent.SetViewport(centerX = 0.6f, centerY = 0.4f, zoom = 2.0f))
+        advanceUntilIdle()
+
+        val transform = model.state.value.document.clips.single().transform
+        assertThat(transform.cropLeft).isEqualTo(0.35f)
+        assertThat(transform.cropRight).isEqualTo(0.85f)
+        assertThat(transform.cropTop).isEqualTo(0.15f)
+        assertThat(transform.cropBottom).isEqualTo(0.65f)
+        assertThat(projects.saved).isNotEmpty()
+
+        // Undo restores the previous transform
+        model.onIntent(EditorIntent.Undo)
+        val reverted = model.state.value.document.clips.single().transform
+        assertThat(reverted.cropLeft).isEqualTo(0f)
+        assertThat(reverted.cropRight).isEqualTo(1f)
+    }
+
+    @Test
+    fun `SetViewport is inert when nothing is selected`() = runTest(dispatcher) {
+        val (model, _) = importedClips(video())
+
+        model.onIntent(EditorIntent.ClearSelection)
+        val before = model.state.value.document
+
+        model.onIntent(EditorIntent.SetViewport(centerX = 0.8f, centerY = 0.8f, zoom = 3.0f))
+
+        assertThat(model.state.value.document).isEqualTo(before)
+    }
+
     private fun HistoryState.topLabelOrNull(): String? = (this as? HistoryState.Ready)?.topLabel
 }

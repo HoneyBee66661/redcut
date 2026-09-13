@@ -9,6 +9,7 @@ import com.redcut.core.media.PreviewFrames
 import com.redcut.core.media.SourceReadResult
 import com.redcut.core.media.ThumbnailSource
 import com.redcut.core.media.ThumbnailStore
+import com.redcut.domain.document.CanvasSpec
 import com.redcut.domain.document.Clip
 import com.redcut.domain.document.ClipAdjustment
 import com.redcut.domain.document.ClipEdge
@@ -987,6 +988,90 @@ class EditorViewModelTest {
             assertThat(model.state.value.document.name).isEqualTo("untitled")
             assertThat(projects.saved.last().name).isEqualTo("untitled")
         }
+
+    // --- Export (FR-5.1) ---------------------------------------------------
+
+    @Test
+    fun `opening the export sheet needs something to export`() = runTest(dispatcher) {
+        // The top bar disables Export on an empty document. This is the same rule read by the state, so
+        // that no second caller can open a resolution picker over a project with no clips in it.
+        val empty = viewModel()
+        empty.onIntent(EditorIntent.OpenExport)
+        assertThat(empty.state.value.exportSheet).isNull()
+
+        val model = viewModel(RecordingReader(listOf(video())))
+        model.onIntent(EditorIntent.ImportMedia(listOf("content://media/1")))
+        advanceUntilIdle()
+        model.onIntent(EditorIntent.OpenExport)
+
+        // It opens on the project's own size, so "export what I have been looking at" is the one tap.
+        assertThat(model.state.value.exportSheet?.resolution).isEqualTo(CanvasSpec.PORTRAIT_1080)
+    }
+
+    @Test
+    fun `the sheet holds the size the user picked, and refuses one FR-5.1 does not allow`() =
+        runTest(
+            dispatcher,
+        ) {
+            val model = viewModel(RecordingReader(listOf(video())))
+            model.onIntent(EditorIntent.ImportMedia(listOf("content://media/1")))
+            advanceUntilIdle()
+            model.onIntent(EditorIntent.OpenExport)
+
+            model.onIntent(EditorIntent.SetExportResolution(CanvasSpec.PORTRAIT_720))
+            assertThat(model.state.value.exportSheet?.resolution).isEqualTo(CanvasSpec.PORTRAIT_720)
+
+            // Landscape 1080p is a real size the DOMAIN models and not one FR-5.1 allows. The sheet is
+            // portrait because the project is, so the pick must leave the state exactly where it was.
+            model.onIntent(EditorIntent.SetExportResolution(CanvasSpec.LANDSCAPE_1080))
+            assertThat(model.state.value.exportSheet?.resolution).isEqualTo(CanvasSpec.PORTRAIT_720)
+        }
+
+    @Test
+    fun `picking a size is view state, not an edit`() = runTest(dispatcher) {
+        // Why the three export intents are View: a resolution is where the user is GOING, not what the
+        // document IS. On the history stack it would be an undo entry that changes nothing anyone can see.
+        val model = viewModel(RecordingReader(listOf(video())))
+        model.onIntent(EditorIntent.ImportMedia(listOf("content://media/1")))
+        advanceUntilIdle()
+        val before = model.state.value
+
+        model.onIntent(EditorIntent.OpenExport)
+        model.onIntent(EditorIntent.SetExportResolution(CanvasSpec.PORTRAIT_720))
+
+        val after = model.state.value
+        assertThat(after.document).isEqualTo(before.document)
+        assertThat(after.history).isEqualTo(before.history)
+    }
+
+    @Test
+    fun `dismissing the sheet closes it and leaves the project alone`() = runTest(dispatcher) {
+        val model = viewModel(RecordingReader(listOf(video())))
+        model.onIntent(EditorIntent.ImportMedia(listOf("content://media/1")))
+        advanceUntilIdle()
+        model.onIntent(EditorIntent.OpenExport)
+
+        model.onIntent(EditorIntent.DismissExport)
+
+        assertThat(model.state.value.exportSheet).isNull()
+        assertThat(model.state.value.document.clips).hasSize(1)
+    }
+
+    @Test
+    fun `an undo with the sheet open does not close it`() = runTest(dispatcher) {
+        // The sheet is view state, like the import report it sits beside in EditorUiState: undoing the
+        // import that made the export possible must not dismiss a dialog the user is reading. Start export
+        // is inert either way, so the empty document underneath it is inconvenient rather than dangerous.
+        val model = viewModel(RecordingReader(listOf(video())))
+        model.onIntent(EditorIntent.ImportMedia(listOf("content://media/1")))
+        advanceUntilIdle()
+        model.onIntent(EditorIntent.OpenExport)
+
+        model.onIntent(EditorIntent.Undo)
+
+        assertThat(model.state.value.document.clips).isEmpty()
+        assertThat(model.state.value.exportSheet).isNotNull()
+    }
 
     private fun HistoryState.topLabelOrNull(): String? = (this as? HistoryState.Ready)?.topLabel
 }

@@ -1,6 +1,7 @@
 package com.redcut.feature.editor
 
 import androidx.compose.runtime.Immutable
+import com.redcut.domain.document.CanvasSpec
 import com.redcut.domain.document.EditDocument
 import com.redcut.domain.document.ImportRejection
 import com.redcut.domain.document.UndoStack
@@ -17,10 +18,9 @@ import com.redcut.domain.document.UndoStack
  * lets it skip recomposition when the state is unchanged. Every field here is a
  * `val` of an immutable type (`EditDocument` is a data class of immutable values).
  *
- * Deliberately absent, because nothing produces them yet: `selection`, `playheadUs`,
- * `playback`, `tool`, `export`, `dialogs` (all in spec §7.2's sketch). Each arrives with
- * the phase that gives it meaning — a field added empty now would be a field every
- * screen has to pass a default for, and the first real one would have to argue with it.
+ * Still absent, because nothing produces them yet: `playback` and the export's own progress (spec Phase
+ * 4.1-4.5). Each arrives with the phase that gives it meaning — a field added empty now would be a field
+ * every screen has to pass a default for, and the first real one would have to argue with it.
  */
 @Immutable
 data class EditorUiState(
@@ -54,6 +54,14 @@ data class EditorUiState(
      * disappear before it has been read.
      */
     val import: ImportReport? = null,
+    /**
+     * The export sheet, or null while it is closed (FR-5.1).
+     *
+     * View state like the stage: opening it, changing its resolution and dismissing it touch no command and
+     * no history entry, so an undo cannot rewind the user out of a dialog they are reading and a resolution
+     * pick cannot land on the stack as an "edit" that changed nothing.
+     */
+    val exportSheet: ExportSheet? = null,
 ) {
     /** The document's state identity, and the recompilation trigger (spec §1.1, §8.1). */
     val revision: Long get() = document.revision
@@ -93,6 +101,7 @@ internal fun UndoStack.toUiState(
     selection: Selection = Selection.None,
     tool: ToolState = ToolState.Idle,
     import: ImportReport? = null,
+    exportSheet: ExportSheet? = null,
 ): EditorUiState = EditorUiState(
     document = current,
     history = HistoryState.Ready(
@@ -105,6 +114,7 @@ internal fun UndoStack.toUiState(
     selection = selection,
     tool = tool,
     import = import,
+    exportSheet = exportSheet,
 )
 
 /**
@@ -127,6 +137,34 @@ internal fun ToolState.reconciledWith(clipIds: List<String>): ToolState =
  * triggered a recompile of the whole timeline.
  */
 internal fun EditorUiState.withStage(stage: Stage): EditorUiState = copy(stage = stage)
+
+/**
+ * Opens the export sheet on the size a project of [canvas] should start from (FR-5.1).
+ *
+ * An empty document leaves the state ALONE. The top bar already disables Export on that fact, so this guard
+ * is the second reader of one rule rather than a second rule — and it is the one that keeps the state
+ * honest, because a sheet that could be opened with nothing to export would put a resolution picker and a
+ * `Start export` in front of a project with no clips in it.
+ */
+internal fun EditorUiState.withExportOpened(canvas: CanvasSpec): EditorUiState =
+    if (document.clips.isEmpty()) {
+        this
+    } else {
+        copy(exportSheet = ExportSheet(resolution = defaultExportResolutionFor(canvas)))
+    }
+
+/**
+ * Sets the sheet's frame size — and refuses anything FR-5.1 does not allow.
+ *
+ * The guard is not decoration: [exportResolutionsFor] is the single place that decides what may be
+ * produced, and a size from anywhere else would be an export the encoder was never told how to make. A
+ * closed sheet is a no-op for the same reason [EditorIntent.DismissExport] is not an error twice.
+ */
+internal fun EditorUiState.withExportResolution(resolution: CanvasSpec): EditorUiState {
+    val sheet = exportSheet ?: return this
+    if (resolution !in exportResolutionsFor(document.canvas)) return this
+    return copy(exportSheet = sheet.copy(resolution = resolution))
+}
 
 /**
  * The outcome of one import, as the UI needs to tell it (FR-1.2, FR-1.4).

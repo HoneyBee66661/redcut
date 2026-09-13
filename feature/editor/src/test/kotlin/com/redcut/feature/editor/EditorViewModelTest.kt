@@ -20,7 +20,9 @@ import com.redcut.domain.document.ProbedSource
 import com.redcut.domain.document.SourceProbe
 import com.redcut.domain.document.SourceRef
 import com.redcut.domain.project.ProjectStore
+import com.redcut.domain.project.ProjectSummary
 import com.redcut.domain.project.SavedProject
+import com.redcut.domain.project.summary
 import com.redcut.feature.editor.timeline.TimelineThumbnails
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -112,6 +114,8 @@ class EditorViewModelTest {
         }
 
         override suspend fun latest(): SavedProject? = reopen
+
+        override suspend fun summaries(): List<ProjectSummary> = saved.map { it.summary() }
 
         override suspend fun savedNames(): List<String> = existingNames.toList()
     }

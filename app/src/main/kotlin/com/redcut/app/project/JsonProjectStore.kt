@@ -5,7 +5,9 @@ import com.redcut.core.common.di.IoDispatcher
 import com.redcut.core.common.logging.RedcutLogger
 import com.redcut.domain.project.ProjectCodec
 import com.redcut.domain.project.ProjectStore
+import com.redcut.domain.project.ProjectSummary
 import com.redcut.domain.project.SavedProject
+import com.redcut.domain.project.summary
 import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
@@ -66,14 +68,16 @@ class JsonProjectStore @Inject constructor(
         ProjectCodec.decode(file.readText())
     }
 
-    override suspend fun savedNames(): List<String> = withContext(io) {
-        // Every project file, decoded for its name only. A file that will not decode contributes no name:
-        // it cannot collide with a new project, and refusing to name a new one because an old file is
+    override suspend fun summaries(): List<ProjectSummary> = withContext(io) {
+        // Every project file, decoded for a summary. A file that will not decode contributes nothing: it
+        // cannot collide with a new project, and refusing to name or list anything because one old file is
         // corrupt would be a strange way to fail.
         directory.listFiles { file -> file.extension == JSON_EXTENSION }
             .orEmpty()
-            .mapNotNull { file -> ProjectCodec.decode(file.readText())?.name }
+            .mapNotNull { file -> ProjectCodec.decode(file.readText())?.summary() }
     }
+
+    override suspend fun savedNames(): List<String> = summaries().map { it.name }
 
     private companion object {
         const val TAG = "JsonProjectStore"

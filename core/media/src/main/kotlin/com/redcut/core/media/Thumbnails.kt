@@ -10,6 +10,7 @@ import com.redcut.core.common.di.IoDispatcher
 import com.redcut.core.common.logging.RedcutLogger
 import dagger.Binds
 import dagger.Module
+import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
@@ -18,6 +19,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
+import javax.inject.Qualifier
 import javax.inject.Singleton
 
 /**
@@ -113,7 +115,14 @@ class ThumbnailStore @Inject constructor(
 }
 
 /**
- * The platform decoder.
+ * The platform decoder, at a configurable width.
+ *
+ * ### Why the width is a parameter
+ *
+ * The timeline wants 160 px thumbnails (§9.3) and the preview wants a frame big enough to look at.
+ * The DECODING is identical, so this one class does both and the width comes from whoever builds it —
+ * a 160 px frame and a 640 px frame are the same call with a different number, and duplicating the
+ * rotation-aware scaling to vary that number would be two places for the same bug.
  *
  * Two details are load-bearing:
  *
@@ -125,13 +134,12 @@ class ThumbnailStore @Inject constructor(
  *    extraction queues behind playback"). This is the only reason a scroll that decodes twenty
  *    thumbnails cannot exhaust the device's codecs.
  */
-@Singleton
-class AndroidThumbnailSource @Inject constructor(
-    // `@param:` states the target Kotlin 2.2 is warning about; see AndroidMediaProbe.
-    @param:ApplicationContext private val context: Context,
+class AndroidFrameSource(
+    private val context: Context,
     private val broker: MediaResourceBroker,
-    @IoDispatcher private val io: CoroutineDispatcher,
+    private val io: CoroutineDispatcher,
     private val logger: RedcutLogger,
+    private val widthPx: Int,
 ) : ThumbnailSource {
 
     override suspend fun thumbnail(sourceId: String, uri: String, positionUs: Long): Bitmap? =
@@ -159,7 +167,7 @@ class AndroidThumbnailSource @Inject constructor(
                 retriever.getScaledFrameAtTime(
                     positionUs,
                     MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
-                    ThumbnailStore.WIDTH_PX,
+                    widthPx,
                     target,
                 )
             } else {
@@ -178,18 +186,17 @@ class AndroidThumbnailSource @Inject constructor(
     }
 
     /**
-     * Height for a [ThumbnailStore.WIDTH_PX]-wide frame, or null when the source's size is not
-     * reported.
+     * Height for a [widthPx]-wide frame, or null when the source's size is not reported.
      *
      * Split into named steps rather than one expression because the arithmetic has three
      * separate ideas in it — what the container stores, what the user sees after rotation, and
-     * what fits in the thumbnail width — and a single condition combining them is a condition
+     * what fits in the requested width — and a single condition combining them is a condition
      * nobody can review (detekt says the same thing about it, at a threshold of four).
      */
     private fun targetHeight(retriever: MediaMetadataRetriever): Int? {
         val stored = retriever.storedSize() ?: return null
         val (visibleWidth, visibleHeight) = stored.forRotation(retriever.rotationDegrees())
-        val scaled = ThumbnailStore.WIDTH_PX.toFloat() * visibleHeight / visibleWidth
+        val scaled = widthPx.toFloat() * visibleHeight / visibleWidth
         return scaled.toInt().coerceAtLeast(1)
     }
 
@@ -236,6 +243,40 @@ class AndroidThumbnailSource @Inject constructor(
     }
 }
 
+/**
+ * The timeline's thumbnail source: [AndroidFrameSource] at the spec's ≤ 160 px (§9.3).
+ *
+ * A delegating class rather than a configured instance, because Hilt builds this one and cannot be
+ * asked for "the same decoder, narrower" without a qualifier per width. Delegation keeps the decoding
+ * in exactly one place: what varies between the two sources is a single number.
+ */
+@Singleton
+class AndroidThumbnailSource @Inject constructor(
+    // `@param:` states the target Kotlin 2.2 is warning about; see AndroidMediaProbe.
+    @param:ApplicationContext context: Context,
+    broker: MediaResourceBroker,
+    @IoDispatcher io: CoroutineDispatcher,
+    logger: RedcutLogger,
+) : ThumbnailSource by AndroidFrameSource(
+    context = context,
+    broker = broker,
+    io = io,
+    logger = logger,
+    widthPx = ThumbnailStore.WIDTH_PX,
+)
+
+/**
+ * The preview's frame source: the same decoder at [PreviewFrames.PREVIEW_WIDTH_PX].
+ *
+ * Its own qualifier rather than a second unqualified binding, because the two sources differ only in a
+ * number and an unqualified `ThumbnailSource` could then be resolved to either — with a filmstrip
+ * silently getting 640 px frames, or a preview silently getting 160 px ones. The qualifier makes the
+ * choice explicit at the injection point.
+ */
+@Qualifier
+@Retention(AnnotationRetention.BINARY)
+annotation class PreviewFrameSource
+
 /** Binds the platform decoder to the port. */
 @Module
 @InstallIn(SingletonComponent::class)
@@ -243,6 +284,33 @@ internal abstract class ThumbnailSourceModule {
 
     @Binds
     abstract fun bindThumbnailSource(impl: AndroidThumbnailSource): ThumbnailSource
+
+    companion object {
+
+        /**
+         * The preview-sized decoder.
+         *
+         * A `@Provides` rather than a `@Binds` because the difference from the timeline's source is an
+         * argument ([AndroidFrameSource]'s width), and Hilt cannot be asked for "the same class,
+         * constructed differently" without a factory like this.
+         */
+        @Provides
+        @Singleton
+        @PreviewFrameSource
+        fun providePreviewFrameSource(
+            // `@param:` states the target Kotlin 2.2 is warning about; see AndroidMediaProbe.
+            @ApplicationContext context: Context,
+            broker: MediaResourceBroker,
+            @IoDispatcher io: CoroutineDispatcher,
+            logger: RedcutLogger,
+        ): ThumbnailSource = AndroidFrameSource(
+            context = context,
+            broker = broker,
+            io = io,
+            logger = logger,
+            widthPx = PreviewFrames.PREVIEW_WIDTH_PX,
+        )
+    }
 }
 
 /**

@@ -1,12 +1,14 @@
 package com.redcut.feature.editor
 
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.redcut.core.common.IdSource
 import com.redcut.core.common.di.IoDispatcher
 import com.redcut.core.common.logging.RedcutLogger
 import com.redcut.core.media.MediaSourceReader
+import com.redcut.core.media.PreviewFrames
 import com.redcut.core.media.SourceReadResult
 import com.redcut.domain.document.Clip
 import com.redcut.domain.document.ClipEdge
@@ -62,6 +64,7 @@ class EditorViewModel @Inject constructor(
     private val logger: RedcutLogger,
     private val sourceReader: MediaSourceReader,
     private val thumbnails: TimelineThumbnails,
+    private val previewFrames: PreviewFrames,
     private val ids: IdSource,
     // `@param:` for the same reason as in :core:media — Kotlin 2.2 warns that a bare
     // annotation on a constructor property will also apply to the field, and CI compiles
@@ -310,6 +313,17 @@ class EditorViewModel @Inject constructor(
      */
     suspend fun timelineThumbnail(sourceId: String, uri: String, positionUs: Long): ImageBitmap? =
         thumbnails.image(sourceId, uri, positionUs)
+
+    /**
+     * The frame the preview shows at the playhead (FR-2's "correct preview").
+     *
+     * Same reasoning as [timelineThumbnail]: the stage takes a `suspend` loader, and the ViewModel is
+     * the Hilt-built object the route already has. The uri and the source time both come from the
+     * DOMAIN's `previewTargetAt`, so the preview shows the frame the playhead maps to — trims, speed
+     * and direction included — rather than the frame at the playhead's own time.
+     */
+    suspend fun previewFrame(uri: String, positionUs: Long): ImageBitmap? =
+        previewFrames.frame(uri, positionUs)?.asImageBitmap()
 
     /**
      * Reads, assesses and appends (FR-1.1–1.5).

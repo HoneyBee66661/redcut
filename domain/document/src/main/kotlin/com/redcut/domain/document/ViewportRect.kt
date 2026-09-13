@@ -1,5 +1,6 @@
 package com.redcut.domain.document
 
+import kotlin.math.abs
 import kotlinx.serialization.Serializable
 
 /**
@@ -110,10 +111,35 @@ data class ViewportRect(
             cropBottom = bottom.coerceIn(0f, 1f),
         )
 
+    /**
+     * Snaps [centerX] and [centerY] to the centre lines when within [thresholdPx]
+     * of the centre, provided a clip is selected ([hasSelection] is true).
+     *
+     * User's requirement: "ada juga snap vertical horizontal center ... dengan catatan,
+     * clip sedang diselect".
+     */
+    fun snappedToCentre(
+        hasSelection: Boolean = true,
+        thresholdPx: Float = DEFAULT_SNAP_THRESHOLD_PX,
+        frameWidthPx: Float = canvasSpec.width.toFloat(),
+        frameHeightPx: Float = canvasSpec.height.toFloat(),
+    ): ViewportRect {
+        if (!hasSelection) return this
+
+        val dxPx = abs(centerX - snapTargetX) * frameWidthPx
+        val dyPx = abs(centerY - snapTargetY) * frameHeightPx
+
+        val newX = if (dxPx <= thresholdPx) snapTargetX else centerX
+        val newY = if (dyPx <= thresholdPx) snapTargetY else centerY
+
+        return copy(centerX = newX, centerY = newY).clamped()
+    }
+
     companion object {
         const val DEFAULT_CENTER = 0.5f
         const val MIN_ZOOM = 1.0f
         const val MAX_ZOOM = 5.0f
+        const val DEFAULT_SNAP_THRESHOLD_PX = 8f
         private const val HALF_DIVISOR = 2f
 
         /**
@@ -137,6 +163,27 @@ data class ViewportRect(
         }
     }
 }
+
+/**
+ * Snaps the given [rect] to the horizontal and vertical centre lines when within
+ * [thresholdPx] of the centre.
+ * User's requirement: "ada juga snap vertical horizontal center ... dengan catatan,
+ * clip sedang diselect".
+ * Snapping is only active when a clip is selected ([hasSelection] is true). When false,
+ * the rect is returned unchanged.
+ */
+fun snappedToCentre(
+    rect: ViewportRect,
+    hasSelection: Boolean = true,
+    thresholdPx: Float = ViewportRect.DEFAULT_SNAP_THRESHOLD_PX,
+    frameWidthPx: Float = rect.canvasSpec.width.toFloat(),
+    frameHeightPx: Float = rect.canvasSpec.height.toFloat(),
+): ViewportRect = rect.snappedToCentre(
+    hasSelection = hasSelection,
+    thresholdPx = thresholdPx,
+    frameWidthPx = frameWidthPx,
+    frameHeightPx = frameHeightPx,
+)
 
 /**
  * Pixel bounds of a resolved [ViewportRect] in screen or canvas pixels.

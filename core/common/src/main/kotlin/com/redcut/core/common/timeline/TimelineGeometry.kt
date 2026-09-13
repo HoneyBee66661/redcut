@@ -50,8 +50,15 @@ value class TimelineZoom(val pixelsPerSecond: Float) {
         pixelsPerSecond.coerceIn(MINIMUM.pixelsPerSecond, MAXIMUM.pixelsPerSecond)
 
     companion object {
-        /** 2 px/s: a five-minute project is 600 px, wider than a phone. */
-        val MINIMUM = TimelineZoom(2f)
+        /**
+         * 0.1 px/s: an HOUR is 360 px, so an hour-long project fits one phone screen.
+         *
+         * The user's word for this end was *"shrink max per 1 hr, incase video is hours long"*, and it
+         * replaced the old 2 px/s ("a five-minute project is wider than a phone"). The old bound was chosen
+         * for a five-minute project; a user with footage measured in hours could not zoom out far enough to
+         * see it, which is the one thing zooming out is for.
+         */
+        val MINIMUM = TimelineZoom(0.1f)
 
         /** 8 px per 60 fps frame (16.67 ms) ≈ 480 px/s, so frame edges are visible. */
         val MAXIMUM = TimelineZoom(480f)
@@ -217,6 +224,21 @@ data class TimelineGeometry(
     /** The half-width of a touch zone around a boundary: the spec's 48 dp target, total. */
     val edgeTouchTargetPx: Float get() = EDGE_TOUCH_TARGET_DP * density
 
+    /**
+     * A track row's height, in pixels (UI revision 2).
+     *
+     * FIXED, and deliberately not a share of the canvas: the user's words were *"tinggi track body timeline
+     * fixed, tidak fitting container"*. The reason survives the wording — a track that stretched with the
+     * canvas would show a TALLER clip rather than more track, which is the opposite of what a taller screen
+     * is for, and once there are several tracks (video, audio, overlay) a height that depends on the total
+     * makes every lane's proportion depend on how many lanes exist.
+     *
+     * It lives HERE, beside [edgeTouchTargetPx], rather than in the drawing layer: the constant is a fact
+     * about the timeline's geometry, so the fast tier can test it, and the draw pass reads it. Same rule as
+     * the ranges in `ClipRanges` — one number, one place, both readers.
+     */
+    val trackHeightPx: Float get() = TRACK_HEIGHT_DP * density
+
     /** Microseconds to content pixels. The one conversion everything else is built on. */
     fun pxFor(us: Long): Float = us / MICROS_PER_SECOND * zoom.pixelsPerSecond
 
@@ -379,6 +401,14 @@ data class TimelineGeometry(
         const val EDGE_TOUCH_TARGET_DP = 48f
 
         /**
+         * A track row's height, in dp (UI revision 2).
+         *
+         * 56 dp holds a clip's thumbnail strip and the labels drawn on it, and it is the height a Material
+         * list row would use for something the user taps. The user asked for it to be FIXED.
+         */
+        const val TRACK_HEIGHT_DP = 56f
+
+        /**
          * The most of a clip's own width an edge target may claim, per side.
          *
          * See `edgeReach`: at a half per side the two targets met in the middle of any clip narrower
@@ -396,10 +426,17 @@ data class TimelineGeometry(
         /**
          * The intervals a ruler is allowed to use, smallest first.
          *
-         * Round numbers only: 1 s, 5 s, 10 s, 30 s, then minutes. A ruler that reads "3.7 s" is a
-         * ruler nobody can scan, and the intervals people trim by are round ones.
+         * Round numbers only: a frame, 0.1 s, 0.5 s, 1 s, 5 s, 10 s, 30 s, then minutes. A ruler that
+         * reads "3.7 s" is a ruler nobody can scan, and the intervals people trim by are round ones.
+         *
+         * The tight end was added by UI revision 2, from the user's ladder: *"paling coarse 1 detik, 0.5,
+         * 0.1, per frame"* — so a frame, 0.1 s and 0.5 s are all reachable granularities, and the ruler
+         * keeps its round-number shape below them.
          */
         val TICK_INTERVALS_US = listOf(
+            FRAME_INTERVAL_US,
+            100_000L,
+            500_000L,
             1_000_000L,
             5_000_000L,
             10_000_000L,
@@ -408,6 +445,14 @@ data class TimelineGeometry(
             300_000_000L,
             600_000_000L,
         )
+
+        /**
+         * One frame at 60 fps, in microseconds.
+         *
+         * The finest granularity the ruler offers, and the number [TimelineZoom.MAXIMUM]'s comment already
+         * reasons about: it is the step a frame-accurate cut lands on (FR-2.9, FR-2.1).
+         */
+        const val FRAME_INTERVAL_US = 16_667L
     }
 }
 

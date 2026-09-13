@@ -1,7 +1,6 @@
 package com.redcut.feature.editor
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -22,7 +21,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.redcut.domain.document.FrameStep
@@ -47,9 +45,6 @@ import com.redcut.feature.editor.timeline.TimelineCanvas
  */
 private val TRANSPORT_HEIGHT = 48.dp
 private val BAR_HEIGHT = 48.dp
-private val TRACKS_TOP_PADDING = 4.dp
-private const val TRACKS_LEFT_INSET_FRACTION = 0.10f
-private val TRACKS_OUTLINE = 1.dp
 
 /**
  * The layout's flexible weights: the preview and the tracks, equal, after the fixed strips.
@@ -106,12 +101,16 @@ internal fun ColumnScope.PreviewHalf(
 }
 
 /**
- * Exit flush left, the project's name beside it, import and export flush right.
+ * Exit flush left, the project's name beside it, Import and Export flush right.
  *
  * A fixed [BAR_HEIGHT] rather than a share of the half: see the note on the strip heights. Export is
  * disabled on an empty document — present rather than hidden, so the button does not appear the moment the
- * user does the thing it needs — and the import button reads "Resolution" once there is something to
- * resolve, which is the revision's toggle.
+ * user does the thing it needs.
+ *
+ * The `Resolution` toggle that briefly lived on the import button is GONE, by the user's word: *"tombol import
+ * dan export kembali seperti desain awal, hilangkan tombol resolusi, karena relevan saat kita tekan tombol
+ * export kita setting resolusi dll di popup khusus"*. The setting belongs in the export sheet, where the user
+ * is already choosing what to produce — tracked as task B2.
  */
 @Composable
 private fun TopBar(
@@ -129,16 +128,14 @@ private fun TopBar(
             text = state.document.name,
             style = MaterialTheme.typography.titleSmall,
             // One line, ellipsised, and it may not push the buttons: a project named by a phrase would
-            // otherwise shove Export off the edge of a 360 dp screen — the same failure the user just
+            // otherwise shove Export off the edge of a 360 dp screen — the same failure the device pass
             // reported, arriving from the other direction.
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f, fill = false).padding(start = 4.dp),
         )
         Box(modifier = Modifier.weight(1f))
-        TextButton(onClick = onImportClick) {
-            Text(if (state.document.clips.isEmpty()) "Import" else "Resolution")
-        }
+        TextButton(onClick = onImportClick) { Text("Import") }
         TextButton(onClick = onExport, enabled = state.document.clips.isNotEmpty()) {
             Text("Export")
         }
@@ -183,16 +180,17 @@ internal fun ColumnScope.TimelineControls(state: EditorUiState, onIntent: (Edito
 }
 
 /**
- * The tracks: an outlined container, inset from the left and the top.
+ * The tracks: the scrollable body, flush to the screen's edges.
  *
- * The inset is the user's: `padding 10% screen width untuk left. right dan bottom = 0. top 4 pixel` — which
- * is the gutter a track header will occupy when tracks are a list (the + buttons and the track types are
- * their own task). Right and bottom are flush because the timeline should run to the edge of the screen as
- * the user drags it.
+ * The gutter and the outline that the previous round added are GONE, both by the user's word: *"hilangkan
+ * outline container"* and *"body track mentok kiri"*. The 10 % left inset had been making room for a track
+ * header column — and the same device pass asked for track SELECTION, so the header is not the design; the
+ * user's answer to how to select a track was tapping the lane's background (*"gue ikut rekomendasi lu"*).
  *
- * The outline is drawn on the CONTAINER rather than on each track: it is the boundary of the scrollable
- * area, which is the thing that moves, and a per-track outline would move with the clips and read as part
- * of the content.
+ * Nothing is clamped on the right either: content runs off the screen as the user drags. The left edge is
+ * bounded only by the playhead, which is what `scrollCentering` already guarantees — time 0 can reach the
+ * playhead and no further, so the head of the first clip never leaves the screen on the right
+ * (*"left clip head saat clip discroll ke kanan, berhenti di playhead"*).
  */
 @Composable
 internal fun ColumnScope.TracksSlice(
@@ -200,17 +198,7 @@ internal fun ColumnScope.TracksSlice(
     onIntent: (EditorIntent) -> Unit,
     onThumbnail: suspend (sourceId: String, uri: String, positionUs: Long) -> ImageBitmap?,
 ) {
-    // The screen's width, for the gutter: a fraction of the screen rather than of the container, because the
-    // user asked for 10 % of the SCREEN and the container is what that fraction defines.
-    val guttersDp = (LocalConfiguration.current.screenWidthDp * TRACKS_LEFT_INSET_FRACTION).dp
-
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .weight(TRACKS_HALF)
-            .padding(start = guttersDp, top = TRACKS_TOP_PADDING)
-            .border(TRACKS_OUTLINE, MaterialTheme.colorScheme.outline),
-    ) {
+    Box(modifier = Modifier.fillMaxWidth().weight(TRACKS_HALF)) {
         TimelineCanvas(
             document = state.document,
             playheadUs = state.playheadUs,

@@ -8,6 +8,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.transformer.CompositionPlayer
 import com.redcut.core.common.di.MainDispatcher
 import com.redcut.core.common.logging.RedcutLogger
+import com.redcut.core.media.MediaResourceBroker
 import com.redcut.domain.render.RenderGraph
 import kotlinx.coroutines.CoroutineDispatcher
 
@@ -38,9 +39,10 @@ import kotlinx.coroutines.CoroutineDispatcher
 @OptIn(ExperimentalApi::class, UnstableApi::class)
 internal class CompositionPlayerRenderer(
     private val context: Context,
+    broker: MediaResourceBroker,
     @param:MainDispatcher main: CoroutineDispatcher,
     logger: RedcutLogger,
-) : Media3PreviewRenderer(main, logger) {
+) : Media3PreviewRenderer(broker = broker, main = main, logger = logger) {
 
     override fun openPlayer(graph: RenderGraph): Player =
         CompositionPlayer.Builder(context).build().apply {

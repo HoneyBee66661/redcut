@@ -2,6 +2,7 @@ package com.redcut.engine.media3
 
 import android.content.Context
 import com.redcut.core.common.logging.RedcutLogger
+import com.redcut.core.media.MediaResourceBroker
 import com.redcut.core.media.PreviewRenderer
 import kotlinx.coroutines.CoroutineDispatcher
 
@@ -30,17 +31,29 @@ object Media3PreviewRenderers {
     /**
      * The renderer for this build.
      *
-     * `logger` is forwarded rather than held: both renderers log through it, and a log line about a
-     * preview should name the renderer that produced it.
+     * Everything is forwarded rather than held: the broker because §9.1 makes it the only way a player
+     * comes into existence, the dispatcher because Media3 confines a player to one `Looper` thread, and
+     * the logger because a line about a preview should name the renderer that produced it.
      */
     fun create(
         context: Context,
+        broker: MediaResourceBroker,
         main: CoroutineDispatcher,
         logger: RedcutLogger,
     ): PreviewRenderer = if (PREFER_COMPOSITION_PLAYER) {
-        CompositionPlayerRenderer(context = context, main = main, logger = logger)
+        CompositionPlayerRenderer(
+            context = context,
+            broker = broker,
+            main = main,
+            logger = logger,
+        )
     } else {
-        ExoPlayerRenderer(context = context, main = main, logger = logger)
+        ExoPlayerRenderer(
+            context = context,
+            broker = broker,
+            main = main,
+            logger = logger,
+        )
     }
 
     /**

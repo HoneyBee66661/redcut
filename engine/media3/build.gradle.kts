@@ -20,10 +20,12 @@ android {
 dependencies {
     implementation(project(":domain:render"))
     implementation(project(":core:common"))
-    // The PreviewRenderer contract the UI holds (§6.8 rule D6). The interface cannot live in
-    // this module: a feature may not depend on an engine (§4.1 rule 2), so it lives in the core
-    // module the editor already sees and this module implements it. Inward, and fine — an engine
-    // may depend on a :core module.
+    // The PreviewRenderer contract the UI holds (§6.8 rule D6), and the codec broker every
+    // player must be built through (§9.1: "Nothing in the app may construct a MediaCodec (or a
+    // Media3 Transformer/CompositionPlayer) except through the broker"). The interface cannot
+    // live in this module: a feature may not depend on an engine (§4.1 rule 2), so it lives in
+    // the core module the editor already sees and this module implements it. Inward, and fine —
+    // an engine may depend on a :core module.
     implementation(project(":core:media"))
     // StateFlow for PreviewRenderer.state, and the scope the renderer's session runs in (§9.2).
     // Not inherited from anywhere: :core:common is pure and declares no coroutines artifact.

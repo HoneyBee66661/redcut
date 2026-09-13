@@ -2,6 +2,7 @@ package com.redcut.feature.editor
 
 import android.graphics.Bitmap
 import android.view.SurfaceView
+import androidx.lifecycle.ViewModelStore
 import com.google.common.truth.Truth.assertThat
 import com.redcut.core.common.IdSource
 import com.redcut.core.common.logging.NoOpRedcutLogger
@@ -118,6 +119,9 @@ class EditorViewModelTest {
         /** Every timeline position the renderer was seeked to, in order. */
         val seeks = mutableListOf<Long>()
 
+        /** How many times the renderer was told to give its decoder back (spec §9.1). */
+        var releases = 0
+
         override val state: StateFlow<PreviewState> = MutableStateFlow(PreviewState.Idle)
 
         override fun attach(surface: SurfaceView, graph: RenderGraph) = Unit
@@ -130,7 +134,9 @@ class EditorViewModelTest {
             seeks += us
         }
 
-        override fun release() = Unit
+        override fun release() {
+            releases++
+        }
     }
 
     /**
@@ -502,6 +508,25 @@ class EditorViewModelTest {
         model.onIntent(EditorIntent.SetPlayhead(9_000_000L))
 
         assertThat(renderer.seeks).containsExactly(4_000_000L)
+    }
+
+    // --- The preview's decoder is given back (spec §9.1) --------------------
+
+    @Test
+    fun `leaving the editor releases the preview's decoder`() = runTest(dispatcher) {
+        // §9.1: Android's pool of hardware decoders is small and globally shared, and "preview and
+        // export cannot run simultaneously" is a consequence rather than a preference. The screen
+        // ending is the end of the preview's claim on one, and this is the path that makes it so —
+        // the ViewModel is the object whose lifetime IS the screen's, so `onCleared` is where the
+        // release belongs and a store that clears is how a test reaches it.
+        val renderer = RecordingRenderer()
+        val model = viewModel(reader = RecordingReader(listOf(video())), renderer = renderer)
+        val store = ViewModelStore()
+        store.put("editor", model)
+
+        store.clear()
+
+        assertThat(renderer.releases).isEqualTo(1)
     }
 
     @Test

@@ -5,6 +5,7 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import com.redcut.core.common.di.MainDispatcher
 import com.redcut.core.common.logging.RedcutLogger
+import com.redcut.core.media.MediaResourceBroker
 import com.redcut.core.media.PreviewRenderer
 import com.redcut.core.media.PreviewState
 import com.redcut.domain.render.RenderGraph
@@ -41,8 +42,31 @@ import kotlinx.coroutines.launch
  * caller's [release], a player error, and the renderer being cleared. The player is released and the
  * decoder slot goes back in every one of them, because §9.1's failure mode — *"a short wait instead of
  * a crash"* — only holds while every path returns what it took.
+ *
+ * ### Resources and threads (§9)
+ *
+ * **The player is built inside a broker slot.** §9.1 is absolute about this: *"Nothing in the app may
+ * construct a `MediaCodec` (or a Media3 `Transformer`/`CompositionPlayer`) except through the broker."*
+ * The slot is taken before the player exists and held until the session ends — `awaitCancellation`
+ * inside `withDecoder` is what keeps it — which is what makes §9.1's two consequences true by
+ * construction: preview and export cannot hold codecs at the same time, and a thumbnail decode queues
+ * behind playback rather than racing it. A `release()` gives the slot back, so a preview nobody is
+ * looking at is not a decoder an export cannot have.
+ *
+ * **One thread.** The session runs on [main] — the `Looper` thread Media3 players are confined to, and
+ * the thread every [PreviewRenderer] call arrives on. Media3 owns its own playback and GL threads below
+ * that (§9.2's *"GL render: Media3's dedicated GL thread"*); nothing here reaches across them.
+ *
+ * **No frame is ever a Kotlin object.** The surface is handed to the player once and the frames go to
+ * it directly — §9.3's *"No frame ever becomes a `Bitmap` in Kotlin state. Frames live as GPU
+ * textures."* Nothing in this class runs per frame, allocates per frame, or could: there is no
+ * per-frame callback in it at all. That is also §6.4 rule 2's precondition — *"No Java object graphs
+ * cross the boundary. Frames move as `AHardwareBuffer`/`Surface`/texture IDs, never as `ByteArray` or
+ * `Bitmap`"* — which binds hard only once the C++ core is in the path (Phase 5); what this path does
+ * today is decline to create the problem it would then have to solve.
  */
 internal abstract class Media3PreviewRenderer(
+    private val broker: MediaResourceBroker,
     @param:MainDispatcher private val main: CoroutineDispatcher,
     protected val logger: RedcutLogger,
 ) : PreviewRenderer {
@@ -90,24 +114,40 @@ internal abstract class Media3PreviewRenderer(
 
         _state.value = PreviewState.Preparing
         session = scope.launch {
-            val opened = openOrFail(graph) ?: return@launch
-            player = opened
-            opened.addListener(listener)
-            opened.setVideoSurfaceView(surface)
-            opened.prepare()
-            // After prepare and before play: seeking first is what stops the first frame the user
-            // sees being frame zero of the composition rather than the frame under the playhead.
-            pendingSeekUs?.let { seekPlayer(opened, it) }
-            if (wantPlay) opened.play()
-            _state.value = PreviewState.Ready(opened.isPlaying)
-            try {
-                awaitCancellation()
-            } finally {
-                opened.removeListener(listener)
-                opened.release()
-                player = null
-                if (failureReason == null) _state.value = PreviewState.Idle
-            }
+            // The whole player lifetime sits inside one decoder slot (§9.1). `withDecoder` suspends
+            // rather than failing when the pool is full, so the wait is the spec's "short wait instead
+            // of a crash"; `awaitCancellation` inside the block is what HOLDS the slot for the session,
+            // and the broker's own `withPermit` is what gives it back on every way out — a new
+            // revision, a release, an error, or the renderer being cleared.
+            broker.withDecoder { holdSession(graph, surface) }
+        }
+    }
+
+    /**
+     * Opens the player and keeps it open until this coroutine is cancelled.
+     *
+     * A function rather than a block inside [attach] so that the decoder slot's scope is one readable
+     * span of code: everything between taking the slot and giving it back is in here, and nothing
+     * outside it can accidentally outlive the permit.
+     */
+    private suspend fun holdSession(graph: RenderGraph, surface: SurfaceView) {
+        val opened = openOrFail(graph) ?: return
+        player = opened
+        opened.addListener(listener)
+        opened.setVideoSurfaceView(surface)
+        opened.prepare()
+        // After prepare and before play: seeking first is what stops the first frame the user sees
+        // being frame zero of the composition rather than the frame under the playhead.
+        pendingSeekUs?.let { seekPlayer(opened, it) }
+        if (wantPlay) opened.play()
+        _state.value = PreviewState.Ready(opened.isPlaying)
+        try {
+            awaitCancellation()
+        } finally {
+            opened.removeListener(listener)
+            opened.release()
+            player = null
+            if (failureReason == null) _state.value = PreviewState.Idle
         }
     }
 

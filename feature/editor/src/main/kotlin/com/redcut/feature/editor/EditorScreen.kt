@@ -142,6 +142,7 @@ internal fun EditorScreen(
     Column(modifier = Modifier.fillMaxSize().statusBarInset()) {
         PreviewHalf(
             state = state,
+            onIntent = onIntent,
             onImportClick = onImportClick,
             onExport = onExport,
             onBack = onBack,

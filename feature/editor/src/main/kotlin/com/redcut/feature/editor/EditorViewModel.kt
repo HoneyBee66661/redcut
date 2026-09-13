@@ -18,8 +18,10 @@ import com.redcut.domain.document.FrameStep
 import com.redcut.domain.document.ImportRejection
 import com.redcut.domain.document.RenameDocument
 import com.redcut.domain.document.ReorderClip
+import com.redcut.domain.document.SetTransform
 import com.redcut.domain.document.TrimClip
 import com.redcut.domain.document.UndoStack
+import com.redcut.domain.document.ViewportRect
 import com.redcut.domain.document.adjust
 import com.redcut.domain.document.commandFor
 import com.redcut.domain.document.planImport
@@ -161,6 +163,23 @@ class EditorViewModel @Inject constructor(
 
             is EditorIntent.BeginAdjust -> beginAdjust(intent.clipId, intent.adjustment)
             is EditorIntent.UpdateAdjust -> updateAdjust(intent.value)
+
+            is EditorIntent.SetViewport -> {
+                val clipId = (_state.value.selection as? Selection.Clip)?.clipId ?: return
+                val clip = clipOf(clipId) ?: return
+                val updatedRect = ViewportRect(
+                    centerX = intent.centerX,
+                    centerY = intent.centerY,
+                    zoom = intent.zoom,
+                    canvasSpec = history.current.canvas,
+                ).clamped()
+                val newTransform = updatedRect.toTransformSpec(base = clip.transform)
+                if (clip.transform == newTransform) return
+                logger.d(TAG, "viewport ${intent.centerX}, ${intent.centerY} @ ${intent.zoom}x")
+                history.execute(SetTransform(clipId = clipId, transform = newTransform))
+                autosave()
+                publish()
+            }
         }
     }
 

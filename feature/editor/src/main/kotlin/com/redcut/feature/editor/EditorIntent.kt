@@ -134,6 +134,18 @@ sealed interface EditorIntent {
     data object CancelAdjust : Edit
 
     /**
+     * Set the preview viewport rect centre and zoom (spec UI revision 2, §WS F / Task F3).
+     *
+     * Pinch to zoom and drag to pan emit this intent with the normalised centre coordinates
+     * and zoom level.
+     */
+    data class SetViewport(
+        val centerX: Float,
+        val centerY: Float,
+        val zoom: Float,
+    ) : Edit
+
+    /**
      * Dismiss the import report (FR-1.4).
      *
      * An explicit intent rather than a timer: a report that says two of five files were unreadable is

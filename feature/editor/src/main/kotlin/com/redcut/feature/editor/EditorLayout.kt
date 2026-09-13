@@ -81,6 +81,7 @@ private const val TRACKS_HALF = 1f
 @Composable
 internal fun ColumnScope.PreviewHalf(
     state: EditorUiState,
+    onIntent: (EditorIntent) -> Unit,
     onImportClick: () -> Unit,
     onExport: () -> Unit,
     onBack: () -> Unit,
@@ -96,6 +97,7 @@ internal fun ColumnScope.PreviewHalf(
         )
         StagePreview(
             state = state,
+            onIntent = onIntent,
             onPreviewFrame = onPreviewFrame,
             onThumbnail = onThumbnail,
             modifier = Modifier.fillMaxWidth().weight(1f),
@@ -284,12 +286,15 @@ internal fun FrameStepButtons(state: EditorUiState, onIntent: (EditorIntent) -> 
 @Composable
 private fun StagePreview(
     state: EditorUiState,
+    onIntent: (EditorIntent) -> Unit,
     onPreviewFrame: suspend (uri: String, positionUs: Long) -> ImageBitmap?,
     onThumbnail: suspend (sourceId: String, uri: String, positionUs: Long) -> ImageBitmap?,
     modifier: Modifier = Modifier,
 ) {
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
-        StageBody(state = state, onThumbnail = onThumbnail, onPreviewFrame = onPreviewFrame)
+        EditorViewport(state = state, onIntent = onIntent) {
+            StageBody(state = state, onThumbnail = onThumbnail, onPreviewFrame = onPreviewFrame)
+        }
     }
 }
 

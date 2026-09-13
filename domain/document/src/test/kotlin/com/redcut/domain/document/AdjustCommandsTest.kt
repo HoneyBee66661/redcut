@@ -198,10 +198,28 @@ class AdjustCommandsTest {
             SetMuted("nope", true),
             SetFades("nope", 100L, 100L),
             SetReverse("nope", true),
+            SetTransform("nope", TransformSpec(cropLeft = 0.1f, cropRight = 0.9f)),
         )
 
         commands.forEach { command ->
             assertThat(command.apply(doc)).isEqualTo(doc)
         }
+    }
+
+    @Test
+    fun `SetTransform updates the clip transform in the document`() {
+        val doc = document()
+        val transform = TransformSpec(
+            cropLeft = 0.2f,
+            cropTop = 0.2f,
+            cropRight = 0.8f,
+            cropBottom = 0.8f,
+        )
+
+        val updated = SetTransform("clip-a", transform).apply(doc)
+        assertThat(updated.clips.single().transform).isEqualTo(transform)
+
+        // Identical transform leaves document unchanged
+        assertThat(SetTransform("clip-a", transform).apply(updated)).isEqualTo(updated)
     }
 }

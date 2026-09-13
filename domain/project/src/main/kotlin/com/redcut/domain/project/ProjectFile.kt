@@ -41,6 +41,16 @@ interface ProjectStore {
     /** The most recently saved project, or null when there is none. */
     suspend fun latest(): SavedProject?
 
+    /**
+     * Every saved project as a summary, in NO particular order (see [summariesNewestFirst] for the order a
+     * gallery wants).
+     *
+     * Summaries rather than projects, because the home screen draws tiles and a tile is a name, a count and
+     * a timestamp: decoding every clip of every project to draw it is work that grows with the library
+     * instead of with the screen.
+     */
+    suspend fun summaries(): List<ProjectSummary>
+
     /** Every saved project's name, for [nextUntitledName]. */
     suspend fun savedNames(): List<String>
 }

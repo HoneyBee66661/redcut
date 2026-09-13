@@ -23,6 +23,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.redcut.domain.document.FrameStep
 import com.redcut.feature.editor.timeline.TimelineCanvas
@@ -127,7 +128,12 @@ private fun TopBar(
         Text(
             text = state.document.name,
             style = MaterialTheme.typography.titleSmall,
-            modifier = Modifier.padding(start = 4.dp),
+            // One line, ellipsised, and it may not push the buttons: a project named by a phrase would
+            // otherwise shove Export off the edge of a 360 dp screen — the same failure the user just
+            // reported, arriving from the other direction.
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false).padding(start = 4.dp),
         )
         Box(modifier = Modifier.weight(1f))
         TextButton(onClick = onImportClick) {

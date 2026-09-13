@@ -442,6 +442,52 @@ class TimelineGeometryTest {
             .isEqualTo(geometry.viewportWidthPx / 2f)
     }
 
+    @Test
+    fun `the last clip's tail stops at the playhead when the body is scrolled left`() {
+        // The mirror of the test above, and the user asked for exactly this pairing before it got written:
+        // "left clip head bakal mentok mid playhead saat di scroll ke kanan dan sebaliknya bagi clip tail?"
+        // — confirmed as option a, symmetric, centre at BOTH ends. Nothing new is computed here; the point
+        // is that the invariant is now a fact the suite guards rather than a consequence of the arithmetic
+        // that happens to hold. With one clip the clip's head and tail ARE the timeline's ends, so both
+        // tests are about the same two clamps: a drag moves the PLAYHEAD, the ViewModel holds it inside
+        // `0..timelineDurationUs`, and the scroll is derived from it.
+        val geometry = geometry(
+            spans = listOf(ClipSpan("a", 0, 10 * oneSecond)),
+            zoom = TimelineZoom(60f),
+        )
+        val scrolled = geometry.copy(scrollPx = geometry.scrollCentering(10 * oneSecond))
+
+        // The end of the content sits under the line, in the draw pass's own expression (content pixel
+        // minus the viewport's start) — the same shape as the head assertion, from the other side.
+        assertThat(scrolled.pxFor(10 * oneSecond) - scrolled.visibleStartPx)
+            .isEqualTo(geometry.viewportWidthPx / 2f)
+        // And the mirror image of the empty space the fixed-centre line leaves at the start: the first
+        // frame is off-screen to the LEFT. (How far off is the content's own length — this clip is 600 px
+        // at 60 px/s against a 360 px viewport, so it is -420, not a half viewport. A half viewport of
+        // emptiness is what the frame at time 0 leaves BEHIND it, which is the assertion below.)
+        assertThat(scrolled.pxFor(0) - scrolled.visibleStartPx).isLessThan(0f)
+        assertThat(scrolled.pxFor(0) - scrolled.visibleStartPx)
+            .isEqualTo(geometry.viewportWidthPx / 2f - scrolled.pxFor(10 * oneSecond))
+        // Nothing to the right of the line, which is what makes this the end of the scroll range: exactly
+        // one half-viewport of empty space past the last frame. That is the price of asymmetry we are NOT
+        // buying — the line stays one fixed reference instead of moving when the content runs out.
+        assertThat(scrolled.visibleEndPx)
+            .isEqualTo(scrolled.pxFor(10 * oneSecond) + geometry.viewportWidthPx / 2f)
+
+        // The same holds when the clip is SHORTER than the viewport (3 s = 180 px against a 360 px
+        // viewport): the drag range is only one clip wide, and each clamp still parks its own end of the
+        // content under the line — the rule does not depend on the content being longer than the screen.
+        val short =
+            geometry(spans = listOf(ClipSpan("a", 0, 3 * oneSecond)), zoom = TimelineZoom(60f))
+        val shortHead = short.copy(scrollPx = short.scrollCentering(0))
+        val shortTail = short.copy(scrollPx = short.scrollCentering(3 * oneSecond))
+
+        assertThat(shortHead.pxFor(0) - shortHead.visibleStartPx)
+            .isEqualTo(short.viewportWidthPx / 2f)
+        assertThat(shortTail.pxFor(3 * oneSecond) - shortTail.visibleStartPx)
+            .isEqualTo(short.viewportWidthPx / 2f)
+    }
+
     // --- Zoom model (pinch) ------------------------------------------------
 
     @Test

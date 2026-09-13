@@ -98,4 +98,87 @@ class ViewportRectTest {
         assertThat(restored.centerY).isEqualTo(original.centerY)
         assertThat(restored.zoom).isEqualTo(original.zoom)
     }
+
+    @Test
+    fun `a rect 2 px off centre snaps to the centre lines when a clip is selected`() {
+        val frameW = 1080f
+        val frameH = 1920f
+        // 2 px off centre on each axis at 2x zoom
+        val rect = ViewportRect(
+            centerX = 0.5f + (2f / frameW),
+            centerY = 0.5f + (2f / frameH),
+            zoom = 2.0f,
+        ).clamped()
+
+        val snapped = rect.snappedToCentre(
+            hasSelection = true,
+            frameWidthPx = frameW,
+            frameHeightPx = frameH,
+        )
+
+        assertThat(snapped.centerX).isEqualTo(0.5f)
+        assertThat(snapped.centerY).isEqualTo(0.5f)
+    }
+
+    @Test
+    fun `a rect well off centre does not snap`() {
+        val frameW = 1080f
+        val frameH = 1920f
+        // 50 px off centre on each axis (well above default 8 px threshold)
+        val rect = ViewportRect(
+            centerX = 0.5f + (50f / frameW),
+            centerY = 0.5f + (50f / frameH),
+            zoom = 2.0f,
+        ).clamped()
+
+        val snapped = rect.snappedToCentre(
+            hasSelection = true,
+            frameWidthPx = frameW,
+            frameHeightPx = frameH,
+        )
+
+        assertThat(snapped.centerX).isEqualTo(rect.centerX)
+        assertThat(snapped.centerY).isEqualTo(rect.centerY)
+    }
+
+    @Test
+    fun `snapping is inert when no clip is selected`() {
+        val frameW = 1080f
+        val frameH = 1920f
+        // 2 px off centre, but hasSelection is false
+        val rect = ViewportRect(
+            centerX = 0.5f + (2f / frameW),
+            centerY = 0.5f + (2f / frameH),
+            zoom = 2.0f,
+        ).clamped()
+
+        val result = rect.snappedToCentre(
+            hasSelection = false,
+            frameWidthPx = frameW,
+            frameHeightPx = frameH,
+        )
+
+        assertThat(result.centerX).isEqualTo(rect.centerX)
+        assertThat(result.centerY).isEqualTo(rect.centerY)
+    }
+
+    @Test
+    fun `top-level snappedToCentre delegates to rect`() {
+        val frameW = 1080f
+        val frameH = 1920f
+        val rect = ViewportRect(
+            centerX = 0.5f + (2f / frameW),
+            centerY = 0.5f,
+            zoom = 2.0f,
+        ).clamped()
+
+        val snapped = snappedToCentre(
+            rect = rect,
+            hasSelection = true,
+            frameWidthPx = frameW,
+            frameHeightPx = frameH,
+        )
+
+        assertThat(snapped.centerX).isEqualTo(0.5f)
+    }
 }

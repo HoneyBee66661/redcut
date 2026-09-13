@@ -86,18 +86,6 @@ fun EditorRoute(
 }
 
 /**
- * The screen's top row: where the user is, what the project is called, and the two actions that are not
- * about the timeline.
- *
- * Extracted when `EditorScreen` reached `detekt`'s function-length limit, and the limit was right again:
- * the screen is "toolbar, banner, tabs, stage, tools, timeline" as a list of things, and a toolbar drawn
- * inline makes that list harder to see rather than shorter to read.
- *
- * Export is disabled on an empty document, and that is the only enablement rule here: it is a fact about
- * the DOCUMENT, while every other control's rule lives with the thing it acts on.
- */
-
-/**
  * FR-1.4's report, as a one-line toast.
  *
  * "Added 1 clip" rather than a sentence about a report: nothing is wrong, and the user asked for this to

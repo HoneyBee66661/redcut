@@ -12,6 +12,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.redcut.core.common.timeline.ClipRect
 import com.redcut.core.common.timeline.ClipSpan
+import com.redcut.core.common.timeline.LaneRect
 import com.redcut.core.common.timeline.TimelineGeometry
 import com.redcut.core.media.ThumbnailKey
 import com.redcut.domain.document.Clip
@@ -37,6 +38,13 @@ internal data class TimelinePaint(
     val clip: Color,
     val selectedClip: Color,
     val selectionBorder: Color,
+    /**
+     * The timeline's own grey: the ruler's ticks, a clip's top ticks, and the empty lane.
+     *
+     * One value for the furniture the DOCUMENT does not contain — the marks that measure time and the band
+     * that says a track holds nothing here. They are the same fact at two sizes, and separate near-identical
+     * theme roles would be three greys nobody can tell apart in a review or on a screen.
+     */
     val ruler: Color,
     val playhead: Color,
     /** The edge a trim gesture is dragging (FR-2.1): brighter than the selection, because it is moving. */
@@ -101,7 +109,7 @@ internal data class TimelineMarks(
     val markerUs: Long? = null,
 )
 
-/** The whole timeline, painted. The order is the layering: ruler, clips, marker, playhead. */
+/** The whole timeline, painted. The order is the layering: lane, ruler, clips, marker, playhead. */
 internal fun DrawScope.drawTimeline(
     layer: TimelineLayer,
     paint: TimelinePaint,
@@ -118,6 +126,11 @@ internal fun DrawScope.drawTimeline(
     // a clip's marks that came from a second call could only ever be accidentally identical.
     val ticks = layer.geometry.rulerTicks()
 
+    // The lane first, so the clips land ON a track instead of floating on the window's background, and so the
+    // culling below is invisible: what is not drawn as a clip is still drawn as lane (task A5).
+    layer.geometry.laneRects().forEach { lane ->
+        drawLane(lane, layer.geometry, track, paint.ruler)
+    }
     drawRuler(ticks, layer.geometry, rulerHeight, paint.ruler)
     layer.rects.forEach { rect ->
         drawClip(
@@ -218,6 +231,32 @@ internal fun DrawScope.drawClip(
         // clip to nothing, its edge line would otherwise scribble over the neighbour.
         draggedEdge?.let { edge -> drawTrimEdge(edge, left, rect.widthPx, track, paint) }
     }
+}
+
+/**
+ * An empty track lane, drawn as a band (UI revision 2, task A5).
+ *
+ * This and [TimelineGeometry.visibleRects]'s culling are a pair, and the pair is the point: the clips that
+ * are on screen are drawn, everything else is drawn as LANE, and the body therefore never has a region that
+ * is neither. The user's words for the second half were *"clip body off screen not rendered for
+ * optimization"*; without this half, culling would leave a hole where a clip is merely off screen.
+ *
+ * Painted in the timeline's structural grey rather than in a colour of its own, and deliberately NOT in the
+ * clip colour: a clip's fill is the same theme role as `TimelinePaint.clip`, so a lane in it would make a
+ * clip's rectangle invisible until its thumbnails arrived. The lane is the timeline's furniture, like the
+ * ticks that share the colour, and not content.
+ */
+private fun DrawScope.drawLane(
+    lane: LaneRect,
+    geometry: TimelineGeometry,
+    track: Track,
+    color: Color,
+) {
+    drawRect(
+        color = color,
+        topLeft = Offset(lane.startPx - geometry.visibleStartPx, track.top),
+        size = Size(lane.widthPx, track.height),
+    )
 }
 
 /**

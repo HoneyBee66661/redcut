@@ -112,6 +112,17 @@ data class ClipRect(
     }
 }
 
+/**
+ * The horizontal extent of a track's lane, in content pixels: the band a track occupies on screen.
+ *
+ * Unlike [ClipRect] it carries no id, because a lane is not a document entity — nothing selects it and no
+ * command edits it; it is the space a track's clips sit in. What it has to answer is where the empty part of
+ * the timeline is, which is why it is allowed to extend past the content: see `laneRects`.
+ */
+data class LaneRect(val startPx: Float, val endPx: Float) {
+    val widthPx: Float get() = endPx - startPx
+}
+
 /** What is under a touch, which is the whole reason the geometry exists. */
 sealed interface TimelineHit {
 
@@ -268,12 +279,38 @@ data class TimelineGeometry(
      * The margin is what keeps a scroll smooth: a clip just off-screen is already drawn on the
      * frame it enters, instead of appearing one frame late (NFR-8's "0 frames > 32 ms" is about
      * scroll, and a clip that pops in is a frame the user notices).
+     *
+     * ### The culling contract (UI revision 2, task A5)
+     *
+     * A clip whose whole span lies outside that window, margin included, is NOT returned. The user's words
+     * for why: *"clip body off screen not rendered for optimization"* — and the same revision's zoom range is
+     * what makes it matter, because at 0.1 px/s an HOUR is one screen, so a project can hold hundreds of
+     * clips of which a handful are on it. A clip that overlaps the margin is returned exactly ONCE, however
+     * much of it is off screen: the rect is the clip's own, in content pixels, and nothing about it depends
+     * on where the viewport happens to be — the draw pass is what clips it to the window.
      */
     fun visibleRects(): List<ClipRect> {
         val from = visibleStartPx - viewportWidthPx
         val to = visibleEndPx + viewportWidthPx
         return clipRects().filter { it.endPx >= from && it.startPx <= to }
     }
+
+    /**
+     * The lane bands to draw, in content pixels (UI revision 2, task A5).
+     *
+     * The lane SPANS THE VISIBLE WINDOW rather than being derived from the clips, and that is the decision
+     * this function exists to write down. It follows from the fixed track height — *"tinggi track body
+     * timeline fixed, tidak fitting container"* — because a canvas taller than a track leaves space that has
+     * to read as empty TRACK: the user's contrast is between more track and a void. With the playhead centred
+     * the same is true horizontally, where half a viewport of the body is empty at each end of the timeline.
+     * A lane clamped to the content would instead leave the area past the last clip looking like a hole in
+     * the timeline, and that edge is one the user drags a clip towards.
+     *
+     * One entry today: the document is still a flat clip list, so its clips occupy one lane. The return type
+     * is a list rather than a single rect because workstream C gives each track its own — and a draw pass
+     * that already loops over lanes is the one that will not have to change when it does.
+     */
+    fun laneRects(): List<LaneRect> = listOf(LaneRect(visibleStartPx, visibleEndPx))
 
     /**
      * What a touch at [screenX] hits (FR-2.1).

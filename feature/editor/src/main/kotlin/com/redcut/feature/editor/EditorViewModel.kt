@@ -292,6 +292,18 @@ class EditorViewModel @Inject constructor(
                 _state.value = _state.value.copy(selection = Selection.None)
 
             EditorIntent.DismissImport -> _state.value = _state.value.copy(import = null)
+
+            // The export sheet's three, all view state. Inlined rather than given a private function each
+            // because detekt's function-count limit is what surfaced the last one (see ApplyReorder), and
+            // the logic behind each — what a resolution may be, what an empty document means — lives in
+            // EditorUiState beside `withStage`, where a plain JVM test reaches it without a ViewModel.
+            EditorIntent.OpenExport ->
+                _state.value = _state.value.withExportOpened(history.current.canvas)
+
+            EditorIntent.DismissExport -> _state.value = _state.value.copy(exportSheet = null)
+
+            is EditorIntent.SetExportResolution ->
+                _state.value = _state.value.withExportResolution(intent.resolution)
         }
     }
 
@@ -524,10 +536,10 @@ class EditorViewModel @Inject constructor(
 
     /**
      * Re-reads the state from the stack, keeping the view fields (stage, playhead, selection,
-     * import report).
-     * None of the four is history: undoing a trim must not also undo "the user is looking at the
-     * Effect stage", rewind the playhead, drop the selection, or erase the explanation of why one
-     * of four files was refused.
+     * import report, export sheet).
+     * None of the five is history: undoing a trim must not also undo "the user is looking at the
+     * Effect stage", rewind the playhead, drop the selection, erase the explanation of why one of
+     * four files was refused, or close the sheet the user is reading.
      *
      * The playhead and selection are RE-DERIVED against the new document rather than copied
      * blindly, which is where two bugs would otherwise live: after a delete or an undo that
@@ -542,6 +554,7 @@ class EditorViewModel @Inject constructor(
             selection = _state.value.selection.reconciledWith(document.clips.map { it.id }),
             tool = _state.value.tool.reconciledWith(document.clips.map { it.id }),
             import = import,
+            exportSheet = _state.value.exportSheet,
         )
     }
 

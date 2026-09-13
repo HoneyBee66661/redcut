@@ -1103,7 +1103,7 @@ class EditorViewModelTest {
     }
 
     @Test
-    fun `the sheet holds the size the user picked, and refuses one FR-5.1 does not allow`() =
+    fun `the sheet holds the size the user picked, and refuses one the spec does not allow`() =
         runTest(
             dispatcher,
         ) {

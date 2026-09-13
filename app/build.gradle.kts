@@ -51,6 +51,11 @@ dependencies {
     // --- Domain: read at the composition root, never rendered here ----------
     implementation(project(":domain:document"))
     implementation(project(":domain:render"))
+    // :domain:project holds the ProjectStore port and the file format; the implementation lives HERE
+    // (JsonProjectStore) because it needs a Context. The app module needs the port it binds and the
+    // format it writes — KSP failed with "ProjectStore could not be resolved" the first time this was
+    // missing, which is the shape of a dependency that only the annotation processor notices.
+    implementation(project(":domain:project"))
 
     // --- Core ---------------------------------------------------------------
     implementation(project(":core:common"))

@@ -50,8 +50,13 @@ class PreviewFrames @Inject constructor(
     suspend fun frame(uri: String, positionUs: Long): Bitmap? =
         store.thumbnail(sourceId = uri, uri = uri, positionUs = positionUs)
 
-    /** Drops the cached frames. Called on a low-memory signal, exactly as the thumbnails are. */
-    fun clear() {
+    /**
+     * Drops the cached frames. Called on a low-memory signal, exactly as the thumbnails are.
+     *
+     * `suspend` because the store's clear takes the mutex a decode in flight may be holding — the same
+     * reason the app launches it from a scope rather than calling it from `onTrimMemory` directly.
+     */
+    suspend fun clear() {
         store.clear()
     }
 

@@ -7,6 +7,12 @@
 // never renders anything. That is what lets the broker be replaced or wrapped
 // when the C++ core takes over rendering, without touching the domain.
 //
+// Phase 1.11 added one thing that is not a question about a source file: the
+// PreviewRenderer INTERFACE (§8.4, §6.8 rule D6). It is here because the UI has to
+// hold it and a feature may not depend on an engine. It is only the interface —
+// which renders nothing either — and both implementations stay in :engine:media3,
+// so rule D1 is untouched: this module still names no Media3 type.
+//
 // SKELETON: Phase 0.2 created the module. Phase 1.3 added the probe and the SAF reader
 // (this file's dependencies); Phase 1.4 adds the MediaResourceBroker and thumbnails.
 plugins {
@@ -23,6 +29,10 @@ android {
 dependencies {
     implementation(project(":core:common"))
     implementation(project(":domain:document"))
+    // api, not implementation: PreviewRenderer.attach names RenderGraph in its public signature,
+    // so a module that implements or holds the interface needs the type on its compile classpath —
+    // the same reasoning :domain:render records for its own api() on :domain:document.
+    api(project(":domain:render"))
 
     // Probing and reading a content:// URI are I/O; the reader is suspend and runs on
     // Dispatchers.IO. `-android` is what supplies it (see DispatchersModule).

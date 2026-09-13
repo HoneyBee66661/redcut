@@ -4,6 +4,7 @@ import com.google.common.truth.Truth.assertThat
 import com.redcut.domain.document.Clip
 import com.redcut.domain.document.EditDocument
 import com.redcut.domain.document.timelineDurationUs
+import com.redcut.domain.document.videoTrack
 import org.junit.Test
 
 /**
@@ -38,7 +39,7 @@ class TimelineProjectionTest {
     private fun document(vararg clips: Clip) = EditDocument(
         id = "doc",
         name = "Doc",
-        clips = clips.toList(),
+        tracks = listOf(videoTrack(clips.toList())),
     )
 
     @Test

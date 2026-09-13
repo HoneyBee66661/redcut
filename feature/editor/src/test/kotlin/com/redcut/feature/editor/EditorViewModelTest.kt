@@ -20,6 +20,7 @@ import com.redcut.domain.document.ImportRejection
 import com.redcut.domain.document.ProbedSource
 import com.redcut.domain.document.SourceProbe
 import com.redcut.domain.document.SourceRef
+import com.redcut.domain.document.videoTrack
 import com.redcut.domain.project.ProjectStore
 import com.redcut.domain.project.ProjectSummary
 import com.redcut.domain.project.SavedProject
@@ -957,12 +958,14 @@ class EditorViewModelTest {
                         height = 1080,
                     ),
                 ),
-                clips = listOf(
-                    Clip(
-                        id = "clip-1",
-                        sourceId = "src-1",
-                        sourceInUs = 0L,
-                        sourceOutUs = 4_000_000L,
+                tracks = listOf(
+                    videoTrack(
+                        Clip(
+                            id = "clip-1",
+                            sourceId = "src-1",
+                            sourceInUs = 0L,
+                            sourceOutUs = 4_000_000L,
+                        ),
                     ),
                 ),
             ),

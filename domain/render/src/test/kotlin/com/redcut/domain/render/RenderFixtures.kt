@@ -4,6 +4,7 @@ import com.redcut.domain.document.AppliedEffect
 import com.redcut.domain.document.Clip
 import com.redcut.domain.document.EditDocument
 import com.redcut.domain.document.SourceRef
+import com.redcut.domain.document.videoTrack
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 
@@ -75,7 +76,7 @@ internal fun document(
     id = "doc-test",
     name = "Test",
     sources = sources,
-    clips = clips,
+    tracks = listOf(videoTrack(clips)),
     effects = effects,
     revision = revision,
 )

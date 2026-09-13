@@ -32,9 +32,11 @@ class CutToolsTest {
         id = "doc",
         name = "Doc",
         sources = listOf(source()),
-        clips = listOf(
-            clip("clip-a", 0L, 4 * oneSecond),
-            clip("clip-b", 8 * oneSecond, 12 * oneSecond),
+        tracks = listOf(
+            videoTrack(
+                clip("clip-a", 0L, 4 * oneSecond),
+                clip("clip-b", 8 * oneSecond, 12 * oneSecond),
+            ),
         ),
     )
 
@@ -143,7 +145,7 @@ class CutToolsTest {
             id = "doc",
             name = "Doc",
             sources = listOf(source()),
-            clips = listOf(clip("clip-a", 0L, 4 * oneSecond)),
+            tracks = listOf(videoTrack(clip("clip-a", 0L, 4 * oneSecond))),
         )
 
         assertThat(one.availabilityFor(CutTool.DELETE, oneSecond))

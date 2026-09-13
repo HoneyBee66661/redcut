@@ -44,7 +44,7 @@ class FrameStepTest {
         id = "doc",
         name = "Doc",
         sources = sources.toList().ifEmpty { listOf(source()) },
-        clips = listOf(clip),
+        tracks = listOf(videoTrack(clip)),
     )
 
     @Test

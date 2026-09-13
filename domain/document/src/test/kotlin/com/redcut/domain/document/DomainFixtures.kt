@@ -46,9 +46,11 @@ internal fun sampleDocument(): EditDocument = EditDocument(
     id = "doc-1",
     name = "Sample",
     sources = listOf(source("s1")),
-    clips = listOf(
-        clip("c1", "s1", 0L, 2 * SEC),
-        clip("c2", "s1", 2 * SEC, 5 * SEC),
+    tracks = listOf(
+        videoTrack(
+            clip("c1", "s1", 0L, 2 * SEC),
+            clip("c2", "s1", 2 * SEC, 5 * SEC),
+        ),
     ),
 )
 

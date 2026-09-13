@@ -1,6 +1,8 @@
 package com.redcut.domain.project
 
+import com.redcut.domain.document.Clip
 import com.redcut.domain.document.EditDocument
+import com.redcut.domain.document.videoTrack
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
@@ -106,8 +108,52 @@ object ProjectCodec {
      * Null rather than an exception, and for the same reason the media reader reports rather than throws
      * (FR-1.4): a corrupt or half-written project file is a project the user cannot open, which is worth
      * telling them — and it is not worth crashing the editor they opened to look at a different one.
+     *
+     * A schema-v1 document is migrated on the way in ([migratedFromV1]), because the alternative —
+     * decoding `tracks` (absent, so the default empty one) and dropping `clips` — would open the user's
+     * project with its timeline silently emptied. `ignoreUnknownKeys` is what makes that silent, which is
+     * why the clips are read a second time through [V1Project] rather than after the decode: by then,
+     * they are gone.
      */
     fun decode(text: String): SavedProject? = runCatching {
-        json.decodeFromString<SavedProject>(text)
+        val legacyClips = json.decodeFromString<V1Project>(text).document.clips
+        json.decodeFromString<SavedProject>(text).migratedFromV1(legacyClips)
     }.getOrNull()
+
+    /**
+     * Moves a schema-v1 document's flat `clips` into the one video track that schema v2 keeps them in.
+     *
+     * Two independent conditions, because either one alone is a silent way to lose an edit: an old file
+     * that already says `2` (hand-edited, or written by a build between the two formats) keeps its own
+     * clips, and a document that already has clips in a track is left exactly as it is. When the version
+     * is old and there are clips to move, they are moved VERBATIM and in order — a migration that dropped
+     * a clip or reordered one would be a migration that lost the user's edit — and only the `clips` key
+     * changes place, so `sources`, `effects`, `canvas` and `name` are untouched by construction.
+     *
+     * The stamp is brought forward either way: what comes out of here is a v2 document, and one that
+     * still said `1` would be migrated a second time by the next reader.
+     */
+    private fun SavedProject.migratedFromV1(legacyClips: List<Clip>): SavedProject {
+        if (document.schemaVersion >= EditDocument.SCHEMA_VERSION) return this
+        val promoted = if (document.clips.isEmpty() && legacyClips.isNotEmpty()) {
+            document.copy(tracks = listOf(videoTrack(legacyClips)))
+        } else {
+            document
+        }
+        return copy(document = promoted.copy(schemaVersion = EditDocument.SCHEMA_VERSION))
+    }
 }
+
+/**
+ * The document as schema v1 wrote it: a flat clip list, and no tracks.
+ *
+ * A view of the file's `document` object rather than a second document type — it names the one key the
+ * migration needs and lets `ignoreUnknownKeys` ignore the rest, so a v1 file with fields this build has
+ * never heard of still yields its clips. Nothing outside the migration may read it: the clips it holds
+ * have no track, which is the state the rest of the codebase is written to not have to think about.
+ */
+@Serializable
+private data class V1Project(val document: V1Document = V1Document())
+
+@Serializable
+private data class V1Document(val clips: List<Clip> = emptyList())

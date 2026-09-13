@@ -40,7 +40,12 @@ class PreviewTargetTest {
     )
 
     private fun document(vararg clips: Clip, sources: List<SourceRef> = listOf(source())) =
-        EditDocument(id = "doc", name = "Doc", sources = sources, clips = clips.toList())
+        EditDocument(
+            id = "doc",
+            name = "Doc",
+            sources = sources,
+            tracks = listOf(videoTrack(clips.toList())),
+        )
 
     @Test
     fun `an untrimmed clip shows its own time`() {
@@ -130,7 +135,7 @@ class PreviewTargetTest {
             id = "doc",
             name = "Doc",
             sources = emptyList(),
-            clips = listOf(clip()),
+            tracks = listOf(videoTrack(clip())),
         )
 
         assertThat(doc.previewTargetAt(oneSecond)).isNull()

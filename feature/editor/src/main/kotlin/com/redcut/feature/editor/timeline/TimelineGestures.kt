@@ -84,20 +84,31 @@ internal class TimelineGestures(
 /**
  * What a tap means, in one place.
  *
- * A tap on a clip selects it AND moves the playhead, which is what a timeline does. A tap on empty
- * space clears the selection. The [TimelineHit.Edge] branch is the FALLBACK path: the trim detector
- * below normally claims an edge press, and this runs only if it declined (a zero-width edge zone, or
- * a finger that never moved — see [trimGesture] for which of those means what).
+ * ### The rule, and why it is stateful (device pass, second round)
+ *
+ * **The first tap on a clip selects it; a tap on the ALREADY selected clip seeks to that point.** The
+ * user's model, verbatim: *"tap pertama di body timeline = select jika unselected; tap kedua atau kondisi
+ * selected pindahin playhead ke touch point"*. The reason it is worth a state rather than a single
+ * behaviour: the two intents are different acts — one says "this is the clip I am working on", the other
+ * says "look here" — and doing both on every tap means a user who only wanted to select has also moved
+ * the playhead somewhere they did not ask for.
+ *
+ * A tap on an edge seeks (the trim detector passes a no-movement edge press here), and a tap past the
+ * clips clears the selection. [selectedClipId] is what makes the body branch stateful.
  */
 internal fun onTimelineTap(
     screenX: Float,
     geometry: TimelineGeometry,
     onIntent: (EditorIntent) -> Unit,
+    selectedClipId: String? = null,
 ) {
     when (val hit = geometry.hitTest(screenX)) {
         is TimelineHit.Body -> {
-            onIntent(EditorIntent.SelectClip(hit.clipId))
-            onIntent(EditorIntent.SetPlayhead(geometry.usFor(geometry.contentPxFor(screenX))))
+            if (hit.clipId == selectedClipId) {
+                onIntent(EditorIntent.SetPlayhead(geometry.usFor(geometry.contentPxFor(screenX))))
+            } else {
+                onIntent(EditorIntent.SelectClip(hit.clipId))
+            }
         }
         is TimelineHit.Edge ->
             onIntent(EditorIntent.SetPlayhead(geometry.usFor(geometry.contentPxFor(screenX))))
@@ -178,6 +189,7 @@ internal fun timelineGestureHandlers(
     setScrollPx: (Float) -> Unit,
     setZoomPxPerSecond: (Float) -> Unit,
     reorder: ReorderGestures,
+    selectedClipId: String? = null,
 ): TimelineGestures {
     fun sourceTimeAt(clipId: String, screenX: Float): Long {
         val clip = clipsById[clipId] ?: return 0L
@@ -202,7 +214,7 @@ internal fun timelineGestureHandlers(
             setZoomPxPerSecond(zoomed.zoom.pixelsPerSecond)
             setScrollPx(zoomed.scrollPx)
         },
-        tap = { screenX -> onTimelineTap(screenX, geometry, onIntent) },
+        tap = { screenX -> onTimelineTap(screenX, geometry, onIntent, selectedClipId) },
         trim = TrimGestures(
             begin = { clipId, edge, screenX ->
                 onIntent(EditorIntent.BeginTrim(clipId, edge, sourceTimeAt(clipId, screenX)))

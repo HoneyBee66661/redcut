@@ -171,6 +171,24 @@ class AdjustCommandsTest {
     // --- The document's edge -----------------------------------------------
 
     @Test
+    fun `a blank name is refused rather than stored`() {
+        // A project with no name is a project the user cannot find in a list. "Call it nothing" keeps the
+        // name it had.
+        val doc = document()
+
+        assertThat(RenameDocument("   ").apply(doc)).isEqualTo(doc)
+        assertThat(RenameDocument("").apply(doc)).isEqualTo(doc)
+    }
+
+    @Test
+    fun `renaming trims, and a name that is already the document's changes nothing`() {
+        val doc = document()
+
+        assertThat(RenameDocument("  untitled 2  ").apply(doc).name).isEqualTo("untitled 2")
+        assertThat(RenameDocument(doc.name).apply(doc)).isEqualTo(doc)
+    }
+
+    @Test
     fun `every adjustment refuses an unknown clip without touching the document`() {
         val doc = document()
 

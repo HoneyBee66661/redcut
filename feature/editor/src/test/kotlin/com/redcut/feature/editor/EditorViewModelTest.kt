@@ -9,13 +9,18 @@ import com.redcut.core.media.PreviewFrames
 import com.redcut.core.media.SourceReadResult
 import com.redcut.core.media.ThumbnailSource
 import com.redcut.core.media.ThumbnailStore
+import com.redcut.domain.document.Clip
 import com.redcut.domain.document.ClipAdjustment
 import com.redcut.domain.document.ClipEdge
 import com.redcut.domain.document.CutTool
+import com.redcut.domain.document.EditDocument
 import com.redcut.domain.document.FrameStep
 import com.redcut.domain.document.ImportRejection
 import com.redcut.domain.document.ProbedSource
 import com.redcut.domain.document.SourceProbe
+import com.redcut.domain.document.SourceRef
+import com.redcut.domain.project.ProjectStore
+import com.redcut.domain.project.SavedProject
 import com.redcut.feature.editor.timeline.TimelineThumbnails
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -68,20 +73,48 @@ class EditorViewModelTest {
     /** Deterministic ids, so a test can name the exact commands an import produced. */
     private fun ids(): IdSource = IdSource { "id-${idCounter++}" }
 
-    private fun viewModel(reader: MediaSourceReader = RecordingReader()) = EditorViewModel(
+    private fun viewModel(
+        reader: MediaSourceReader = RecordingReader(),
+        projects: ProjectStore = RecordingProjects(),
+    ) = EditorViewModel(
         logger = NoOpRedcutLogger,
         sourceReader = reader,
-        // The timeline's pictures are not this test's subject: a store whose source never returns
-        // an image keeps every case here about state rather than about decoding.
-        thumbnails = TimelineThumbnails(
-            ThumbnailStore(source = NoThumbnails, logger = NoOpRedcutLogger),
+        projects = projects,
+        // The timeline's pictures and the preview are not this test's subject: loaders whose source never
+        // returns an image keep every case here about state rather than about decoding.
+        images = EditorImages(
+            thumbnails = TimelineThumbnails(
+                ThumbnailStore(source = NoThumbnails, logger = NoOpRedcutLogger),
+            ),
+            previewFrames = PreviewFrames(source = NoThumbnails, logger = NoOpRedcutLogger),
         ),
-        // Same fake for the preview: a source that never returns an image keeps every case here about
-        // state rather than about decoding.
-        previewFrames = PreviewFrames(source = NoThumbnails, logger = NoOpRedcutLogger),
         ids = ids(),
         io = dispatcher,
     )
+
+    /**
+     * The project store, in memory.
+     *
+     * Records what was saved as well as holding what to reopen, because the two questions this suite asks
+     * about autosave are "was it written?" and "what was it called?" — and a fake that only stored the
+     * last project could not answer the second.
+     */
+    private class RecordingProjects(
+        private val reopen: SavedProject? = null,
+        private val existingNames: MutableList<String> = mutableListOf(),
+    ) : ProjectStore {
+
+        val saved = mutableListOf<SavedProject>()
+
+        override suspend fun save(project: SavedProject) {
+            saved += project
+            if (project.name !in existingNames) existingNames += project.name
+        }
+
+        override suspend fun latest(): SavedProject? = reopen
+
+        override suspend fun savedNames(): List<String> = existingNames.toList()
+    }
 
     /** A thumbnail source that produces nothing, for tests that do not draw a timeline. */
     private object NoThumbnails : ThumbnailSource {
@@ -840,6 +873,112 @@ class EditorViewModelTest {
 
         assertThat(model.state.value.tool).isEqualTo(ToolState.Idle)
     }
+
+    // --- Autosave and reopening (the device pass's "my clip disappeared") ---
+
+    @Test
+    fun `an import names the project and saves it`() = runTest(dispatcher) {
+        val projects = RecordingProjects()
+        val model = viewModel(projects = projects)
+
+        model.onIntent(EditorIntent.ImportMedia(listOf("content://media/1")))
+        advanceUntilIdle()
+
+        // Named by the rule, and the name reached the DOCUMENT as well as the file: the toolbar shows the
+        // document's name, and a project saved under a name its own document does not carry would be two
+        // answers to "what is this called?".
+        assertThat(model.state.value.document.name).isEqualTo("untitled")
+        assertThat(projects.saved).isNotEmpty()
+        assertThat(projects.saved.last().name).isEqualTo("untitled")
+        assertThat(projects.saved.last().document.clips).hasSize(1)
+    }
+
+    @Test
+    fun `a project made while untitled already exists takes the next number`() = runTest(
+        dispatcher,
+    ) {
+        val projects = RecordingProjects(existingNames = mutableListOf("untitled", "untitled 2"))
+        val model = viewModel(projects = projects)
+
+        model.onIntent(EditorIntent.ImportMedia(listOf("content://media/1")))
+        advanceUntilIdle()
+
+        assertThat(model.state.value.document.name).isEqualTo("untitled 3")
+    }
+
+    @Test
+    fun `an edit after the import is saved too, not only the import`() = runTest(dispatcher) {
+        val projects = RecordingProjects()
+        val model = viewModel(projects = projects)
+        model.onIntent(EditorIntent.ImportMedia(listOf("content://media/1")))
+        advanceUntilIdle()
+        val afterImport = projects.saved.size
+
+        model.onIntent(EditorIntent.SetPlayhead(1_000_000L))
+        model.onIntent(EditorIntent.ApplyCut(CutTool.SPLIT))
+        advanceUntilIdle()
+
+        // A split is a document change, so it is written; the playhead move is not, so it is not.
+        assertThat(projects.saved.size).isGreaterThan(afterImport)
+        assertThat(projects.saved.last().document.clips).hasSize(2)
+    }
+
+    @Test
+    fun `opening the editor reopens the project the user was last in`() = runTest(dispatcher) {
+        val reopened = SavedProject(
+            id = "untitled",
+            name = "untitled 2",
+            document = EditDocument(
+                id = "untitled",
+                name = "untitled 2",
+                sources = listOf(
+                    SourceRef(
+                        id = "src-1",
+                        uri = "content://media/1",
+                        displayName = "clip.mp4",
+                        durationUs = 4_000_000L,
+                        width = 1920,
+                        height = 1080,
+                    ),
+                ),
+                clips = listOf(
+                    Clip(
+                        id = "clip-1",
+                        sourceId = "src-1",
+                        sourceInUs = 0L,
+                        sourceOutUs = 4_000_000L,
+                    ),
+                ),
+            ),
+            updatedAtMs = 1L,
+        )
+        val model = viewModel(projects = RecordingProjects(reopen = reopened))
+        advanceUntilIdle()
+
+        assertThat(model.state.value.document.clips).hasSize(1)
+        assertThat(model.state.value.document.name).isEqualTo("untitled 2")
+        // And a reopened project has nothing to undo: the stack belongs to the session, not the file.
+        assertThat(model.state.value.history).isEqualTo(HistoryState.Ready(false, false, null))
+    }
+
+    @Test
+    fun `a project that is still untitled when the first import lands is not renamed twice`() =
+        runTest(
+            dispatcher,
+        ) {
+            val projects = RecordingProjects()
+            val model = viewModel(projects = projects)
+
+            model.onIntent(EditorIntent.ImportMedia(listOf("content://media/1")))
+            advanceUntilIdle()
+            model.onIntent(EditorIntent.ImportMedia(listOf("content://media/2")))
+            advanceUntilIdle()
+
+            // The second import adds to the SAME project: it does not start a new one, and does not renumber.
+            assertThat(model.state.value.document.name).isEqualTo("untitled")
+            assertThat(projects.saved.last().name).isEqualTo("untitled")
+            assertThat(projects.saved.last().document.sources).hasSize(2)
+        }
 
     private fun HistoryState.topLabelOrNull(): String? = (this as? HistoryState.Ready)?.topLabel
 }

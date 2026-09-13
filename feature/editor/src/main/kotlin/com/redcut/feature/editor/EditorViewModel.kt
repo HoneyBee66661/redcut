@@ -1,14 +1,12 @@
 package com.redcut.feature.editor
 
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.redcut.core.common.IdSource
 import com.redcut.core.common.di.IoDispatcher
 import com.redcut.core.common.logging.RedcutLogger
 import com.redcut.core.media.MediaSourceReader
-import com.redcut.core.media.PreviewFrames
 import com.redcut.core.media.SourceReadResult
 import com.redcut.domain.document.Clip
 import com.redcut.domain.document.ClipAdjustment
@@ -18,6 +16,7 @@ import com.redcut.domain.document.CutTool
 import com.redcut.domain.document.EditDocument
 import com.redcut.domain.document.FrameStep
 import com.redcut.domain.document.ImportRejection
+import com.redcut.domain.document.RenameDocument
 import com.redcut.domain.document.ReorderClip
 import com.redcut.domain.document.TrimClip
 import com.redcut.domain.document.UndoStack
@@ -27,7 +26,9 @@ import com.redcut.domain.document.planImport
 import com.redcut.domain.document.steppedPlayheadUs
 import com.redcut.domain.document.timelineDurationUs
 import com.redcut.domain.document.trimmedTo
-import com.redcut.feature.editor.timeline.TimelineThumbnails
+import com.redcut.domain.project.ProjectStore
+import com.redcut.domain.project.SavedProject
+import com.redcut.domain.project.nextUntitledName
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -65,8 +66,8 @@ import javax.inject.Inject
 class EditorViewModel @Inject constructor(
     private val logger: RedcutLogger,
     private val sourceReader: MediaSourceReader,
-    private val thumbnails: TimelineThumbnails,
-    private val previewFrames: PreviewFrames,
+    private val images: EditorImages,
+    private val projects: ProjectStore,
     private val ids: IdSource,
     // `@param:` for the same reason as in :core:media — Kotlin 2.2 warns that a bare
     // annotation on a constructor property will also apply to the field, and CI compiles
@@ -74,11 +75,43 @@ class EditorViewModel @Inject constructor(
     @param:IoDispatcher private val io: CoroutineDispatcher,
 ) : ViewModel() {
 
-    private val history = UndoStack(
+    /**
+     * A `var`, not a `val`, for one reason: opening a saved project starts a NEW history. The comment
+     * above about a second owner still holds — this is the only owner, and it is replaced only by a
+     * document that deserves no undo stack of its own.
+     */
+    private var history = UndoStack(
         initial = EditDocument(id = UNTITLED_ID, name = UNTITLED_NAME),
     )
 
+    /**
+     * The name this project is saved under, or null while it has never been saved.
+     *
+     * Held here rather than read from the document, because "has this been named yet?" is not a question
+     * the document can answer: it starts with a placeholder name, and a placeholder is not a name.
+     */
+    private var projectName: String? = null
+
     private val _state = MutableStateFlow(history.toUiState(stage = Stage.Cut))
+
+    /**
+     * Reopens the project the user was last in (the device pass's "my clip disappeared").
+     *
+     * `init` rather than a screen-side call, so every entry point to the editor — back navigation, process
+     * recreation, a future deep link — gets the same behaviour without remembering to ask for it. A fresh
+     * history is correct here for the same reason the name is: a project the user has just opened has
+     * nothing to undo, and inheriting the previous session's stack would let them undo an edit they never
+     * made.
+     */
+    init {
+        viewModelScope.launch(io) {
+            val saved = projects.latest() ?: return@launch
+            history = UndoStack(initial = saved.document)
+            projectName = saved.name
+            logger.d(TAG, "reopened ${saved.name}: ${saved.document.clips.size} clip(s)")
+            publish()
+        }
+    }
 
     /** The single source of truth the UI renders. */
     val state: StateFlow<EditorUiState> = _state.asStateFlow()
@@ -115,7 +148,16 @@ class EditorViewModel @Inject constructor(
 
             is EditorIntent.ApplyCut -> applyCut(intent.tool)
 
-            is EditorIntent.ApplyReorder -> applyReorder(intent.clipId, intent.toIndex)
+            is EditorIntent.ApplyReorder -> {
+                // Inlined rather than a one-call-site private function: detekt's function-count limit is
+                // what surfaced it, and a name with no logic behind it is a name a reader follows for
+                // nothing.
+                logger.d(TAG, "reorder ${intent.clipId} -> ${intent.toIndex}")
+                history.execute(ReorderClip(clipId = intent.clipId, toIndex = intent.toIndex))
+                _state.value = _state.value.copy(selection = Selection.Clip(intent.clipId))
+                autosave()
+                publish()
+            }
 
             is EditorIntent.BeginAdjust -> beginAdjust(intent.clipId, intent.adjustment)
             is EditorIntent.UpdateAdjust -> updateAdjust(intent.value)
@@ -163,6 +205,7 @@ class EditorViewModel @Inject constructor(
     private fun endGesture() {
         if (_state.value.tool is ToolState.Idle) return
         history.commit()
+        autosave()
         _state.value = _state.value.copy(tool = ToolState.Idle)
         publish()
     }
@@ -185,13 +228,6 @@ class EditorViewModel @Inject constructor(
      * — and the marker the user dragged to came from the same arithmetic the command will apply, which
      * is what stops the clip landing somewhere they did not point at.
      */
-    private fun applyReorder(clipId: String, toIndex: Int) {
-        logger.d(TAG, "reorder $clipId -> $toIndex")
-        history.execute(ReorderClip(clipId = clipId, toIndex = toIndex))
-        _state.value = _state.value.copy(selection = Selection.Clip(clipId))
-        publish()
-    }
-
     /**
      * View changes: stage, playhead, selection, history navigation.
      *
@@ -213,12 +249,14 @@ class EditorViewModel @Inject constructor(
             EditorIntent.Undo -> {
                 logger.d(TAG, "undo")
                 history.undo()
+                autosave()
                 publish()
             }
 
             EditorIntent.Redo -> {
                 logger.d(TAG, "redo")
                 history.redo()
+                autosave()
                 publish()
             }
 
@@ -272,6 +310,7 @@ class EditorViewModel @Inject constructor(
         }
         logger.d(TAG, "cut ${tool.name.lowercase()}")
         history.execute(command)
+        autosave()
         publish()
     }
 
@@ -351,7 +390,7 @@ class EditorViewModel @Inject constructor(
      * that no composable needs to know how the object graph is wired.
      */
     suspend fun timelineThumbnail(sourceId: String, uri: String, positionUs: Long): ImageBitmap? =
-        thumbnails.image(sourceId, uri, positionUs)
+        images.timelineThumbnail(sourceId, uri, positionUs)
 
     /**
      * The frame the preview shows at the playhead (FR-2's "correct preview").
@@ -362,7 +401,39 @@ class EditorViewModel @Inject constructor(
      * and direction included — rather than the frame at the playhead's own time.
      */
     suspend fun previewFrame(uri: String, positionUs: Long): ImageBitmap? =
-        previewFrames.frame(uri, positionUs)?.asImageBitmap()
+        images.previewFrame(uri, positionUs)
+
+    /**
+     * Writes the working project, so leaving the screen does not throw the user's edits away.
+     *
+     * ### When this is called, and why not on every state change
+     *
+     * Only from the paths that CHANGE THE DOCUMENT — an import, a cut, a reorder, the commit of a
+     * gesture, an undo. A save on every `publish()` would also fire for a moved playhead or a changed
+     * stage, which are view state: writing the user's project to disk because they scrolled the timeline
+     * is work nobody asked for, on a disk that has to last.
+     *
+     * Fire-and-forget on [io], deliberately: the UI must not wait for a file write to redraw. A save that
+     * fails is logged rather than surfaced, because the alternative — an error dialog over an edit the
+     * user has already made — is worse than losing the autosave and telling them the next time they open
+     * the project (Phase 4.7's job to make that visible).
+     */
+    private fun autosave() {
+        val document = history.current
+        val name = projectName ?: return
+        viewModelScope.launch(io) {
+            runCatching {
+                projects.save(
+                    SavedProject(
+                        id = document.id,
+                        name = name,
+                        document = document,
+                        updatedAtMs = System.currentTimeMillis(),
+                    ),
+                )
+            }.onFailure { failure -> logger.d(TAG, "autosave failed: ${failure.message}") }
+        }
+    }
 
     /**
      * Reads, assesses and appends (FR-1.1–1.5).
@@ -393,13 +464,34 @@ class EditorViewModel @Inject constructor(
             )
 
             if (plan.hasImports) {
-                history.execute(CompoundCommand(IMPORT_LABEL, plan.commands))
+                // The project is NAMED at its first import, and the rename rides inside the import's own
+                // command list: one act, one undoable entry, one label the user recognises. Naming it when
+                // the screen opened would name a project the user might never make, and the numbering
+                // exists to avoid colliding with projects that DO exist.
+                val name = if (projectName == null) {
+                    nextUntitledName(
+                        projects.savedNames(),
+                    )
+                } else {
+                    null
+                }
+                val commands = buildList {
+                    name?.let { add(RenameDocument(it)) }
+                    addAll(plan.commands)
+                }
+
+                history.execute(CompoundCommand(IMPORT_LABEL, commands))
+                if (name != null) {
+                    projectName = name
+                    logger.d(TAG, "project named $name")
+                }
                 // The clip just imported becomes the SELECTED one. After an import the user's next act is
                 // almost always about the clip they added, and the timeline's indicator is what answers
                 // "which one am I working on?" — the device pass asked for exactly that.
                 history.current.clips.lastOrNull()?.let { appended ->
                     _state.value = _state.value.copy(selection = Selection.Clip(appended.id))
                 }
+                autosave()
             }
 
             val report = ImportReport(

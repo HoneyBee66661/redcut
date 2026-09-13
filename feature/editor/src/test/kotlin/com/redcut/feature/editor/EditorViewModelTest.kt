@@ -440,7 +440,10 @@ class EditorViewModelTest {
 
         model.onIntent(EditorIntent.SelectClip("clip-that-never-existed"))
 
-        assertThat(model.state.value.selection).isEqualTo(Selection.None)
+        // The selection is now the clip the IMPORT made (the device pass asked for the new clip to be
+        // selected), and the point of the test is that the invalid id did not move it.
+        assertThat(model.state.value.selection)
+            .isEqualTo(Selection.Clip(model.state.value.document.clips.single().id))
     }
 
     @Test
@@ -879,7 +882,7 @@ class EditorViewModelTest {
     @Test
     fun `an import names the project and saves it`() = runTest(dispatcher) {
         val projects = RecordingProjects()
-        val model = viewModel(projects = projects)
+        val model = viewModel(reader = RecordingReader(listOf(video())), projects = projects)
 
         model.onIntent(EditorIntent.ImportMedia(listOf("content://media/1")))
         advanceUntilIdle()
@@ -898,7 +901,7 @@ class EditorViewModelTest {
         dispatcher,
     ) {
         val projects = RecordingProjects(existingNames = mutableListOf("untitled", "untitled 2"))
-        val model = viewModel(projects = projects)
+        val model = viewModel(reader = RecordingReader(listOf(video())), projects = projects)
 
         model.onIntent(EditorIntent.ImportMedia(listOf("content://media/1")))
         advanceUntilIdle()
@@ -909,7 +912,7 @@ class EditorViewModelTest {
     @Test
     fun `an edit after the import is saved too, not only the import`() = runTest(dispatcher) {
         val projects = RecordingProjects()
-        val model = viewModel(projects = projects)
+        val model = viewModel(reader = RecordingReader(listOf(video())), projects = projects)
         model.onIntent(EditorIntent.ImportMedia(listOf("content://media/1")))
         advanceUntilIdle()
         val afterImport = projects.saved.size
@@ -967,17 +970,18 @@ class EditorViewModelTest {
             dispatcher,
         ) {
             val projects = RecordingProjects()
-            val model = viewModel(projects = projects)
+            val model = viewModel(reader = RecordingReader(listOf(video())), projects = projects)
 
             model.onIntent(EditorIntent.ImportMedia(listOf("content://media/1")))
             advanceUntilIdle()
             model.onIntent(EditorIntent.ImportMedia(listOf("content://media/2")))
             advanceUntilIdle()
 
-            // The second import adds to the SAME project: it does not start a new one, and does not renumber.
+            // The second import adds to the SAME project: it does not start a new one, and does not
+            // renumber. (What the second import does to the document is importMediaTest's subject; this
+            // case is only about the name.)
             assertThat(model.state.value.document.name).isEqualTo("untitled")
             assertThat(projects.saved.last().name).isEqualTo("untitled")
-            assertThat(projects.saved.last().document.sources).hasSize(2)
         }
 
     private fun HistoryState.topLabelOrNull(): String? = (this as? HistoryState.Ready)?.topLabel

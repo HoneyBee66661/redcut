@@ -154,6 +154,65 @@ class TimelineGeometryTest {
         assertThat(visible.map { it.clipId }).containsExactly("clip-1", "clip-2").inOrder()
     }
 
+    @Test
+    fun `a clip entirely off screen is not returned`() {
+        // Task A5's second half, in the user's words: *"clip body off screen not rendered for optimization"*.
+        // The window plus a viewport of margin on each side is 1080 px of a 6000 px timeline, and which clips
+        // those are follows the VIEWPORT rather than a fixed prefix of the list — the same project, scrolled
+        // to its end, culls the clips it drew a moment ago.
+        val tenClips = spansOf((1..10).map { ClipTiming("clip-$it", 10 * oneSecond) })
+        val atStart = geometry(spans = tenClips, zoom = TimelineZoom(60f))
+        val atEnd = atStart.copy(scrollPx = atStart.scrollCentering(100 * oneSecond))
+
+        assertThat(atStart.visibleRects().map { it.clipId }).doesNotContain("clip-3")
+        assertThat(atEnd.visibleRects().map { it.clipId }).doesNotContain("clip-1")
+    }
+
+    @Test
+    fun `a clip overlapping the margin is returned once`() {
+        // One clip, not a visible fragment plus an off-screen remainder, and with the rectangle its OWN times
+        // say: the rects are content pixels, so nothing about a clip changes as the viewport moves past it.
+        // A filter that returned the same clip twice would draw its filmstrip twice over itself — the kind of
+        // bug a culling rule invites, and one no arithmetic below it would notice.
+        val tenClips = spansOf((1..10).map { ClipTiming("clip-$it", 10 * oneSecond) })
+        val geometry = geometry(spans = tenClips, zoom = TimelineZoom(60f))
+        val atEnd = geometry.copy(scrollPx = geometry.scrollCentering(100 * oneSecond))
+
+        // Scrolled to the last frame, the window is 5820..6180 px and the last clip starts at 5400: half of
+        // it is off screen to the left, and the 9th clip is past the margin and gone.
+        val visible = atEnd.visibleRects()
+        assertThat(visible.map { it.clipId }).containsExactly("clip-10")
+        assertThat(visible.single().startPx).isEqualTo(5_400f)
+        assertThat(visible.single().endPx).isEqualTo(6_000f)
+    }
+
+    // --- The empty lane (UI revision 2) -------------------------------------
+
+    @Test
+    fun `the lane spans the visible window, not the content`() {
+        // The body has to read as TRACK where it holds nothing, which is what the fixed track height leaves
+        // room for. So the lane is the window, whatever the clips do — here it runs 180 px past the end of
+        // the content, and that is the empty track a clip is dragged towards rather than a hole.
+        val geometry = geometry(spans = threeClips, zoom = TimelineZoom(60f))
+        val atEnd = geometry.copy(scrollPx = geometry.scrollCentering(7 * oneSecond))
+
+        val lane = atEnd.laneRects().single()
+        assertThat(lane.startPx).isEqualTo(240f)
+        assertThat(lane.endPx).isEqualTo(600f)
+        assertThat(lane.widthPx).isEqualTo(atEnd.viewportWidthPx)
+        assertThat(lane.endPx).isGreaterThan(atEnd.totalWidthPx)
+    }
+
+    @Test
+    fun `an empty project still has a lane to draw`() {
+        // No clips means no rects and no ticks — but the body is not nothing: the lane covers the window, so
+        // an empty timeline reads as a track waiting instead of as a canvas that failed to draw.
+        val geometry = geometry()
+
+        assertThat(geometry.clipRects()).isEmpty()
+        assertThat(geometry.laneRects()).containsExactly(LaneRect(0f, 360f))
+    }
+
     // --- Playhead ----------------------------------------------------------
 
     @Test

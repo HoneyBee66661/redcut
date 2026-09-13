@@ -4,16 +4,12 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -22,7 +18,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.platform.LocalContext
@@ -30,7 +25,6 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.redcut.domain.document.CutAvailability
 import com.redcut.domain.document.CutTool
-import com.redcut.domain.document.FrameStep
 import com.redcut.domain.document.availabilityFor
 import com.redcut.feature.editor.timeline.TimelineCanvas
 
@@ -101,34 +95,6 @@ fun EditorRoute(
  * Export is disabled on an empty document, and that is the only enablement rule here: it is a fact about
  * the DOCUMENT, while every other control's rule lives with the thing it acts on.
  */
-@Composable
-private fun EditorToolbar(
-    state: EditorUiState,
-    onImportClick: () -> Unit,
-    onExport: () -> Unit,
-    onBack: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 8.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        TextButton(onClick = onBack) { Text("Projects") }
-        Text(
-            text = state.document.name,
-            style = MaterialTheme.typography.titleSmall,
-            modifier = Modifier.padding(start = 8.dp),
-        )
-        Box(modifier = Modifier.weight(1f))
-        // Import sits before Export because that is the order of the user's work: a document with no
-        // clips has nothing to export, and the button says so.
-        TextButton(onClick = onImportClick) { Text("Import") }
-        TextButton(onClick = onExport, enabled = state.document.clips.isNotEmpty()) {
-            Text("Export")
-        }
-    }
-}
 
 /**
  * FR-1.4's report, as a one-line toast.
@@ -170,13 +136,33 @@ internal fun EditorScreen(
     onThumbnail: suspend (sourceId: String, uri: String, positionUs: Long) -> ImageBitmap?,
     onPreviewFrame: suspend (uri: String, positionUs: Long) -> ImageBitmap?,
 ) {
+    // One Column, four weights — see EditorLayout.kt for the diagram and why the percentages are weights.
     Column(modifier = Modifier.fillMaxSize()) {
-        EditorToolbar(
+        PreviewHalf(
             state = state,
             onImportClick = onImportClick,
             onExport = onExport,
             onBack = onBack,
+            onPreviewFrame = onPreviewFrame,
+            onThumbnail = onThumbnail,
         )
+
+        TimelineControls(state = state, onIntent = onIntent)
+
+        // The tracks, and the red line the revision fixed at the centre of them. The canvas fills its
+        // slice exactly: its own layout is the ruler plus the clip track, and a fixed height was the old
+        // layout's answer to a question the slices now answer.
+        TimelineCanvas(
+            document = state.document,
+            playheadUs = state.playheadUs,
+            selection = state.selection,
+            tool = state.tool,
+            onIntent = onIntent,
+            onThumbnail = onThumbnail,
+            modifier = Modifier.fillMaxWidth().weight(TRACKS_SLICE),
+        )
+
+        BottomToolbar(state = state, onIntent = onIntent)
 
         // Only refusals reach the banner; a clean import was toasted by the route and its report cleared.
         state.import
@@ -187,55 +173,6 @@ internal fun EditorScreen(
                     onDismiss = { onIntent(EditorIntent.DismissImport) },
                 )
             }
-
-        TabRow(selectedTabIndex = state.stage.ordinal) {
-            Stage.entries.forEach { stage ->
-                Tab(
-                    selected = stage == state.stage,
-                    onClick = { onIntent(EditorIntent.SelectStage(stage)) },
-                    text = { Text(stage.label) },
-                )
-            }
-        }
-
-        StageBody(state = state, onThumbnail = onThumbnail, onPreviewFrame = onPreviewFrame)
-
-        // The stage's own tools, under its tabs: the Cut tools only make sense while the Cut stage is
-        // open, and a global row of them would be a row of disabled buttons in the other stages.
-        if (state.stage == Stage.Cut) {
-            CutTools(state = state, onIntent = onIntent)
-        }
-
-        // The Edit stage's controls (task 2.1). Shown only in the Edit stage: the Cut tools belong to
-        // cutting, and speed sliders under a cut gesture would be controls for something the user is not
-        // doing. The stage is already the screen's own state, so no new plumbing.
-        if (state.stage == Stage.Edit) {
-            Inspector(state = state, onIntent = onIntent)
-        }
-
-        // Frame-stepping sits with the timeline rather than with the Cut tools: it moves the PLAYHEAD,
-        // so it is useful in every stage, and FR-2.9's whole purpose is to place the playhead exactly
-        // before another tool acts on it.
-        FrameStepButtons(state = state, onIntent = onIntent)
-
-        // The timeline sits between the preview and the history bar, which is the layout §7.1
-        // draws. It is given a fixed height rather than a weight: the preview is what should grow
-        // when the screen does, and a timeline that stretched with the window would show more
-        // empty track rather than more clips.
-        TimelineCanvas(
-            document = state.document,
-            playheadUs = state.playheadUs,
-            selection = state.selection,
-            tool = state.tool,
-            onIntent = onIntent,
-            onThumbnail = onThumbnail,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(TIMELINE_HEIGHT_DP.dp)
-                .padding(horizontal = 8.dp),
-        )
-
-        HistoryBar(history = state.history, onIntent = onIntent)
     }
 }
 
@@ -251,7 +188,7 @@ internal fun EditorScreen(
  * one tool's reason under a row of four would be worse than printing none.
  */
 @Composable
-private fun CutTools(state: EditorUiState, onIntent: (EditorIntent) -> Unit) {
+internal fun CutTools(state: EditorUiState, onIntent: (EditorIntent) -> Unit) {
     val rows = remember(state.document, state.playheadUs) {
         CUT_TOOLS.map { tool -> tool to state.document.availabilityFor(tool, state.playheadUs) }
     }
@@ -273,34 +210,6 @@ private fun CutTools(state: EditorUiState, onIntent: (EditorIntent) -> Unit) {
         }
         if (allBlocked && reasons.size == 1) {
             Text(text = reasons.first(), style = MaterialTheme.typography.bodySmall)
-        }
-    }
-}
-
-/**
- * FR-2.9's frame-step buttons.
- *
- * Always visible, unlike the Cut tools: whoever needs a frame-accurate playhead needs these, and the
- * millisecond readout between them is what makes the step visible — one frame is 33 ms, which is a
- * third of a blink, and a button whose effect you cannot see reads as a button that did nothing.
- */
-@Composable
-private fun FrameStepButtons(state: EditorUiState, onIntent: (EditorIntent) -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        TextButton(onClick = { onIntent(EditorIntent.StepPlayhead(FrameStep.BACK)) }) {
-            Text("◀ frame", style = MaterialTheme.typography.labelLarge)
-        }
-        Text(
-            text = "${state.playheadUs / 1_000} ms",
-            style = MaterialTheme.typography.labelMedium,
-        )
-        TextButton(onClick = { onIntent(EditorIntent.StepPlayhead(FrameStep.FORWARD)) }) {
-            Text("frame ▶", style = MaterialTheme.typography.labelLarge)
         }
     }
 }
@@ -333,37 +242,6 @@ private fun CutTool.label(): String = when (this) {
  * buttons are driven by the flags rather than by `undoDepth > 0`: the UI must not be able
  * to disagree with the stack about whether an undo is available.
  */
-@Composable
-private fun HistoryBar(history: HistoryState, onIntent: (EditorIntent) -> Unit) {
-    val (canUndo, canRedo, label) = when (history) {
-        is HistoryState.Ready -> Triple(history.canUndo, history.canRedo, history.topLabel)
-        HistoryState.Busy -> Triple(false, false, null)
-    }
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 8.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        TextButton(onClick = { onIntent(EditorIntent.Undo) }, enabled = canUndo) {
-            Text(label?.let { "Undo $it" } ?: "Undo")
-        }
-        TextButton(onClick = { onIntent(EditorIntent.Redo) }, enabled = canRedo) {
-            Text("Redo")
-        }
-    }
-}
-
-/**
- * The timeline's height.
- *
- * Fixed rather than a weight: the preview is what should grow when the window does. A timeline
- * that stretched would show more empty track instead of more clips, which is the opposite of what
- * a taller screen is for.
- */
-private const val TIMELINE_HEIGHT_DP = 96f
-
 /**
  * What the last import did (FR-1.2, FR-1.4).
  *

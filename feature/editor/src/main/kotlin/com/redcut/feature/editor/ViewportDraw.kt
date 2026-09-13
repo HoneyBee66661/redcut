@@ -43,10 +43,7 @@ internal data class ViewportPaint(
 /**
  * Draws the viewport rectangle overlay and centre snap lines over the preview area.
  */
-internal fun DrawScope.drawViewportOverlay(
-    rect: ViewportRect,
-    paint: ViewportPaint,
-) {
+internal fun DrawScope.drawViewportOverlay(rect: ViewportRect, paint: ViewportPaint) {
     val frameWidth = size.width
     val frameHeight = size.height
     if (frameWidth <= 0f || frameHeight <= 0f) return

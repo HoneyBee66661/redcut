@@ -9,6 +9,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import com.redcut.core.common.di.MainDispatcher
 import com.redcut.core.common.logging.RedcutLogger
+import com.redcut.core.media.MediaResourceBroker
 import com.redcut.domain.render.RenderGraph
 import kotlinx.coroutines.CoroutineDispatcher
 
@@ -45,9 +46,10 @@ import kotlinx.coroutines.CoroutineDispatcher
 @OptIn(UnstableApi::class)
 internal class ExoPlayerRenderer(
     private val context: Context,
+    broker: MediaResourceBroker,
     @param:MainDispatcher main: CoroutineDispatcher,
     logger: RedcutLogger,
-) : Media3PreviewRenderer(main, logger) {
+) : Media3PreviewRenderer(broker = broker, main = main, logger = logger) {
 
     /** The playlist, in timeline order. Empty until a graph is attached. */
     private var windows: List<PlaylistWindow> = emptyList()

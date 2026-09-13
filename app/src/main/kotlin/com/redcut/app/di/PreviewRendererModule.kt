@@ -3,6 +3,7 @@ package com.redcut.app.di
 import android.content.Context
 import com.redcut.core.common.di.MainDispatcher
 import com.redcut.core.common.logging.RedcutLogger
+import com.redcut.core.media.MediaResourceBroker
 import com.redcut.core.media.PreviewRenderer
 import com.redcut.engine.media3.Media3PreviewRenderers
 import dagger.Module
@@ -36,14 +37,24 @@ import kotlinx.coroutines.CoroutineDispatcher
 @InstallIn(ViewModelComponent::class)
 internal object PreviewRendererModule {
 
+    /**
+     * The broker is passed in rather than reached for, because §9.1 makes it the only way a Media3
+     * player may come into existence: *"Nothing in the app may construct a `MediaCodec` (or a Media3
+     * `Transformer`/`CompositionPlayer`) except through the broker."* The broker itself is a singleton
+     * of the `SingletonComponent` — exactly one, for the whole app — while the renderer that takes a
+     * slot from it is per-screen; that is the split §9.1 asks for, and it is why the two have different
+     * scopes here.
+     */
     @Provides
     @ViewModelScoped
     fun providePreviewRenderer(
         @ApplicationContext context: Context,
+        broker: MediaResourceBroker,
         @MainDispatcher main: CoroutineDispatcher,
         logger: RedcutLogger,
     ): PreviewRenderer = Media3PreviewRenderers.create(
         context = context,
+        broker = broker,
         main = main,
         logger = logger,
     )

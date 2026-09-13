@@ -100,6 +100,14 @@ class EditorViewModelTest {
      * Records what was saved as well as holding what to reopen, because the two questions this suite asks
      * about autosave are "was it written?" and "what was it called?" — and a fake that only stored the
      * last project could not answer the second.
+     *
+     * [reopen] is the seam for "a project already existed when this session started". With
+     * nothing seeded, `latest()` answers the last SAVE, because that is the port's own
+     * promise — "the most recently saved project, or null when there is none" — and what the
+     * device does: `JsonProjectStore` writes a pointer to the last saved id and reads it back.
+     * A fake that recorded saves but reported nothing to reopen would let a test claim a reload
+     * that never happened: the session would load an empty document instead of the project it
+     * was just editing.
      */
     private class RecordingProjects(
         private val reopen: SavedProject? = null,
@@ -113,7 +121,7 @@ class EditorViewModelTest {
             if (project.name !in existingNames) existingNames += project.name
         }
 
-        override suspend fun latest(): SavedProject? = reopen
+        override suspend fun latest(): SavedProject? = reopen ?: saved.lastOrNull()
 
         override suspend fun summaries(): List<ProjectSummary> = saved.map { it.summary() }
 
@@ -1003,13 +1011,23 @@ class EditorViewModelTest {
         advanceUntilIdle()
 
         val transform = model.state.value.document.clips.single().transform
-        assertThat(transform.cropLeft).isEqualTo(0.35f)
-        assertThat(transform.cropRight).isEqualTo(0.85f)
-        assertThat(transform.cropTop).isEqualTo(0.15f)
-        assertThat(transform.cropBottom).isEqualTo(0.65f)
+        // The crop edges are DERIVED, so an exact compare is the wrong promise for them:
+        // `toTransformSpec` builds left as centerX - (1 / zoom) / 2, and 0.6f - 0.25f is
+        // 0.35000002f — one float bit off the 0.35f literal. What the user is owed is "the crop
+        // is where the pinch put it", not "the last bit matches a decimal I typed", so the edges
+        // get a tolerance. 1e-5f normalised is ~0.01 px on a 1080 px frame: far below anything
+        // visible, and ~300x the ~3e-8 this derivation actually drifts, while a real defect — a
+        // half-width never halved, a wrong centre or zoom — moves an edge well past it. Same
+        // bound and same reasoning as ViewportRectTest's transform round trip.
+        assertThat(transform.cropLeft).isWithin(1e-5f).of(0.35f)
+        assertThat(transform.cropRight).isWithin(1e-5f).of(0.85f)
+        assertThat(transform.cropTop).isWithin(1e-5f).of(0.15f)
+        assertThat(transform.cropBottom).isWithin(1e-5f).of(0.65f)
         assertThat(projects.saved).isNotEmpty()
 
-        // Undo restores the previous transform
+        // Undo restores the transform the clip was imported with: TransformSpec's defaults, read
+        // back from the snapshot rather than recomputed, so 0f and 1f are STORED values and exact
+        // equality is the right promise for them.
         model.onIntent(EditorIntent.Undo)
         val reverted = model.state.value.document.clips.single().transform
         assertThat(reverted.cropLeft).isEqualTo(0f)
@@ -1044,12 +1062,23 @@ class EditorViewModelTest {
             advanceUntilIdle()
 
             val expectedTransform = model.state.value.document.clips.single().transform
+            // The autosave has to have carried the transform to the store before a reload can
+            // mean anything: asserted here so a store that never got it fails as itself, rather
+            // than as an empty clip list below — the shape of the bug this test exists for (a
+            // session that reopened nothing, and lost the edit).
+            assertThat(projects.saved.last().document.clips.single().transform)
+                .isEqualTo(expectedTransform)
 
-            // Reopening the project in a new ViewModel session reloads the clip's persisted transform
+            // A second session over the SAME store reopens the last saved project, because
+            // `latest()` answers the last save. That is the path the device takes: autosave
+            // wrote it, reopening reads it back.
             val reloaded = viewModel(reader = RecordingReader(listOf(video())), projects = projects)
             advanceUntilIdle()
 
+            assertThat(reloaded.state.value.document.clips).hasSize(1)
             val reloadedClip = reloaded.state.value.document.clips.single()
+            // Exact here, unlike the crop edges above: the transform travels through the store as a
+            // stored value and is never recomputed, so no arithmetic can move its last bit.
             assertThat(reloadedClip.transform).isEqualTo(expectedTransform)
         }
 

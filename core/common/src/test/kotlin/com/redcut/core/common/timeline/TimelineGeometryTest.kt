@@ -562,6 +562,58 @@ class TimelineGeometryTest {
         assertThat(geometry().rulerTicks()).isEmpty()
     }
 
+    // --- The ruler on the clip's top edge (UI revision 2) -------------------
+
+    @Test
+    fun `a clip's top ticks are the ruler's ticks, filtered to the clip`() {
+        // The user: "beri ruler indikator waktu juga di top clip untuk memudahkan cut ops dan keyframing".
+        // Three clips at 60 px/s against a 5 s interval: the ruler draws 0 s and 5 s, and each of them lands
+        // on whichever clip covers it — 0 s on "a", 5 s (300 px in) on "b".
+        val geometry = geometry(spans = threeClips, zoom = TimelineZoom(60f))
+        val ticks = geometry.rulerTicks()
+        val rects = geometry.clipRects()
+
+        assertThat(ticks).containsExactly(0L, 5_000_000L).inOrder()
+        assertThat(geometry.ticksForClipTop(ticks, rects[0])).containsExactly(0L)
+        assertThat(geometry.ticksForClipTop(ticks, rects[1])).containsExactly(5_000_000L)
+        // Clip "c" (6 s to 7 s) holds none, and that is a fact about the ladder rather than a gap to fill:
+        // at this zoom the marks are five seconds apart, so nothing is invented to give every clip one.
+        assertThat(geometry.ticksForClipTop(ticks, rects[2])).isEmpty()
+    }
+
+    @Test
+    fun `a clip's top ticks never invent a time the ruler does not show`() {
+        // The invariant that says there is ONE ladder: everything drawn on a clip is a tick of the ruler's,
+        // and every tick whose time is inside a clip is drawn on it — so the strip above the body and the
+        // marks on the clip cannot disagree about where a time is, at any zoom.
+        val geometry = geometry(spans = threeClips, zoom = TimelineZoom(60f))
+        val ticks = geometry.rulerTicks()
+        val onClips = geometry.clipRects().flatMap { geometry.ticksForClipTop(ticks, it) }.toSet()
+
+        assertThat(ticks).containsAtLeastElementsIn(onClips)
+        assertThat(onClips).containsExactly(0L, 5_000_000L)
+    }
+
+    @Test
+    fun `a clip's top ticks tighten with the ruler when the zoom does`() {
+        // The consequence of reusing the selection rather than re-deriving it: zoomed to the tight end the
+        // interval is half a second, so the same 4-second clip carries more marks than it did at the default.
+        // A ladder of the clip's own would have had to be told to change; this one cannot get it wrong.
+        val atDefault = geometry(spans = threeClips, zoom = TimelineZoom(60f))
+        val zoomedIn = geometry(spans = threeClips, zoom = TimelineZoom(480f))
+        val marksAtDefault = atDefault.ticksForClipTop(
+            ticks = atDefault.rulerTicks(),
+            rect = atDefault.clipRects().first(),
+        )
+        val marksZoomedIn = zoomedIn.ticksForClipTop(
+            ticks = zoomedIn.rulerTicks(),
+            rect = zoomedIn.clipRects().first(),
+        )
+
+        assertThat(marksAtDefault).hasSize(1)
+        assertThat(marksZoomedIn.size).isGreaterThan(marksAtDefault.size)
+    }
+
     // --- The playhead's clip ----------------------------------------------
 
     @Test

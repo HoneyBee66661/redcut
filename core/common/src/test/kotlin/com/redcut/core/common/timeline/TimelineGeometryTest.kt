@@ -127,21 +127,20 @@ class TimelineGeometryTest {
     // --- Scroll ------------------------------------------------------------
 
     @Test
-    fun `scroll is held inside what the content can scroll to`() {
+    fun `the scroll range is a fact about content versus viewport`() {
+        // `maxScrollPx` survives the fixed-centre model as an answer to "how much content is off screen",
+        // which is what a minimap or a "fit to view" button would ask. Nothing positions the viewport with
+        // it any more: the viewport follows the playhead, and `scrollCentering` says where that is.
         val geometry = geometry(spans = threeClips)
 
         assertThat(geometry.maxScrollPx).isWithin(0.001f).of(84f)
-        assertThat(geometry.scrollClampedTo(-50f)).isEqualTo(0f)
-        assertThat(geometry.scrollClampedTo(1_000f)).isWithin(0.001f).of(84f)
-        assertThat(geometry.scrollClampedTo(40f)).isWithin(0.001f).of(40f)
     }
 
     @Test
-    fun `content shorter than the viewport does not scroll at all`() {
+    fun `content shorter than the viewport has nothing off screen`() {
         val geometry = geometry(viewportWidthPx = 1_000f, spans = threeClips)
 
         assertThat(geometry.maxScrollPx).isEqualTo(0f)
-        assertThat(geometry.scrollClampedTo(200f)).isEqualTo(0f)
     }
 
     @Test
@@ -291,32 +290,47 @@ class TimelineGeometryTest {
     }
 
     @Test
-    fun `the end cannot be scrolled past, so the line drifts there and not before`() {
-        val geometry =
-            geometry(spans = listOf(ClipSpan("a", 0, 10 * oneSecond)), zoom = TimelineZoom(60f))
+    fun `a playhead at the start sits at the centre, not at the left edge`() {
+        // THE device bug, pinned. With the clamp the line rendered at x = 0 for a new project, because a
+        // timeline shorter than the viewport has no scroll range to be centred by. The user's words:
+        // "apakah redline playhead secara default ada di left mentok layar? harusnya center horizontal fixed".
+        val geometry = geometry(
+            spans = listOf(ClipSpan("a", 0, 10 * oneSecond)),
+            zoom = TimelineZoom(60f),
+        )
 
-        // At 0 the viewport is already at its start; the line sits where the first frame is, which is the
-        // viewport's left edge, not its centre.
-        assertThat(geometry.scrollCentering(0)).isEqualTo(0f)
-        assertThat(geometry.centredPlayheadPx(0)).isEqualTo(0f)
-
-        // Past 7.5 s the scroll is at its maximum, so the line moves right of centre.
-        val latest = geometry.maxScrollPx
-        assertThat(geometry.scrollCentering(10 * oneSecond)).isEqualTo(latest)
-        assertThat(geometry.centredPlayheadPx(10 * oneSecond)).isEqualTo(600f - latest)
+        // 0 s is 0 px in, so centring it means scrolling half a viewport to the LEFT: empty space before the
+        // first frame, which is what a fixed-centre line requires.
+        assertThat(geometry.scrollCentering(0)).isEqualTo(-180f)
+        assertThat(geometry.centredPlayheadPx(0)).isEqualTo(180f)
     }
 
     @Test
-    fun `a timeline shorter than the viewport never scrolls and the line tracks the time`() {
-        // 1 s at 60 px/s = 60 px inside a 300 px viewport: nothing to scroll, so the playhead's screen x is
-        // its own position. This is the case a hard-coded centre would get wrong — the line would sit in
-        // the middle while the clip is at the left.
-        val geometry =
-            geometry(spans = listOf(ClipSpan("a", 0, oneSecond)), zoom = TimelineZoom(60f))
+    fun `a timeline shorter than the viewport is centred too`() {
+        // The same bug in its worst form: 1 s of content (60 px) in a 360 px viewport. There is no scrolling
+        // to be had at all, and the old code therefore drew the line wherever the time fell.
+        val geometry = geometry(
+            spans = listOf(ClipSpan("a", 0, oneSecond)),
+            zoom = TimelineZoom(60f),
+        )
 
         assertThat(geometry.maxScrollPx).isEqualTo(0f)
-        assertThat(geometry.scrollCentering(oneSecond / 2)).isEqualTo(0f)
-        assertThat(geometry.centredPlayheadPx(oneSecond / 2)).isEqualTo(30f)
+        assertThat(geometry.scrollCentering(oneSecond / 2)).isEqualTo(-150f)
+        assertThat(geometry.centredPlayheadPx(oneSecond / 2)).isEqualTo(180f)
+        assertThat(geometry.centredPlayheadPx(0)).isEqualTo(180f)
+    }
+
+    @Test
+    fun `the line stays at the centre at the end of the timeline too`() {
+        val geometry = geometry(
+            spans = listOf(ClipSpan("a", 0, 10 * oneSecond)),
+            zoom = TimelineZoom(60f),
+        )
+
+        // 600 px of content, so the last moment is centred by scrolling to 420 — and the empty space is now
+        // AFTER the last frame rather than the line drifting right to meet the content's edge.
+        assertThat(geometry.scrollCentering(10 * oneSecond)).isEqualTo(420f)
+        assertThat(geometry.centredPlayheadPx(10 * oneSecond)).isEqualTo(180f)
     }
 
     @Test
@@ -369,38 +383,28 @@ class TimelineGeometryTest {
     // --- Zoom model (pinch) ------------------------------------------------
 
     @Test
-    fun `zooming keeps the moment under the fingers in place`() {
-        // The difference between a pinch that feels like the timeline is a physical object and one
-        // that feels like it is sliding away: the frame under the gesture must not move.
+    fun `a zoom cannot move the playhead, because the scroll is derived from it`() {
+        // The anchor arithmetic is gone with the fixed-centre model, and this test is what replaces it:
+        // there is no point that "stays still" during a zoom, because the playhead is the only fixed thing
+        // on the screen and the scroll is computed from it. Zooming changes how many pixels a second
+        // occupies, and nothing else.
+        val playhead = 3 * oneSecond
         val before = geometry(spans = threeClips, zoom = TimelineZoom(60f))
-        val anchorScreenX = 180f
-        val timeUnderTheFingers = before.usFor(before.contentPxFor(anchorScreenX))
+        val after = before.copy(zoom = TimelineZoom(120f))
 
-        val after = before.zoomedAround(anchorScreenX, TimelineZoom(120f))
-
-        assertThat(after.zoom.pixelsPerSecond).isEqualTo(120f)
-        assertThat(after.usFor(after.contentPxFor(anchorScreenX))).isEqualTo(timeUnderTheFingers)
+        assertThat(after.centredPlayheadPx(playhead)).isEqualTo(before.centredPlayheadPx(playhead))
+        assertThat(after.scrollCentering(playhead)).isNotEqualTo(before.scrollCentering(playhead))
     }
 
     @Test
-    fun `zooming out about the left edge puts the start of the timeline back at the edge`() {
-        val before = geometry(spans = threeClips, scrollPx = 60f)
+    fun `a negative scroll still reports the rects that are on screen`() {
+        // A centred playhead means empty space at the start of a timeline, and empty space must not turn
+        // into an empty draw pass: the first clip is half a viewport to the RIGHT and has to be drawn.
+        val geometry = geometry(spans = threeClips, scrollPx = -180f)
 
-        val after = before.zoomedAround(0f, TimelineZoom(10f))
-
-        assertThat(after.visibleStartPx).isEqualTo(0f)
-    }
-
-    @Test
-    fun `zooming out can leave a scroll offset out of range, and reads clamp it`() {
-        val before = geometry(spans = threeClips, scrollPx = 84f) // scrolled to the end
-
-        // Anchor at the right edge, so zooming out pulls the content leftwards past its own start.
-        val zoomedOut = before.zoomedAround(360f, TimelineZoom(10f))
-
-        assertThat(zoomedOut.scrollPx).isLessThan(0f)
-        assertThat(zoomedOut.visibleStartPx).isEqualTo(0f)
-        assertThat(zoomedOut.visibleRects()).isNotEmpty()
+        assertThat(geometry.visibleRects()).isNotEmpty()
+        assertThat(geometry.visibleRects().first().startPx - geometry.visibleStartPx)
+            .isGreaterThan(0f)
     }
 
     // --- Ruler -------------------------------------------------------------

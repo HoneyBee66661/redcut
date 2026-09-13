@@ -1,12 +1,12 @@
 package com.redcut.app.navigation
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -62,23 +62,29 @@ private fun NativeSeamStrip(modifier: Modifier = Modifier) {
         is NativeStatus.Unavailable -> "native seam unavailable — ${status.reason}"
     }
 
-    NavigationBar(modifier = modifier) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                text = line,
-                style = MaterialTheme.typography.bodySmall,
-                color = if (ready) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.error
-                },
-                textAlign = TextAlign.Center,
-            )
-        }
+    // A thin strip, not a `NavigationBar`.
+    //
+    // It was a full Material bottom bar (~80 dp) carrying one sentence, and a device pass noticed the cost:
+    // in the editor, the app's own bottom toolbar was competing for the bottom of the screen with a debug
+    // line. The check itself has to stay readable — this line IS Phase 0's exit criterion as far as a device
+    // is concerned, since the development host has neither a device nor an emulator — so it keeps its place
+    // and loses its height.
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(vertical = 3.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = line,
+            style = MaterialTheme.typography.labelSmall,
+            color = if (ready) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.error
+            },
+            textAlign = TextAlign.Center,
+        )
     }
 }

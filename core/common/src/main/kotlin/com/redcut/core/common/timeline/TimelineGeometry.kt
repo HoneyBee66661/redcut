@@ -165,9 +165,6 @@ data class TimelineGeometry(
     /** How far the content can be scrolled before its end reaches the viewport's right edge. */
     val maxScrollPx: Float get() = (totalWidthPx - viewportWidthPx).coerceAtLeast(0f)
 
-    /** The scroll position, held inside what the content can actually scroll to. */
-    fun scrollClampedTo(px: Float): Float = px.coerceIn(0f, maxScrollPx)
-
     /**
      * The scroll offset that puts [us] under the horizontal centre of the viewport (UI revision 1).
      *
@@ -179,26 +176,40 @@ data class TimelineGeometry(
      * stop being two things. The scroll is therefore DERIVED from the playhead rather than stored, which is
      * why this returns a value instead of mutating one.
      *
-     * Clamped at both ends, and the clamp is honest rather than a compromise: with no padding the first
-     * and last moments cannot be centred, so [centredPlayheadPx] says where the line actually sits. (Real
-     * editors pad the ends by half a viewport to make the centre unconditionally reachable; that is a
-     * change to [totalWidthPx] and every position in the ruler, so it belongs with the layout work, not
-     * hidden in a scroll calculation.)
+     * ### Not clamped, and the bug that taught us (device pass, after the layout)
+     *
+     * The first version clamped this to the content's scroll range, on the reasoning that a viewport cannot
+     * scroll past its content. On a device that put the line at the LEFT EDGE of the screen for a new
+     * project: a timeline shorter than the viewport has no scroll range at all, so the clamp pinned the
+     * viewport to 0 and the playhead — centred *within the content* — rendered at its own pixel position,
+     * which for a playhead at 0 is the left edge. The user's report was exactly that: "apakah redline
+     * playhead secara default ada di left mentok layar? harusnya center horizontal fixed".
+     *
+     * So there is no clamp, and that is the model rather than a relaxation: a fixed-centre playhead REQUIRES
+     * empty space at both ends, because with an empty project or the first frame under the line, half the
+     * viewport has nothing to show. Negative scroll means empty space before the first frame; scrolling past
+     * the content's end means empty space after the last one. [maxScrollPx] stays as a fact about content
+     * versus viewport, but nothing needs it to position the viewport any more.
      */
-    fun scrollCentering(us: Long): Float = scrollClampedTo(pxFor(us) - viewportWidthPx / 2f)
+    fun scrollCentering(us: Long): Float = pxFor(us) - viewportWidthPx / 2f
 
     /**
-     * The playhead's screen x when the viewport is centred on it: the viewport's centre, unless the
-     * timeline is too short to scroll that far.
+     * The playhead's screen x: the viewport's centre, always.
      *
-     * The line is drawn here rather than at a hard-coded centre so that it stays glued to its own time:
-     * a line that claimed to be the centre while pointing at the wrong frame would be worse than one that
-     * drifts at the ends.
+     * Which is a property of the model, not a coincidence of the arithmetic — [scrollCentering] is defined
+     * as the offset that puts [us] there, so this is the identity that proves it. It is kept as a function
+     * because the Canvas draws the line here and a reader should be able to see the claim rather than
+     * derive it.
      */
     fun centredPlayheadPx(us: Long): Float = pxFor(us) - scrollCentering(us)
 
-    /** Left edge of the visible window in content pixels. */
-    val visibleStartPx: Float get() = scrollClampedTo(scrollPx)
+    /**
+     * Left edge of the visible window in content pixels.
+     *
+     * NOT clamped: see [scrollCentering] for why a negative value is meaningful, and why the scroll is no
+     * longer something a gesture can push out of range.
+     */
+    val visibleStartPx: Float get() = scrollPx
 
     /** Right edge of the visible window in content pixels. */
     val visibleEndPx: Float get() = visibleStartPx + viewportWidthPx
@@ -309,29 +320,6 @@ data class TimelineGeometry(
      */
     private fun ClipRect.edgeReach(): Float =
         minOf(edgeTouchTargetPx, widthPx * EDGE_TARGET_MAX_CLIP_FRACTION)
-
-    /**
-     * The same timeline at a new zoom, with the moment under [anchorScreenX] staying put.
-     *
-     * This is the whole reason pinch-zoom feels right or wrong. Zooming about the viewport's left
-     * edge makes the content slide out from under the user's fingers; zooming about the centroid
-     * of the gesture keeps the frame they are looking at where they are looking. Being pure
-     * arithmetic, it is decided here rather than buried in a gesture callback:
-     *
-     * 1. What time is under the anchor now? ([usFor] on the content position.)
-     * 2. Where does that time land at the new zoom, in content pixels?
-     * 3. Scroll so it lands under the same screen x again.
-     *
-     * The offset is stored as the gesture produced it and clamped when it is READ ([visibleStartPx],
-     * [contentPxFor]) — storing the clamped value instead would make a pinch that briefly goes past
-     * the end of the timeline write the collapsed position down permanently, so the content would
-     * jump when the user pinched back.
-     */
-    fun zoomedAround(anchorScreenX: Float, newZoom: TimelineZoom): TimelineGeometry {
-        val anchorUs = usFor(contentPxFor(anchorScreenX))
-        val anchorAtNewZoomPx = anchorUs / MICROS_PER_SECOND * newZoom.pixelsPerSecond
-        return copy(zoom = newZoom, scrollPx = anchorAtNewZoomPx - anchorScreenX)
-    }
 
     /**
      * Where to draw ruler ticks, in microseconds, inside the visible window.

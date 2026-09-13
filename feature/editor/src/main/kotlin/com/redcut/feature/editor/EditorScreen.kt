@@ -1,6 +1,7 @@
 package com.redcut.feature.editor
 
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
@@ -16,6 +17,7 @@ import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -23,6 +25,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.redcut.domain.document.CutAvailability
@@ -61,6 +64,21 @@ fun EditorRoute(
         viewModel.onIntent(EditorIntent.ImportMedia(uris.map(Uri::toString)))
     }
 
+    // A successful import is MINOR INFORMATION, and the device pass asked for it as a toast rather than
+    // a banner. A REFUSAL is not minor — it says a file the user picked cannot be used, and that needs a
+    // surface they can read twice — so the banner stays for that case and only that case.
+    //
+    // Keyed on the report, so it fires once; the report is cleared immediately after, which is what stops
+    // it firing again on a recomposition or when the user comes back to the screen.
+    val context = LocalContext.current
+    LaunchedEffect(state.import) {
+        val report = state.import ?: return@LaunchedEffect
+        if (report.rejected.isEmpty() && report.importedCount > 0) {
+            Toast.makeText(context, report.toastText(), Toast.LENGTH_SHORT).show()
+            viewModel.onIntent(EditorIntent.DismissImport)
+        }
+    }
+
     EditorScreen(
         state = state,
         onIntent = viewModel::onIntent,
@@ -70,6 +88,58 @@ fun EditorRoute(
         onThumbnail = viewModel::timelineThumbnail,
         onPreviewFrame = viewModel::previewFrame,
     )
+}
+
+/**
+ * The screen's top row: where the user is, what the project is called, and the two actions that are not
+ * about the timeline.
+ *
+ * Extracted when `EditorScreen` reached `detekt`'s function-length limit, and the limit was right again:
+ * the screen is "toolbar, banner, tabs, stage, tools, timeline" as a list of things, and a toolbar drawn
+ * inline makes that list harder to see rather than shorter to read.
+ *
+ * Export is disabled on an empty document, and that is the only enablement rule here: it is a fact about
+ * the DOCUMENT, while every other control's rule lives with the thing it acts on.
+ */
+@Composable
+private fun EditorToolbar(
+    state: EditorUiState,
+    onImportClick: () -> Unit,
+    onExport: () -> Unit,
+    onBack: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        TextButton(onClick = onBack) { Text("Projects") }
+        Text(
+            text = state.document.name,
+            style = MaterialTheme.typography.titleSmall,
+            modifier = Modifier.padding(start = 8.dp),
+        )
+        Box(modifier = Modifier.weight(1f))
+        // Import sits before Export because that is the order of the user's work: a document with no
+        // clips has nothing to export, and the button says so.
+        TextButton(onClick = onImportClick) { Text("Import") }
+        TextButton(onClick = onExport, enabled = state.document.clips.isNotEmpty()) {
+            Text("Export")
+        }
+    }
+}
+
+/**
+ * FR-1.4's report, as a one-line toast.
+ *
+ * "Added 1 clip" rather than a sentence about a report: nothing is wrong, and the user asked for this to
+ * be minor information. The plural branch is not cosmetic — an import of three files is one action, and
+ * a message that read "Added 1 clip" three times would be three interruptions for one thought.
+ */
+private fun ImportReport.toastText(): String = when (importedCount) {
+    1 -> "Added 1 clip"
+    else -> "Added $importedCount clips"
 }
 
 /**
@@ -101,33 +171,22 @@ internal fun EditorScreen(
     onPreviewFrame: suspend (uri: String, positionUs: Long) -> ImageBitmap?,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            TextButton(onClick = onBack) { Text("Projects") }
-            Text(
-                text = state.document.name,
-                style = MaterialTheme.typography.titleSmall,
-                modifier = Modifier.padding(start = 8.dp),
-            )
-            Box(modifier = Modifier.weight(1f))
-            // Import sits before Export because that is the order of the user's work: a
-            // document with no clips has nothing to export, and the button states it.
-            TextButton(onClick = onImportClick) { Text("Import") }
-            TextButton(onClick = onExport, enabled = state.document.clips.isNotEmpty()) {
-                Text("Export")
-            }
-        }
+        EditorToolbar(
+            state = state,
+            onImportClick = onImportClick,
+            onExport = onExport,
+            onBack = onBack,
+        )
 
-        state.import?.let { report ->
-            ImportBanner(
-                report = report,
-                onDismiss = { onIntent(EditorIntent.DismissImport) },
-            )
-        }
+        // Only refusals reach the banner; a clean import was toasted by the route and its report cleared.
+        state.import
+            ?.takeIf { report -> report.rejected.isNotEmpty() }
+            ?.let { report ->
+                ImportBanner(
+                    report = report,
+                    onDismiss = { onIntent(EditorIntent.DismissImport) },
+                )
+            }
 
         TabRow(selectedTabIndex = state.stage.ordinal) {
             Stage.entries.forEach { stage ->

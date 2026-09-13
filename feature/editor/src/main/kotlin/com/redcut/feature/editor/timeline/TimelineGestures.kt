@@ -26,21 +26,27 @@ import com.redcut.feature.editor.toClipEdge
  * state that order once, readably:
  *
  * 1. **Ruler strip** — the playhead's own surface; consumes what it takes.
- * 2. **Trim** (FR-2.1) — a press inside a clip's edge zone, below the ruler.
+ * 2. **Trim** (FR-2.1) — a press inside a clip's EDGE ZONE, below the ruler.
  * 3. **Reorder** (FR-2.7) — a LONG PRESS on a clip body, then a drag.
- * 4. **Pan / zoom** — the clip area's drag and pinch.
- * 5. **Tap** — select a clip, or clear the selection on empty space.
+ * 4. **Pan / zoom** — a drag inside the clip area scrolls it, and a pinch zooms.
+ * 5. **Tap** — seeks the playhead to the point touched, and selects the clip under it; empty space past
+ *    the clips clears the selection instead.
  *
- * Reorder sits above pan/zoom and needs its long press for exactly that reason: a plain horizontal
- * drag across a clip is how the user SCROLLS the timeline, and two gestures cannot own the same finger.
- * Holding still to pick a clip up is the convention every NLE uses, and it leaves scrolling working
- * everywhere on the track.
+ * Two gestures want the track's one finger — scrolling it, and seeking in it — and the split is by
+ * MOVEMENT, not by which detector ran first: **a tap seeks, a drag scrolls**. That is why the trim's edge
+ * zone matters so much. It used to be capped at half a clip's width, so on any clip narrower than twice
+ * the 48 dp touch target the two edge zones met in the middle and the whole clip trimmed on any drag at
+ * all — the bug the first device pass found, where dragging to scroll shrank the user's clip instead.
+ * A third per side leaves a body that scrolls and seeks like any other part of the track.
  *
- * Getting it wrong is not a crash: it is a timeline where a pinch also scrubs, or where dragging an
- * edge scrolls the clips instead of trimming. That arbitration is BEHAVIOUR, and behaviour here is
- * verified by a device pass (Phase 1's exit criterion), not by CI — this host has no Android
- * runtime, and no test can press a finger on a Canvas. What CI proves is that this compiles and that
- * the arithmetic it delegates to is tested.
+ * The long press for reorder stays, for the reason it always had: a plain drag inside a clip is already
+ * spoken for, and two gestures cannot own the same finger.
+ *
+ * Getting it wrong is not a crash: it is a timeline where a drag trims instead of scrolling, or where a
+ * tap does nothing. That arbitration is BEHAVIOUR, and behaviour here is verified by a device pass
+ * (Phase 1's exit criterion), not by CI — this host has no Android runtime, and no test can press a
+ * finger on a Canvas. What CI proves is that this compiles and that the arithmetic it delegates to is
+ * tested.
  */
 
 /**
@@ -259,7 +265,7 @@ internal fun Modifier.timelineGestures(
  * Picking a clip up and moving it (FR-2.7).
  *
  * Long-press first, deliberately: see the order note at the top of the file. A plain horizontal drag
- * across a clip body is the SCROLL gesture, so reorder waits for the hold — and the wait is the
+ * across a clip body SCROLLS the timeline, so reorder waits for the hold — and the wait is the
  * platform's, not a number invented here.
  *
  * The clip id is resolved here (the only thing this layer knows how to ask), and every position after

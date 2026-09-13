@@ -5,6 +5,7 @@ import com.google.common.truth.Truth.assertThat
 import com.redcut.core.common.IdSource
 import com.redcut.core.common.logging.NoOpRedcutLogger
 import com.redcut.core.media.MediaSourceReader
+import com.redcut.core.media.PreviewFrames
 import com.redcut.core.media.SourceReadResult
 import com.redcut.core.media.ThumbnailSource
 import com.redcut.core.media.ThumbnailStore
@@ -74,6 +75,9 @@ class EditorViewModelTest {
         thumbnails = TimelineThumbnails(
             ThumbnailStore(source = NoThumbnails, logger = NoOpRedcutLogger),
         ),
+        // Same fake for the preview: a source that never returns an image keeps every case here about
+        // state rather than about decoding.
+        previewFrames = PreviewFrames(source = NoThumbnails, logger = NoOpRedcutLogger),
         ids = ids(),
         io = dispatcher,
     )

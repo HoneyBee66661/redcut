@@ -3,6 +3,7 @@ package com.redcut.app
 import android.app.Application
 import android.content.ComponentCallbacks2
 import com.redcut.app.logging.plantLoggingTrees
+import com.redcut.core.media.PreviewFrames
 import com.redcut.core.media.ThumbnailStore
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
@@ -33,6 +34,16 @@ class RedcutApp : Application() {
      */
     @Inject
     lateinit var thumbnails: ThumbnailStore
+
+    /**
+     * The preview's frame cache, dropped on the same signal for the same reason.
+     *
+     * Held separately because it is a different cache: 640 px frames are ~1 MB each where a thumbnail
+     * is a few kilobytes, so this is the one that actually matters when memory is short — the
+     * thumbnails could be re-decoded from scratch on every scroll and nobody would notice.
+     */
+    @Inject
+    lateinit var previewFrames: PreviewFrames
 
     /**
      * A scope that outlives every screen.
@@ -72,7 +83,10 @@ class RedcutApp : Application() {
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
         if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
-            applicationScope.launch { thumbnails.clear() }
+            applicationScope.launch {
+                thumbnails.clear()
+                previewFrames.clear()
+            }
         }
     }
 }

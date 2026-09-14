@@ -41,6 +41,8 @@ data class SetSpeed(val trackId: String, val clipId: String, val speed: Float) :
         val clamped = speed.coerceIn(ClipRanges.SPEED_MIN, ClipRanges.SPEED_MAX)
         return doc.withClip(trackId, clip.copy(speed = clamped))
     }
+
+    override fun touchedTrackIds(document: EditDocument): Set<String> = setOf(trackId)
 }
 
 /** FR-3.2: set a clip's volume, 0 %–200 %. */
@@ -52,6 +54,8 @@ data class SetVolume(val trackId: String, val clipId: String, val volume: Float)
         val clamped = volume.coerceIn(ClipRanges.VOLUME_MIN, ClipRanges.VOLUME_MAX)
         return doc.withClip(trackId, clip.copy(volume = clamped))
     }
+
+    override fun touchedTrackIds(document: EditDocument): Set<String> = setOf(trackId)
 }
 
 /**
@@ -68,6 +72,8 @@ data class SetMuted(val trackId: String, val clipId: String, val muted: Boolean)
         val clip = doc.trackById(trackId)?.clipById(clipId) ?: return doc
         return doc.withClip(trackId, clip.copy(muted = muted))
     }
+
+    override fun touchedTrackIds(document: EditDocument): Set<String> = setOf(trackId)
 }
 
 /**
@@ -99,6 +105,8 @@ data class SetFades(
             ),
         )
     }
+
+    override fun touchedTrackIds(document: EditDocument): Set<String> = setOf(trackId)
 }
 
 /**
@@ -115,6 +123,8 @@ data class SetReverse(val trackId: String, val clipId: String, val reverse: Bool
         val clip = doc.trackById(trackId)?.clipById(clipId) ?: return doc
         return doc.withClip(trackId, clip.copy(reverse = reverse))
     }
+
+    override fun touchedTrackIds(document: EditDocument): Set<String> = setOf(trackId)
 }
 
 /**
@@ -135,6 +145,9 @@ data class RenameDocument(val name: String) : EditCommand {
         val trimmed = name.trim()
         return if (trimmed.isEmpty() || trimmed == doc.name) doc else doc.copy(name = trimmed)
     }
+
+    /** No lane: this renames the project, and a project is not a track. */
+    override fun touchedTrackIds(document: EditDocument): Set<String> = emptySet()
 }
 
 /**
@@ -158,6 +171,8 @@ data class SetTransform(
         if (clip.transform == transform) return doc
         return doc.withClip(trackId, clip.copy(transform = transform))
     }
+
+    override fun touchedTrackIds(document: EditDocument): Set<String> = setOf(trackId)
 }
 
 private const val MICROS_PER_MILLI = 1_000L

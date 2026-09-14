@@ -101,13 +101,19 @@ class UndoStack(
      * Otherwise the result becomes the new state and carries the next revision --
      * one mutation, one stamp, which is what §8.1 recompiles on.
      *
+     * A command that would touch a LOCKED lane never runs at all: [EditDocument.after] refuses it, and
+     * the refusal arrives here as the document it already was. So it records no entry and advances no
+     * revision, which is the same handling a no-op gets and is meant to be: a refused command is not an
+     * edit, and an entry for one that never happened costs the user two taps to get past. A refused
+     * command also leaves the redo history standing, because nothing about the document changed.
+     *
      * Any in-flight preview is abandoned first: [execute] is the discrete-action
      * path, and mixing it into a gesture would attribute the gesture's partial
      * state to the wrong history entry.
      */
     fun execute(command: EditCommand): EditDocument {
         discardPreview()
-        val next = command.apply(current)
+        val next = current.after(command)
         if (next.sameContentAs(current)) return current
         pushUndo(Entry(current, command.label))
         redoStack.clear()
@@ -126,11 +132,15 @@ class UndoStack(
      * a drag emits one delta per frame, so the revision legitimately advances per
      * frame. What §8.1 debounces is the PREVIEW REBUILD (120 ms during drags), never
      * the revision. A frame that changes nothing leaves the revision untouched.
+     *
+     * A frame the lock refuses is not a frame: [EditDocument.after] hands back the document unchanged, so
+     * a gesture that only ever touched a locked lane commits to nothing at all when it ends -- see
+     * [commit].
      */
     fun preview(command: EditCommand): EditDocument {
         if (previewBase == null) previewBase = current
         previewLabel = command.label
-        val next = command.apply(current)
+        val next = current.after(command)
         if (next.sameContentAs(current)) return current
         current = next.copy(revision = current.revision + 1)
         return current

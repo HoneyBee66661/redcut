@@ -222,7 +222,7 @@ private fun rememberTimelineLayer(
     // slice inputs and the gesture layer's spans — and they ask a clip id a question.
     val lanesOnScreen = geometry.visibleRectsByLane()
     val rects = lanesOnScreen.flatMap { it.rects }
-    val requests = rememberSliceRequests(document, clipsById, rects, spans)
+    val requests = rememberSliceRequests(document, clipsById, geometry, rects, spans)
     val images = rememberThumbnails(requests, onThumbnail)
     return TimelineLayer(
         geometry = geometry,
@@ -327,15 +327,24 @@ private fun rememberTimelinePaint(): TimelinePaint = TimelinePaint(
 )
 
 /**
- * The visible clips, as slice inputs.
+ * The visible clips, as slice inputs — the window included.
  *
  * `sourceTimeAt` is the clip's OWN mapping (spec §5.1 keeps speed and reverse in the domain), so the
  * filmstrip and the renderer cannot disagree about which frame a timeline position refers to.
+ *
+ * The two window fields are the geometry's own culling window ([TimelineGeometry.cullStartPx],
+ * [TimelineGeometry.cullEndPx]), which is the margin [TimelineGeometry.visibleRects] already culled
+ * these rects by. They are read HERE rather than re-derived at the call site, and they are passed
+ * on rather than left to default: the default means "the whole clip", which is right for a caller
+ * with no viewport and wrong for this one — the filmstrip would then ask for every slice of a
+ * ten-minute clip to draw one screen of it. Nothing outside the window can be drawn, so nothing
+ * outside it is requested.
  */
 @Composable
 private fun rememberSliceRequests(
     document: EditDocument,
     clipsById: Map<String, com.redcut.domain.document.Clip>,
+    geometry: TimelineGeometry,
     rects: List<ClipRect>,
     spans: List<ClipSpan>,
 ): List<SliceRequest> {
@@ -353,6 +362,8 @@ private fun rememberSliceRequests(
                 widthPx = rect.widthPx,
                 durationUs = span.durationUs,
                 sourceTimeAt = clip::sourceTimeAt,
+                windowStartPx = geometry.cullStartPx,
+                windowEndPx = geometry.cullEndPx,
             )
         },
     )

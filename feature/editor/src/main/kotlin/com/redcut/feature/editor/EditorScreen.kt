@@ -23,6 +23,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.redcut.core.media.PreviewRenderer
@@ -184,17 +185,16 @@ internal fun EditorScreen(
  *
  * When NOTHING can be cut, the reason is shown. When only some tools are blocked, it is not: the
  * reasons differ per tool (delete is unavailable on the last clip while split is fine), and printing
- * one tool's reason under a row of four would be worse than printing none.
+ * one tool's reason under a row of four would be worse than printing none. That rule is
+ * [cutToolsReason]; the line it feeds is [CutToolReason], which is drawn in BOTH cases — see there for
+ * why the empty one is not free.
  */
 @Composable
 internal fun CutTools(state: EditorUiState, onIntent: (EditorIntent) -> Unit) {
     val rows = remember(state.document, state.playheadUs) {
         CUT_TOOLS.map { tool -> tool to state.document.availabilityFor(tool, state.playheadUs) }
     }
-    val allBlocked = rows.none { (_, availability) -> availability is CutAvailability.Available }
-    val reasons = rows.mapNotNull { (_, availability) ->
-        (availability as? CutAvailability.Unavailable)?.reason
-    }.distinct()
+    val reason = cutToolsReason(rows.map { (_, availability) -> availability })
 
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
         // Horizontally scrollable, CapCut-style, and that is a fix rather than a style choice: six tool
@@ -211,10 +211,73 @@ internal fun CutTools(state: EditorUiState, onIntent: (EditorIntent) -> Unit) {
                 }
             }
         }
-        if (allBlocked && reasons.size == 1) {
-            Text(text = reasons.first(), style = MaterialTheme.typography.bodySmall)
-        }
+        CutToolReason(reason)
     }
+}
+
+/**
+ * What the explanation row says: the ONE reason every tool shares, or "" when there is nothing to say.
+ *
+ * Pulled out of [CutTools] so the rule can be read and tested on its own — it is a fact about a list of
+ * availabilities and nothing else, and it has two halves. The line appears only when NOTHING can be cut
+ * (a reason under a row where three of four tools still work would misdescribe those three), and only
+ * when the tools AGREE on it (delete's reason on a row where split is fine says the wrong thing about
+ * split). Six identical sentences are one reason, which is what the `distinct` is for.
+ *
+ * "" rather than null because the caller draws the row either way: the empty string is what "no reason"
+ * looks like in a slot that is always the same size, and [CutToolReason] turns it into blank text.
+ */
+internal fun cutToolsReason(availabilities: List<CutAvailability>): String {
+    val allBlocked = availabilities.none { it is CutAvailability.Available }
+    val reasons = availabilities.mapNotNull { availability ->
+        (availability as? CutAvailability.Unavailable)?.reason
+    }.distinct()
+    return if (allBlocked && reasons.size == 1) reasons.first() else ""
+}
+
+/**
+ * How many `bodySmall` lines the explanation row always occupies.
+ *
+ * Two, because that is what the longest reason needs on a 360 dp screen at the default font scale: the
+ * reasons are sentences ("The timeline must keep at least one clip; delete is unavailable on the last
+ * one."), not labels.
+ */
+private const val REASON_LINES = 2
+
+/**
+ * The explanation line: drawn ALWAYS, and always [REASON_LINES] lines tall.
+ *
+ * It used to be drawn only when there was something to say, and that made the toolbar's height a
+ * function of what it said. The reason appears exactly as the playhead leaves the last clip,
+ * `BottomToolbar` wraps its content, and the preview and the tracks above it take `weight(1f)` each — so
+ * the line appearing pushed both flexible halves up by the height of a line, and the line vanishing
+ * dropped them straight back. Dragging a clip's end onto the playhead read as a wobble, which is what
+ * the device pass reported: *"saat gua scroll clip ke arah kiri dan end of clip menyentuh playhead, ui
+ * agak naik beberapa pixel seperti shaking"*. Nothing was jittering geometrically; a row was being added
+ * and removed, and this row is the one that was.
+ *
+ * So the row is a SLOT, and both of the text's bounds are load-bearing. `minLines` is the half that fixes
+ * the reported crossing: it reserves the room in the state where there is nothing to say, so the row is as
+ * tall with an empty string in it as it is with a reason. `maxLines` is the ceiling, and without it a
+ * longer reason — a bigger font scale, a narrower screen — would push the preview on the way in, which is
+ * the same jump arriving from the other side. The ellipsis that ceiling can produce is the deliberate
+ * cost of it, and it is the cheaper of the two: a truncated tail at a very large font scale beats a
+ * preview that moves under the user's finger.
+ *
+ * The text is `" "` rather than `""` when there is nothing to say, and that is not cosmetic: Compose
+ * measures an EMPTY string as zero height, `minLines` included, so an empty string would hand the jump
+ * back in the one state this row exists to hold open. A space is a line with no glyph in it — nothing
+ * paints, and the line is measured like any other line of the same style.
+ */
+@Composable
+private fun CutToolReason(reason: String) {
+    Text(
+        text = reason.ifEmpty { " " },
+        style = MaterialTheme.typography.bodySmall,
+        minLines = REASON_LINES,
+        maxLines = REASON_LINES,
+        overflow = TextOverflow.Ellipsis,
+    )
 }
 
 private val CUT_TOOLS = listOf(

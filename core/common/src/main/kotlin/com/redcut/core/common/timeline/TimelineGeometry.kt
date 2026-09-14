@@ -346,6 +346,21 @@ data class TimelineGeometry(
     /** Right edge of the visible window in content pixels. */
     val visibleEndPx: Float get() = visibleStartPx + viewportWidthPx
 
+    /**
+     * The window a draw pass actually works with: the visible one, plus one viewport of margin.
+     *
+     * Named rather than left inline in [visibleRects], because a second reader needed the same
+     * number: the filmstrip asks its own arithmetic (`TimelineSlices.requests`) for the slices
+     * inside this window, and a margin re-derived at that call site would be a second answer to
+     * "what is being drawn" — which drifts the moment either end changes, and drifts silently,
+     * because a strip that decodes one viewport too few looks exactly like a strip that is merely
+     * slow.
+     */
+    val cullStartPx: Float get() = visibleStartPx - viewportWidthPx
+
+    /** The window's right edge; see [cullStartPx] for why it is named. */
+    val cullEndPx: Float get() = visibleEndPx + viewportWidthPx
+
     /** The half-width of a touch zone around a boundary: the spec's 48 dp target, total. */
     val edgeTouchTargetPx: Float get() = EDGE_TOUCH_TARGET_DP * density
 
@@ -403,11 +418,8 @@ data class TimelineGeometry(
      * much of it is off screen: the rect is the clip's own, in content pixels, and nothing about it depends
      * on where the viewport happens to be — the draw pass is what clips it to the window.
      */
-    fun visibleRects(): List<ClipRect> {
-        val from = visibleStartPx - viewportWidthPx
-        val to = visibleEndPx + viewportWidthPx
-        return clipRects().filter { it.endPx >= from && it.startPx <= to }
-    }
+    fun visibleRects(): List<ClipRect> =
+        clipRects().filter { it.endPx >= cullStartPx && it.startPx <= cullEndPx }
 
     /**
      * The lane bands to draw, in content pixels (UI revision 2, task A5).

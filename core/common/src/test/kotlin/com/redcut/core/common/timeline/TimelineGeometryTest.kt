@@ -896,4 +896,68 @@ class TimelineGeometryTest {
         assertThat(geometry.hitTest(230f, 1.5f * geometry.trackHeightPx))
             .isEqualTo(TimelineHit.None)
     }
+
+    // --- The track under a touch (schema v3) -------------------------------
+
+    @Test
+    fun `a lane's empty tail is that lane's background, not the clip one lane up`() {
+        // One x, two lanes: 420 is past "track-2"'s only clip (60 px wide, and 20 px is all of it an
+        // edge target may claim) and inside "track-1"'s clip, which runs the whole width. The touch's y
+        // picks the lane, so the lower lane answers its own track rather than the clip above it — the
+        // claim `a lane boundary is not a clip edge` makes from the other side, and the reason the two
+        // are not confused by sharing an x.
+        val lanes = listOf(
+            LaneSpans("track-1", listOf(ClipSpan("long", 0, 10 * oneSecond))),
+            LaneSpans("track-2", spansOf(listOf(ClipTiming("short", oneSecond)))),
+        )
+        val geometry = lanesGeometry(lanes, zoom = TimelineZoom(60f))
+        val firstLaneY = geometry.trackHeightPx / 2f
+        val secondLaneY = geometry.laneTopPx(1) + geometry.trackHeightPx / 2f
+
+        assertThat(geometry.hitTest(420f, secondLaneY)).isEqualTo(TimelineHit.Track("track-2"))
+        assertThat(geometry.hitTest(420f, firstLaneY)).isEqualTo(TimelineHit.Body("long"))
+    }
+
+    @Test
+    fun `outside every lane's band is nowhere, not some lane's background`() {
+        // The background is INSIDE a band. At the very x that is the video lane's empty tail, a y above
+        // the first track and a y below the last are still nothing: "past the last clip of a track" and
+        // "below the last track" are different answers, which is the whole reason Track exists.
+        val geometry = lanesGeometry(twoLanes, zoom = TimelineZoom(60f))
+        val insideTheFirstLane = geometry.trackHeightPx / 2f
+
+        assertThat(geometry.hitTest(420f, insideTheFirstLane)).isEqualTo(TimelineHit.Track("video"))
+        assertThat(geometry.hitTest(420f, -1f)).isEqualTo(TimelineHit.None)
+        assertThat(geometry.hitTest(420f, 2f * geometry.trackHeightPx)).isEqualTo(TimelineHit.None)
+    }
+
+    @Test
+    fun `a lane with no clips at all is its own background everywhere in its band`() {
+        // An overlay track waiting for its first clip: nothing in it can be under the finger, so every x
+        // in its band answers the same thing — and that thing is the track, which is what makes "add a
+        // clip to this empty track" a gesture the UI can hang on a tap instead of a dead one.
+        val lanes = listOf(
+            LaneSpans("video", spansOf(listOf(ClipTiming("v1", 4 * oneSecond)))),
+            LaneSpans("overlay", emptyList()),
+        )
+        val geometry = lanesGeometry(lanes, zoom = TimelineZoom(60f))
+        val overlayY = geometry.laneTopPx(1) + geometry.trackHeightPx / 2f
+
+        assertThat(geometry.hitTest(100f, overlayY)).isEqualTo(TimelineHit.Track("overlay"))
+        assertThat(geometry.hitTest(900f, overlayY)).isEqualTo(TimelineHit.Track("overlay"))
+    }
+
+    @Test
+    fun `the flat reading names no track, so its empty background is still nothing`() {
+        // Pre-existing behaviour, pinned where the new variant could have changed it: with no lanes there
+        // is no track id to answer with, so past the last clip stays None in BOTH readings rather than
+        // becoming an empty id or a sentinel string standing for "the one lane".
+        val geometry = geometry(spans = threeClips, zoom = TimelineZoom(60f))
+        val middleOfTheLane = geometry.trackHeightPx / 2f
+
+        assertThat(geometry.hitTest(480f)).isEqualTo(TimelineHit.None)
+        assertThat(geometry.hitTest(480f, middleOfTheLane)).isEqualTo(TimelineHit.None)
+        // And an empty project, where even the flat lane has nothing in it, is still nothing.
+        assertThat(geometry().hitTest(100f, middleOfTheLane)).isEqualTo(TimelineHit.None)
+    }
 }

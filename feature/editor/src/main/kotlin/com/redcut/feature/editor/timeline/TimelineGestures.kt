@@ -121,6 +121,11 @@ internal fun onTimelineTap(
     val tapped = when (hit) {
         is TimelineHit.Body -> hit.clipId
         is TimelineHit.Edge -> hit.clipId
+        // A lane's BACKGROUND is not a clip, so there is nothing to select yet -- the same answer the
+        // area past the clips gives, and for the same reason. The hit type exists so a caller can tell
+        // "empty track under the finger" from "nowhere at all"; what that will MEAN (selecting the
+        // track, adding a clip to it) arrives with the intents that carry a track id.
+        is TimelineHit.Track -> null
         TimelineHit.None -> null
     }
 

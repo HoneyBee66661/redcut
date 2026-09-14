@@ -165,7 +165,14 @@ data class LaneClips(val lane: LaneRect, val rects: List<ClipRect>)
 /** What is under a touch, which is the whole reason the geometry exists. */
 sealed interface TimelineHit {
 
-    /** Nothing: the empty area past the end of the last clip, or a gap. */
+    /**
+     * Nothing at all: a point in no lane's band — above the first track, below the last — or, in the
+     * flat reading, the empty area past the end of the last clip or a gap between them.
+     *
+     * The second half is not an oversight: the flat reading draws ONE lane and has no track to name, so
+     * it answers [None] where a lane reading answers [Track]. Same point, same rules — the difference is
+     * whether there is a track id to put in the answer.
+     */
     data object None : TimelineHit
 
     /**
@@ -187,6 +194,27 @@ sealed interface TimelineHit {
      * the time.
      */
     data class Edge(val clipId: String, val side: EdgeSide, val withinClip: Boolean) : TimelineHit
+
+    /**
+     * The BACKGROUND of a lane: a point inside a track's band that is on none of that track's clips.
+     *
+     * This is a place the user can act on, which is why it is an answer rather than a failure to find
+     * one. Most of an empty track, and everything past a track's last clip, is this — and while it was
+     * [None] a caller could not tell "empty video track at 3 s" from "below the last track", so a tap on
+     * a track with nothing under the finger was a dead tap. What the difference buys is the gesture: a
+     * tap here selects the track, or adds a clip to it.
+     *
+     * It is NOT a clip and NOT a clip's edge. The rules above it still win — an edge zone, then a body,
+     * then this — because those are what the finger actually landed on; this is reached only where the
+     * lane holds no clip under the point at all. And it is answered by the LANE reading only: the flat
+     * [hitTest] has no tracks, so it keeps answering [None] rather than inventing an id, or a sentinel
+     * string, for the single lane a caller without a document draws.
+     *
+     * [trackId] is the track whose band the touch landed in, and it is the whole of the answer: a lane's
+     * background is one place at every x, the same way `laneRects` draws the empty track across the
+     * whole visible window.
+     */
+    data class Track(val trackId: String) : TimelineHit
 }
 
 enum class EdgeSide { LEFT, RIGHT }
@@ -511,6 +539,11 @@ data class TimelineGeometry(
      *   across the boundary into the lane below, where the user is pointing at a different track entirely:
      *   a clip's out-point would be grabbed by a finger that is one lane down from it. Resolving y first is
      *   what stops that, and it is the reason this overload exists at all.
+     * - **A lane's background is [TimelineHit.Track].** Where the three rules find no clip of the lane the
+     *   touch landed in, the answer is the lane itself, not [TimelineHit.None]: it is still a track, and
+     *   which one is the thing the UI acts on. Only the flat reading keeps answering [TimelineHit.None]
+     *   there, because the one lane it draws has no id — and so does a y outside every band, since the
+     *   background is INSIDE a lane and past the last track there is no lane at all.
      *
      * The flat reading is the same arithmetic with one band: a y inside the first track height is the whole
      * timeline, and a y outside it is nothing.
@@ -519,7 +552,10 @@ data class TimelineGeometry(
         val bands = laneRects()
         val index = bands.indexOfFirst { screenY >= it.topPx && screenY < it.bottomPx }
         val lane = laneReadings.getOrNull(index) ?: return TimelineHit.None
-        return copy(spans = lane.second).hitTest(screenX)
+        val hit = copy(spans = lane.second).hitTest(screenX)
+        if (hit != TimelineHit.None) return hit
+        // No clip under the touch, so the lane's own background is what is there — when it has an id.
+        return lane.first?.let { TimelineHit.Track(it) } ?: TimelineHit.None
     }
 
     /**

@@ -1,5 +1,6 @@
 package com.redcut.domain.document
 
+import com.redcut.core.common.timeline.Timebase
 import kotlinx.serialization.Serializable
 
 /**
@@ -21,10 +22,35 @@ data class SourceRef(
     /** Container rotation metadata, 0/90/180/270. */
     val rotationDegrees: Int = 0,
     val frameRate: Float = 30f,
+    /**
+     * The rate as the exact rational the arithmetic uses, or 0 when only the Float is known.
+     *
+     * A probe reports a Float, and 29.97 is NOT 30000/1001: the grid a frame-step lands on has to
+     * be the exact rate, or every step drifts off the frames the user is looking at. A numerator
+     * of 0 means "derive it from [frameRate]", which is what [timebase] does — and it is the
+     * default, so a project file written before this field existed still loads.
+     */
+    val frameRateNumerator: Int = 0,
+    val frameRateDenominator: Int = 1,
     val hasAudio: Boolean = false,
     val videoCodec: String = "",
     val audioCodec: String? = null,
-)
+) {
+
+    /**
+     * The grid this source's frames sit on.
+     *
+     * The rational pair when whatever probed the source knew the exact rate, and otherwise the best
+     * reading of [frameRate] — which still recognises the NTSC rates by value, so a Float 29.97
+     * becomes 30000/1001 rather than a rate no frame boundary is ever on.
+     */
+    val timebase: Timebase
+        get() = if (frameRateNumerator > 0) {
+            Timebase(frameRateNumerator, frameRateDenominator)
+        } else {
+            Timebase.fromFrameRate(frameRate)
+        }
+}
 
 /**
  * A clip: a range of one source, plus the EDIT-stage properties applied to it.

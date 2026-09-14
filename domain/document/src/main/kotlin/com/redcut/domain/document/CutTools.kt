@@ -52,10 +52,12 @@ sealed interface CutAvailability {
  * is now a second NAME for the one sum rather than a second sum: every position here comes from
  * [EditDocument.timeline], whose walk advances over a lane's items, so a [Gap] takes the room it shows.
  *
- * Still the FLAT reading across the lanes: a second track's clips are placed after the first track's
- * rather than alongside them, so this is the length of the timeline as one lane. Per-lane spans are the
- * timeline's own next step; what matters to the commands here is that the playhead arithmetic below and
- * the render graph agree, and they read the same list.
+ * The timeline is as long as its LONGEST lane, because a second track plays ALONGSIDE the first and
+ * the lanes are not added up. The flat reading of [EditDocument.timeline] does lay them end to end,
+ * so with more than one lane the last slot of that list sits past this number: that is the flat
+ * reading's length and not the timeline's, a face of the ambiguity WS C6 resolves rather than a
+ * defect here. Where this number counts is that the ONE-lane document every project is still reads
+ * back exactly what it always did — the longest of one lane is that lane.
  */
 val EditDocument.timelineDurationUs: Long get() = durationUs
 
@@ -66,11 +68,13 @@ val EditDocument.timelineDurationUs: Long get() = durationUs
  * clip edge: at a boundary the cut lands on the clip that is about to start, which is what a playhead
  * parked on a cut point means when the user presses "cut right".
  *
- * Reads [EditDocument.timeline], so with more than one track it answers about the timeline as ONE lane
- * — the same reading [timelineDurationUs] and the render graph take, and therefore the one the commands
- * must agree with. A gap is no clip's time, so a playhead parked in one has nothing to cut, and the
- * null it gets is the same "there is no clip here" the end of the timeline gives. The clip it returns
- * is the clip a tool at that position means; WHICH lane that clip is on is answered by
+ * Reads [EditDocument.timeline], so with more than one track it answers about the timeline as ONE
+ * lane. "Which clip does this position mean" is a question one list can answer; turning it into the
+ * per-lane one (see [EditDocument.lanes], one clip per lane) takes an intent that names the lane it
+ * acts on, which is WS C6. So this is the answer the commands are built on until the intents carry
+ * a track id. A gap is no clip's time, so a playhead parked in one has nothing to cut, and the
+ * null it gets is the same "there is no clip here" the end of the timeline gives. The clip it
+ * returns is the clip a tool at that position means; WHICH lane that clip is on is answered by
  * [EditDocument.trackIdOf], and that is what the commands are built with.
  */
 fun EditDocument.clipAt(playheadUs: Long): Clip? = timeline.firstOrNull { playheadUs in it }?.clip

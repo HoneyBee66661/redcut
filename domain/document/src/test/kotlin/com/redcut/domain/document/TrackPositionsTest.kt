@@ -110,7 +110,9 @@ class TrackPositionsTest {
         val doc = twoLanes()
 
         assertEquals(listOf(3 * SEC, 5 * SEC), doc.tracks.map { it.contentEndUs })
-        assertEquals(8 * SEC, doc.durationUs)
+        // The lanes run in PARALLEL, so the timeline is as long as the longest of them, not as long
+        // as the two added up: 8 s is the flat reading's own length, and it is not the video's.
+        assertEquals(5 * SEC, doc.durationUs)
         assertEquals(listOf(0L, 5 * SEC), doc.timeline.map { it.startUs })
         assertEquals(listOf("c1", "c2"), doc.timeline.map { it.clip.id })
         // Flat, not side by side: the second lane's clips come after the first lane has finished, and

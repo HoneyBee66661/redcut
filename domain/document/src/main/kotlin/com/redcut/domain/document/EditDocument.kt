@@ -15,8 +15,9 @@ import kotlinx.serialization.Serializable
  * clone) and what makes concurrent reads safe without locking.
  *
  * Positions are NEVER stored. A clip records where it reads *from the source*;
- * where it sits *on the timeline* is derived by [timeline]. Storing both is the
- * classic source of "the timeline went stale after a ripple edit" bugs.
+ * where it sits *on the timeline* is derived — by [timeline] for the document
+ * read as one lane, by [lanes] for each lane on its own clock. Storing either is
+ * the classic source of "the timeline went stale after a ripple edit" bugs.
  *
  * ### Tracks, since schema v2
  *
@@ -99,17 +100,29 @@ data class EditDocument(
      * so it is deliberately NOT cached — a cache here would be a correctness liability for no
      * measurable gain.
      *
-     * Still the FLAT reading since v2: the lanes are walked in document order, so the second lane's
-     * clips are placed after the first lane's rather than beside them. That is what a single-lane
-     * document has always meant and it is what keeps the render graph and the frame stepping unchanged
-     * while the lanes are introduced; a prefix sum PER lane is the next step, and it is the one that
-     * makes the lanes overlap in time.
+     * Still the FLAT reading: the lanes are walked in document order, so the second lane's clips
+     * are placed after the first lane's rather than beside them. That is what a one-lane document
+     * has always meant, and it gave the frame stepping and the commands their answer while the
+     * lanes were introduced. [lanes] is the reading a caller with more than one lane wants: it
+     * places each lane on its own clock, so lane 2 starts at 0 like lane 1 — the lanes run in
+     * PARALLEL, and that is the whole of the difference between the two readings.
      *
-     * "After" means after everything the lane OCCUPIES, not after its last clip: each lane is shifted
-     * by the [Track.contentEndUs] of the lanes before it, which is what keeps this list and [durationUs]
-     * telling the same story. Shifting by the last CLIP instead left the two disagreeing the moment a
-     * lane ended in a gap — the last slot ended one gap earlier than the document claimed to be long,
-     * which is exactly the kind of pair of answers a caller eventually trusts the wrong one of.
+     * This one is not deleted, and not flipped here, because flipping it is not arithmetic. With
+     * two lanes there is no single answer to "which clip is the playhead on" — a position is on
+     * one clip per lane, and this list holds only one of them, so whichever per-lane order it
+     * picked would be an invented tie-break. The question becomes well posed when an intent says
+     * which lane it acts on, which is [EditCommand]'s own shape and WS C6's task; until the
+     * intents carry a track id, a per-lane [timeline] would only move the ambiguity into every
+     * caller that reads it.
+     *
+     * "After" means after everything the lane OCCUPIES, not after its last clip: each lane is
+     * shifted by the [Track.contentEndUs] of the lanes before it, which keeps this list's slots
+     * and the room the lanes spend telling the same story. Shifting by the last CLIP instead left
+     * the two disagreeing the moment a lane ended in a gap — the last slot ended one gap earlier
+     * than the lane claimed to run, exactly the kind of pair of answers a caller ends up trusting
+     * the wrong one of. With one lane the last slot still ends at [durationUs]; with more, this
+     * list runs past it, because end to end is not the length of a timeline whose lanes play at
+     * once.
      */
     val timeline: List<TimelineSlot>
         get() {
@@ -135,10 +148,20 @@ data class EditDocument(
     /**
      * Total playback duration after trims and speed changes, the gaps included.
      *
-     * The flat sum of the lanes' [Track.contentEndUs], so a document that ends in a [Gap] is as long as
-     * the room it shows rather than only as long as its clips.
+     * The LONGEST lane, because the lanes run in parallel: two lanes ending at 3 s and 5 s are 5 s
+     * of video, not 8. A document whose longest lane ends in a [Gap] is as long as the room it
+     * shows rather than only as long as its clips, since a lane's extent is [Track.contentEndUs].
+     *
+     * What this replaced was the flat SUM of the lanes' extents, which is the same number while a
+     * document has one lane and a lie the moment it has two: the sum grows every time a lane is
+     * added, and an export would carry the extra seconds of nothing at the end of it. The one-lane
+     * document is the case the change had to leave alone, and it does — the longest of one lane IS
+     * that lane, so every project that exists reads back the number it always did.
+     *
+     * A document with no lanes at all is 0, which is an empty lane's own extent too. [lanes] gives
+     * the per-lane breakdown this is the maximum of.
      */
-    val durationUs: Long get() = tracks.sumOf { it.contentEndUs }
+    val durationUs: Long get() = tracks.maxOfOrNull { it.contentEndUs } ?: 0L
 
     /** The slot containing [positionUs], clamped to the last slot at the end. */
     fun slotAt(positionUs: Long): TimelineSlot? =

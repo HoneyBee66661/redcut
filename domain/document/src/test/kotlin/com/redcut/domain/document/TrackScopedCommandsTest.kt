@@ -56,7 +56,10 @@ class TrackScopedCommandsTest {
         val doc = document()
 
         commandsFor(AUDIO, "v1").forEach { command ->
-            assertSame("$command should not have touched the document", doc, command.apply(doc))
+            // JUnit's argument order, message LAST — see [a command acts on its own lane and leaves the
+            // other one exactly as it was] for the same assertion without a message. The message is kept
+            // because a failure here has to name WHICH command reached the wrong lane.
+            assertSame(doc, command.apply(doc), "$command should not have touched the document")
         }
     }
 

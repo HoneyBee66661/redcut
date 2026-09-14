@@ -47,7 +47,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 internal class ExoPlayerRenderer(
     private val context: Context,
     broker: MediaResourceBroker,
-    @param:MainDispatcher main: CoroutineDispatcher,
+    main: CoroutineDispatcher,
     logger: RedcutLogger,
 ) : Media3PreviewRenderer(broker = broker, main = main, logger = logger) {
 

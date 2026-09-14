@@ -24,7 +24,10 @@ class TrackTest {
     private fun clipOf(id: String) = clip(id, "s1", 0L, oneSecond)
 
     private fun audioTrack(vararg clips: Clip) =
-        Track(id = AUDIO_ID, kind = TrackKind.AUDIO, clips = clips.toList())
+        Track(id = AUDIO_ID, kind = TrackKind.AUDIO, items = clips.toList())
+
+    /** The exception a lane or an item is refused with, or null when the model allows the value. */
+    private fun refusal(build: () -> Any?): Throwable? = runCatching(build).exceptionOrNull()
 
     @Test
     fun `a document built with no tracks is one empty video track`() {
@@ -114,9 +117,112 @@ class TrackTest {
     @Test
     fun `the video lane helper builds the track every command writes to`() {
         assertThat(videoTrack(clipOf("v1"))).isEqualTo(
-            Track(id = Track.MAIN_ID, kind = TrackKind.VIDEO, clips = listOf(clipOf("v1"))),
+            Track(id = Track.MAIN_ID, kind = TrackKind.VIDEO, items = listOf(clipOf("v1"))),
         )
         assertThat(videoTrack()).isEqualTo(Track.MAIN)
+    }
+
+    // --- The v3 lane: attributes, items, and the rule about which lane may carry which attribute ---
+
+    @Test
+    fun `a lane's attributes default to the neutral reading`() {
+        // The default has to mean "nothing decided": a v2 lane arrives through the migration with these
+        // values and nothing else, and a level nobody chose would be a mix the user never made.
+        val fresh = Track(id = "track-1", kind = TrackKind.VIDEO)
+
+        assertThat(fresh.items).isEmpty()
+        assertThat(fresh.isLocked).isFalse()
+        assertThat(fresh.isVisible).isTrue()
+        assertThat(fresh.isMuted).isFalse()
+        assertThat(fresh.isSolo).isFalse()
+        assertThat(fresh.volume).isEqualTo(1f)
+        assertThat(fresh.pan).isEqualTo(0f)
+        assertThat(fresh.opacity).isEqualTo(1f)
+        assertThat(fresh.blendMode).isEqualTo(BlendMode.NORMAL)
+        assertThat(fresh.isCollapsed).isFalse()
+    }
+
+    @Test
+    fun `a gap has to have a duration`() {
+        // A zero-length gap is not a hole, it is nothing at all — an element the prefix sum would have
+        // to account for while it accounts for no time.
+        assertThat(refusal { Gap(0L) }).isInstanceOf(IllegalArgumentException::class.java)
+        assertThat(refusal { Gap(-oneSecond) }).isInstanceOf(IllegalArgumentException::class.java)
+    }
+
+    @Test
+    fun `the clips view reads past the gaps, in order`() {
+        // The failure this rules out is the one a gap is most likely to cause: a lane whose holes moved
+        // a clip or hid it from the flat reading the compiler and the frame stepping still use.
+        val track = Track(
+            id = Track.MAIN_ID,
+            kind = TrackKind.VIDEO,
+            items = listOf(clipOf("v1"), Gap(oneSecond), clipOf("v2")),
+        )
+
+        assertThat(track.items).hasSize(3)
+        assertThat(track.clips.map { it.id }).containsExactly("v1", "v2").inOrder()
+        assertThat(track.clipById("v2")).isEqualTo(clipOf("v2"))
+        assertThat(track.clipById("v3")).isNull()
+    }
+
+    @Test
+    fun `a picture lane may not carry the attributes of sound`() {
+        // volume, pan, mute and solo describe a lane's SOUND, and a VIDEO or TEXT_OVERLAY lane has none of
+        // its own: set there, they would be state the render path has to invent a meaning for.
+        assertThat(refusal { Track(id = "t", kind = TrackKind.VIDEO, volume = 0.5f) })
+            .isInstanceOf(IllegalArgumentException::class.java)
+        assertThat(refusal { Track(id = "t", kind = TrackKind.VIDEO, pan = 0.5f) })
+            .isInstanceOf(IllegalArgumentException::class.java)
+        assertThat(refusal { Track(id = "t", kind = TrackKind.VIDEO, isMuted = true) })
+            .isInstanceOf(IllegalArgumentException::class.java)
+        assertThat(refusal { Track(id = "t", kind = TrackKind.TEXT_OVERLAY, isSolo = true) })
+            .isInstanceOf(IllegalArgumentException::class.java)
+    }
+
+    @Test
+    fun `a sound lane may not carry the attributes of picture`() {
+        assertThat(refusal { Track(id = "t", kind = TrackKind.AUDIO, opacity = 0.5f) })
+            .isInstanceOf(IllegalArgumentException::class.java)
+        assertThat(
+            refusal { Track(id = "t", kind = TrackKind.AUDIO, blendMode = BlendMode.MULTIPLY) },
+        ).isInstanceOf(IllegalArgumentException::class.java)
+    }
+
+    @Test
+    fun `the attributes a lane's kind does allow are ordinary documents`() {
+        // The other half of the rule, and the half a rule that was too eager would break: a mixed audio
+        // lane is an edit the user made, and a lane attribute the schema has to be able to express.
+        assertThat(
+            refusal {
+                Track(
+                    id = "t",
+                    kind = TrackKind.AUDIO,
+                    volume = 0.5f,
+                    pan = -0.5f,
+                    isMuted = true,
+                    isSolo = true,
+                )
+            },
+        ).isNull()
+        assertThat(refusal { Track(id = "t", kind = TrackKind.VIDEO, opacity = 0.5f) }).isNull()
+        assertThat(
+            refusal { Track(id = "t", kind = TrackKind.VIDEO, blendMode = BlendMode.SCREEN) },
+        ).isNull()
+        assertThat(refusal { Track(id = "t", kind = TrackKind.ADJUSTMENT, opacity = 0.5f) })
+            .isNull()
+    }
+
+    @Test
+    fun `the lane's numbers are checked where they are set`() {
+        // The boundary rule this module keeps everywhere else: a file carrying a pan of 1.5 is refused
+        // where it is read rather than drawn as hard right.
+        assertThat(refusal { Track(id = "t", kind = TrackKind.AUDIO, volume = -0.1f) })
+            .isInstanceOf(IllegalArgumentException::class.java)
+        assertThat(refusal { Track(id = "t", kind = TrackKind.AUDIO, pan = 1.5f) })
+            .isInstanceOf(IllegalArgumentException::class.java)
+        assertThat(refusal { Track(id = "t", kind = TrackKind.VIDEO, opacity = 1.5f) })
+            .isInstanceOf(IllegalArgumentException::class.java)
     }
 
     private companion object {

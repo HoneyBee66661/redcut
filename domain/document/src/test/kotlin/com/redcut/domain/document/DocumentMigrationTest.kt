@@ -4,14 +4,16 @@ import com.google.common.truth.Truth.assertThat
 import org.junit.jupiter.api.Test
 
 /**
- * The v1 → v2 migration, as a rule about documents rather than as a JSON trick.
+ * The document's upgrade rules — v1 → v2 and v2 → v3 — as rules about documents, not JSON tricks.
  *
- * The file-level half of the same story lives in :domain:project, where a real v1 payload is decoded.
- * This half is here because the rule has decisions in it — when a document is old, what "nothing to
- * move" means, and what must NOT change — and those are testable in milliseconds without a file.
+ * The file-level half of the same story lives in :domain:project, where a real payload of each version
+ * is decoded. This half is here because each rule has decisions in it — when a document is old, what
+ * "nothing to move" means, and what must NOT change — and those are testable in milliseconds without a
+ * file.
  *
- * What the migration must never do is lose an edit. Every test below is a different way of asking the
- * same question: after promotion, is everything that is not the clips exactly as it was?
+ * What a migration must never do is lose an edit. Every test below is a different way of asking the same
+ * question: after promotion, is everything that is not the clips exactly as it was? The v2 tests add the
+ * question the ORDER of the two rules turns on: which files each rule is allowed to touch.
  */
 class DocumentMigrationTest {
 
@@ -107,16 +109,16 @@ class DocumentMigrationTest {
     }
 
     @Test
-    fun `a document that is already v2 is left alone`() {
-        // The stamp alone decides, and a v2 document says 2 — so a project saved by this build is not
-        // migrated twice, and its lanes are not folded into one.
-        val v2 = EditDocument(
+    fun `a document that is already v3 is left alone`() {
+        // The stamp alone decides, and a document this build wrote says the CURRENT version — so a
+        // project saved by this build is not migrated twice, and its lanes are not folded into one.
+        val v3 = EditDocument(
             id = "doc-1",
             name = "Holiday",
             tracks = listOf(videoTrack(v1Clip("v1", 0L, oneSecond))),
         )
 
-        assertThat(v2.promotedFromV1(listOf(v1Clip("stale", 0L, oneSecond)))).isEqualTo(v2)
+        assertThat(v3.promotedFromV1(listOf(v1Clip("stale", 0L, oneSecond)))).isEqualTo(v3)
     }
 
     @Test
@@ -147,5 +149,89 @@ class DocumentMigrationTest {
         assertThat(promoted.schemaVersion).isEqualTo(EditDocument.SCHEMA_VERSION)
         assertThat(promoted.tracks).isEqualTo(listOf(Track.MAIN))
         assertThat(promoted.clips).isEmpty()
+    }
+
+    // --- v2 → v3: a track's flat clips become that track's items ---------------------------------
+
+    /**
+     * A v2 document as it exists in memory once the codec has read it: the stamp says 2 and every lane is
+     * EMPTY, because v2's per-track `clips` key is not a field of this build's [Track]. The lanes arrive
+     * separately, through the codec's own view of the file — one version on from the v1 problem above.
+     */
+    private fun v2Document() = EditDocument(
+        schemaVersion = 2,
+        id = "doc-2",
+        name = "Holiday",
+        sources = listOf(source("s1")),
+    )
+
+    /** A v2 lane as the codec builds it from the file: the clips it held are the lane's items. */
+    private fun v2Track(vararg clips: Clip) = videoTrack(clips.toList())
+
+    @Test
+    fun `a v2 lane's clips become its items, in order, and its attributes stay at defaults`() {
+        // v2 wrote no lane attributes, so the migration must not invent any: what comes out is the clip
+        // list moved, and nothing else about the lane changed.
+        val v2Tracks = listOf(
+            v2Track(clip("c1", "s1", 0L, oneSecond), clip("c2", "s1", oneSecond, 2 * oneSecond)),
+        )
+
+        val promoted = v2Document().promotedFromV2(v2Tracks)
+
+        assertThat(promoted.schemaVersion).isEqualTo(EditDocument.SCHEMA_VERSION)
+        assertThat(promoted.tracks).isEqualTo(v2Tracks)
+        assertThat(promoted.clips.map { it.id }).containsExactly("c1", "c2").inOrder()
+        assertThat(promoted.tracks.single().items).hasSize(2)
+        assertThat(promoted.tracks.single().volume).isEqualTo(1f)
+        assertThat(promoted.tracks.single().isLocked).isFalse()
+        assertThat(promoted.tracks.single().blendMode).isEqualTo(BlendMode.NORMAL)
+    }
+
+    @Test
+    fun `a v2 document keeps everything that was not its clips`() {
+        val before = v2Document()
+
+        val after = before.promotedFromV2(listOf(v2Track(clip("c1", "s1", 0L, oneSecond))))
+
+        assertThat(after.id).isEqualTo("doc-2")
+        assertThat(after.name).isEqualTo("Holiday")
+        assertThat(after.sources).isEqualTo(before.sources)
+        assertThat(after.canvas).isEqualTo(CanvasSpec.PORTRAIT_1080)
+    }
+
+    @Test
+    fun `a document that is already v3 is not migrated by the v2 rule either`() {
+        val v3 = EditDocument(
+            id = "doc-3",
+            name = "Holiday",
+            tracks = listOf(videoTrack(clip("v1", "s1", 0L, oneSecond))),
+        )
+
+        assertThat(v3.promotedFromV2(listOf(videoTrack(clip("stale", "s1", 0L, oneSecond)))))
+            .isEqualTo(v3)
+    }
+
+    @Test
+    fun `a v1 document is not this rule's business`() {
+        // The stamp band, and why it is narrower than "anything older than this build": a v1 file has no
+        // `tracks` key, so the v2 rule has nothing to move in it — but it would still stamp the version
+        // forward, and the v1 rule would then find a document that looks current and leave the clips the
+        // decode dropped exactly where they fell.
+        val v1 = v1Document()
+
+        val untouched = v1.promotedFromV2(emptyList())
+
+        assertThat(untouched).isEqualTo(v1)
+        assertThat(untouched.schemaVersion).isEqualTo(1)
+    }
+
+    @Test
+    fun `an empty v2 document gains the stamp and no invented lane`() {
+        // The stamp is brought forward either way — a file that still said 2 would be migrated again by
+        // the next reader — and the lane a fresh document has is not duplicated on the way.
+        val promoted = v2Document().promotedFromV2(emptyList())
+
+        assertThat(promoted.schemaVersion).isEqualTo(EditDocument.SCHEMA_VERSION)
+        assertThat(promoted.tracks).isEqualTo(listOf(Track.MAIN))
     }
 }

@@ -40,6 +40,18 @@ data class EditDocument(
      * the audio workstream is close to it), which is why the model does not require one either.
      */
     val tracks: List<Track> = listOf(Track.MAIN),
+    /**
+     * The other timelines this document holds — EMPTY in v3, and read by nothing.
+     *
+     * ### Why an empty hook is worth a schema change
+     *
+     * Nesting a sequence is the one model change that could not be added later without reshaping the
+     * document. Today the document IS the timeline, so "a project with two timelines" has nowhere to put
+     * the second one, and the day it arrives every reader would have to change at once. The hook costs a
+     * key written as `[]` and nothing to ignore — the same reasoning the spec uses for
+     * `SourceRef.uri: String`. If it is still empty in a year, it is a line of JSON.
+     */
+    val sequences: List<SequenceSpec> = emptyList(),
     val effects: List<AppliedEffect> = emptyList(),
     val canvas: CanvasSpec = CanvasSpec.PORTRAIT_1080,
     val createdAtMs: Long = 0L,
@@ -153,12 +165,14 @@ data class EditDocument(
          * Written from day one. Retrofitting a version field after users have
          * projects on disk is not possible (spec §10.2).
          *
-         * `2` is the tracks version: the clips moved inside [Track], so a file written by this build
-         * says `tracks` where the previous one said `clips`. That is not a compatible read, which is
-         * why :domain:project's codec migrates a v1 file on the way in rather than letting the old
-         * list fall on the floor.
+         * `2` is the tracks version: the clips moved inside [Track], so a file written by that build
+         * says `tracks` where the one before it said `clips`. `3` is the items version: a track's
+         * contents became [TrackItem]s ([Clip] or [Gap]), the lanes gained the attributes [Track]
+         * carries, and the document gained [sequences]. Neither is a compatible read, which is why
+         * :domain:project's codec migrates an older file on the way in rather than letting the keys it
+         * no longer names fall on the floor.
          */
-        const val SCHEMA_VERSION = 2
+        const val SCHEMA_VERSION = 3
     }
 }
 
@@ -173,9 +187,13 @@ data class EditDocument(
  * A track id the document does not have leaves the document untouched, the same way every other
  * unmet precondition in a command does. Nothing is created here: a lane is the document's own
  * structure, and a command that invented one would be editing a timeline the user cannot see.
+ *
+ * What it writes is the lane's ITEMS, so a lane that held a [Gap] comes back with it gone: the clip list
+ * a command hands over is the whole lane. Nothing builds a gap yet — the commands that insert and honour
+ * them are the next workstream — and when one does, this is the function that has to learn about them.
  */
 internal fun EditDocument.withTrackClips(trackId: String, clips: List<Clip>): EditDocument =
-    copy(tracks = tracks.map { if (it.id == trackId) it.copy(clips = clips) else it })
+    copy(tracks = tracks.map { if (it.id == trackId) it.copy(items = clips) else it })
 
 /**
  * A clip as placed on the timeline: the clip plus where it lands.
@@ -191,6 +209,28 @@ data class TimelineSlot(
 
     operator fun contains(positionUs: Long): Boolean = positionUs >= startUs && positionUs < endUs
 }
+
+/**
+ * A named timeline inside a document: its own lanes, and its own canvas.
+ *
+ * ### Why this is called SequenceSpec and not Sequence
+ *
+ * `kotlin.sequences.Sequence` is a default import, so a domain type of that name would collide in every
+ * file that uses both — and the one that won would be whichever the file did not mean. The suffix is the
+ * one [TransformSpec] and [ColorAdjustSpec] already carry: a spec is the DATA of a thing, and the thing
+ * itself is built from it.
+ *
+ * v3 defines this and puts nothing in it (see [EditDocument.sequences]): it is the shape a nested
+ * timeline would take, named now so that the migration which fills it is not also the migration that
+ * invents it.
+ */
+@Serializable
+data class SequenceSpec(
+    val id: String,
+    val name: String,
+    val tracks: List<Track> = emptyList(),
+    val canvas: CanvasSpec = CanvasSpec.PORTRAIT_1080,
+)
 
 /** Output frame geometry. MVP ships only 720p and 1080p (FR-5.1). */
 @Serializable

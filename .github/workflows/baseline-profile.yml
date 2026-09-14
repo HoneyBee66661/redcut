@@ -63,7 +63,11 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
+      # Same explicit `packages` as ci.yml's native job, and for the same reason: the action's default
+      # asks for `tools`, which Google no longer publishes, so it failed before the emulator started.
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
       - uses: gradle/actions/setup-gradle@v4
 
       # KVM is what makes an x86_64 emulator usable in a job rather than a time-out. The

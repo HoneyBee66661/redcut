@@ -46,61 +46,55 @@ sealed interface CutAvailability {
 /**
  * How long the whole timeline is, in microseconds.
  *
- * Derived, never stored (spec §5.1): every position in the editor comes from prefix-summing the clips'
- * own durations, and this is where that sum lives. It used to exist only in the editor's projection,
- * which meant the domain's frame-stepping could not ask how far the timeline went — a rule with two
- * homes is a rule that disagrees with itself eventually.
+ * [EditDocument.durationUs], under the name the editor's projection has always used. It used to live
+ * only in that projection, which meant the domain's frame-stepping could not ask how far the timeline
+ * went — and a rule with two homes is a rule that disagrees with itself eventually, which is why this
+ * is now a second NAME for the one sum rather than a second sum: every position here comes from
+ * [EditDocument.timeline], whose walk advances over a lane's items, so a [Gap] takes the room it shows.
  *
- * Still the FLAT reading across [EditDocument.clips]: a second track's clips are summed after the
- * first track's rather than alongside them, so this is the length of the timeline as one lane. Per-lane
- * spans are the timeline's own next step; what matters to the commands here is that the playhead
- * arithmetic below and the render graph agree, and they read the same list.
+ * Still the FLAT reading across the lanes: a second track's clips are placed after the first track's
+ * rather than alongside them, so this is the length of the timeline as one lane. Per-lane spans are the
+ * timeline's own next step; what matters to the commands here is that the playhead arithmetic below and
+ * the render graph agree, and they read the same list.
  */
-val EditDocument.timelineDurationUs: Long get() = clips.sumOf { it.timelineDurationUs }
+val EditDocument.timelineDurationUs: Long get() = durationUs
 
 /**
- * The clip the playhead is inside, or null when it is past the end of the timeline.
+ * The clip the playhead is inside, or null when it is past the end or parked in a gap.
  *
  * Boundaries belong to the clip on their RIGHT, the same rule the timeline's hit-testing uses for a
  * clip edge: at a boundary the cut lands on the clip that is about to start, which is what a playhead
  * parked on a cut point means when the user presses "cut right".
  *
- * Reads the flattened clip list, so with more than one track it answers about the timeline as ONE lane
- * — which is the same reading [timelineDurationUs] and the render graph take, and therefore the one the
- * commands must agree with. The clip it returns is the clip a tool at that position means; WHICH lane
- * that clip is on is answered by [EditDocument.trackIdOf], and that is what the commands are built with.
+ * Reads [EditDocument.timeline], so with more than one track it answers about the timeline as ONE lane
+ * — the same reading [timelineDurationUs] and the render graph take, and therefore the one the commands
+ * must agree with. A gap is no clip's time, so a playhead parked in one has nothing to cut, and the
+ * null it gets is the same "there is no clip here" the end of the timeline gives. The clip it returns
+ * is the clip a tool at that position means; WHICH lane that clip is on is answered by
+ * [EditDocument.trackIdOf], and that is what the commands are built with.
  */
-fun EditDocument.clipAt(playheadUs: Long): Clip? {
-    var start = 0L
-    clips.forEach { clip ->
-        val end = start + clip.timelineDurationUs
-        if (playheadUs >= start && playheadUs < end) return clip
-        start = end
-    }
-    return null
-}
+fun EditDocument.clipAt(playheadUs: Long): Clip? = timeline.firstOrNull { playheadUs in it }?.clip
 
-/** Where [clipId] starts on the timeline, or null when the document has no such clip. */
-fun EditDocument.timelineStartOf(clipId: String): Long? {
-    var start = 0L
-    clips.forEach { clip ->
-        if (clip.id == clipId) return start
-        start += clip.timelineDurationUs
-    }
-    return null
-}
+/**
+ * Where [clipId] starts on the timeline, or null when the document has no such clip.
+ *
+ * The start the clip actually has, a gap in front of it included: this reads [EditDocument.timeline]
+ * rather than summing the clips again, because a second sum is a second place to forget a gap.
+ */
+fun EditDocument.timelineStartOf(clipId: String): Long? =
+    timeline.firstOrNull { it.clip.id == clipId }?.startUs
 
 /**
  * How far into [clipId] the playhead is, in TIMELINE time, or null when the playhead is not on it.
  *
  * Timeline time, not source time: turning this into a source time is the clip's own job
  * ([sourceTimeFor]), and doing it here would put a sped-up or reversed clip's mapping in two places.
+ * The start it subtracts is the slot's own, so a gap before the clip is already accounted for.
  */
 fun EditDocument.offsetIntoClip(clipId: String, playheadUs: Long): Long? {
-    val start = timelineStartOf(clipId) ?: return null
-    val clip = clips.firstOrNull { it.id == clipId } ?: return null
-    val offset = playheadUs - start
-    return if (offset >= 0 && offset < clip.timelineDurationUs) offset else null
+    val slot = timeline.firstOrNull { it.clip.id == clipId } ?: return null
+    val offset = playheadUs - slot.startUs
+    return if (offset >= 0 && offset < slot.durationUs) offset else null
 }
 
 /**

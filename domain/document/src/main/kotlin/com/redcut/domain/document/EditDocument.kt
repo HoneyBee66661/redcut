@@ -93,30 +93,52 @@ data class EditDocument(
     /**
      * Clips paired with their derived timeline positions, in playback order.
      *
-     * Computed by prefix-summing each clip's speed-adjusted duration. Cheap (a
-     * few dozen additions) and called on every compile, so it is deliberately
-     * NOT cached — a cache here would be a correctness liability for no
+     * Each lane places its own clips ([Track.positionedClips]), and the cursor there advances over the
+     * lane's ITEMS, so a [Gap] is room the timeline spends: it moves every clip after it later even
+     * though it produces no slot of its own. Cheap (a few dozen additions) and called on every compile,
+     * so it is deliberately NOT cached — a cache here would be a correctness liability for no
      * measurable gain.
      *
-     * Still the FLAT reading since v2: the sum runs across [clips], so a second track's clips are
-     * placed after the first track's rather than beside them. That is what a single-lane document has
-     * always meant and it is what keeps the render graph and the frame stepping unchanged while the
-     * lanes are introduced; a prefix sum PER track is the next step, and it is the one that makes the
-     * lanes overlap in time.
+     * Still the FLAT reading since v2: the lanes are walked in document order, so the second lane's
+     * clips are placed after the first lane's rather than beside them. That is what a single-lane
+     * document has always meant and it is what keeps the render graph and the frame stepping unchanged
+     * while the lanes are introduced; a prefix sum PER lane is the next step, and it is the one that
+     * makes the lanes overlap in time.
+     *
+     * "After" means after everything the lane OCCUPIES, not after its last clip: each lane is shifted
+     * by the [Track.contentEndUs] of the lanes before it, which is what keeps this list and [durationUs]
+     * telling the same story. Shifting by the last CLIP instead left the two disagreeing the moment a
+     * lane ended in a gap — the last slot ended one gap earlier than the document claimed to be long,
+     * which is exactly the kind of pair of answers a caller eventually trusts the wrong one of.
      */
     val timeline: List<TimelineSlot>
         get() {
-            var cursor = 0L
-            return clips.mapIndexed { index, clip ->
-                val start = cursor
-                cursor += clip.timelineDurationUs
-                TimelineSlot(clip = clip, index = index, startUs = start, endUs = cursor)
+            var laneOffsetUs = 0L
+            var index = 0
+            return buildList {
+                tracks.forEach { track ->
+                    track.positionedClips().forEach { placed ->
+                        add(
+                            TimelineSlot(
+                                clip = placed.clip,
+                                index = index++,
+                                startUs = laneOffsetUs + placed.startUs,
+                                endUs = laneOffsetUs + placed.endUs,
+                            ),
+                        )
+                    }
+                    laneOffsetUs += track.contentEndUs
+                }
             }
         }
 
-    /** Total playback duration after trims and speed changes. */
-    val durationUs: Long
-        get() = clips.sumOf { it.timelineDurationUs }
+    /**
+     * Total playback duration after trims and speed changes, the gaps included.
+     *
+     * The flat sum of the lanes' [Track.contentEndUs], so a document that ends in a [Gap] is as long as
+     * the room it shows rather than only as long as its clips.
+     */
+    val durationUs: Long get() = tracks.sumOf { it.contentEndUs }
 
     /** The slot containing [positionUs], clamped to the last slot at the end. */
     fun slotAt(positionUs: Long): TimelineSlot? =

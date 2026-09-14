@@ -195,6 +195,44 @@ class ProjectFileTest {
         assertThat(opened.document.clips).isEmpty()
     }
 
+    // --- The committed v2 fixture -----------------------------------------------------------
+
+    /**
+     * The committed v2 file, off the CLASSPATH.
+     *
+     * From the classpath rather than the path on disk because Gradle puts `src/test/resources` there, so
+     * the test finds it from wherever it happens to run. A hand-written JSON literal would prove only
+     * that the migration agrees with what this test's author believed the old format was; this fixture
+     * was emitted BY the v2 serializer and committed next to it.
+     */
+    private fun v2Fixture(): String =
+        requireNotNull(javaClass.getResourceAsStream("/v2-project.json")) {
+            "the committed v2 fixture is missing from the test classpath"
+        }.use { it.readBytes().toString(Charsets.UTF_8) }
+
+    @Test
+    fun `the committed v2 fixture opens as a v3 document with nothing lost`() {
+        // The real file, through the real codec: a v2 lane's `clips` key becomes its items and every fact
+        // the fixture records — the two sources, the trim, the speed, the level — has to survive the
+        // promotion, because the alternative is a user opening a project onto an empty timeline.
+        val opened = ProjectCodec.decode(v2Fixture())!!
+
+        assertThat(opened.document.schemaVersion).isEqualTo(EditDocument.SCHEMA_VERSION)
+        assertThat(opened.document.sources.map { it.id })
+            .containsExactly("src-plain", "src-rotated")
+            .inOrder()
+        assertThat(opened.document.tracks).hasSize(1)
+        assertThat(opened.document.tracks.single().id).isEqualTo(Track.MAIN_ID)
+        assertThat(opened.document.tracks.single().kind).isEqualTo(TrackKind.VIDEO)
+        assertThat(opened.document.clips.map { it.id })
+            .containsExactly("clip-trimmed", "clip-adjusted")
+            .inOrder()
+        assertThat(opened.document.clipById("clip-trimmed")?.sourceInUs).isEqualTo(1_000_000L)
+        assertThat(opened.document.clipById("clip-trimmed")?.sourceOutUs).isEqualTo(4_500_000L)
+        assertThat(opened.document.clipById("clip-adjusted")?.speed).isEqualTo(2f)
+        assertThat(opened.document.clipById("clip-adjusted")?.volume).isEqualTo(0.5f)
+    }
+
     @Test
     fun `a file this build wrote is not migrated a second time`() {
         // The round trip above proves equality; this proves the RULE — a v2 document keeps its tracks and

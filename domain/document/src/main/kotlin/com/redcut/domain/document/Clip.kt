@@ -1,6 +1,7 @@
 package com.redcut.domain.document
 
 import com.redcut.core.common.timeline.Timebase
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 /**
@@ -61,6 +62,7 @@ data class SourceRef(
  * become trivially correct, because nothing but the prefix sum ever moves.
  */
 @Serializable
+@SerialName("clip")
 data class Clip(
     val id: String,
     val sourceId: String,
@@ -74,13 +76,38 @@ data class Clip(
     val fadeOutMs: Long = 0L,
     val transform: TransformSpec = TransformSpec(),
     val enabled: Boolean = true,
-) {
+    /**
+     * The clips cut from one source in one gesture, or null when this clip stands alone.
+     *
+     * v3 STORES this and nothing reads it: the commands that honour a link — select one, and its partners
+     * come with it — are WS S part 2. It is in the schema now because a link that is not written down is
+     * a link the user re-establishes after every save, and the field costs a nullable string per clip
+     * where the behaviour costs a re-audit of every command that moves a clip.
+     */
+    val linkGroupId: String? = null,
+    /**
+     * How far this clip's sound is nudged against its own picture, in microseconds.
+     *
+     * Microseconds, because that is the unit this document keeps time in ([sourceInUs],
+     * [SourceRef.durationUs]) and a field that quietly meant milliseconds would be an off-by-1000 defect
+     * that only shows up as drift on a long timeline. The UI may show it in ms; that conversion belongs
+     * at the edge. Where a field here really is in milliseconds its NAME says so (`fadeInMs`) — that is
+     * the exception, and it is spelled out rather than assumed.
+     *
+     * Bounded by [MAX_AUDIO_SYNC_US] in both directions: past a minute the offset is not a sync fix but a
+     * second copy of the track, and refusing that here is cheaper than reasoning about it in the mixer.
+     */
+    val audioSyncOffsetUs: Long = 0,
+) : TrackItem {
     init {
         require(sourceInUs >= 0) { "sourceInUs must be >= 0, was $sourceInUs" }
         require(sourceOutUs > sourceInUs) {
             "sourceOutUs ($sourceOutUs) must exceed sourceInUs ($sourceInUs)"
         }
         require(speed > 0f) { "speed must be > 0, was $speed" }
+        require(audioSyncOffsetUs in -MAX_AUDIO_SYNC_US..MAX_AUDIO_SYNC_US) {
+            "audioSyncOffsetUs must be within ±$MAX_AUDIO_SYNC_US, was $audioSyncOffsetUs"
+        }
     }
 
     /** Length of the source range this clip reads, before speed is applied. */
@@ -105,6 +132,14 @@ data class Clip(
     companion object {
         /** 100 ms (FR-2). Trim/split/cut clamp to this; below it, delete instead. */
         const val MIN_DURATION_US = 100_000L
+
+        /**
+         * The largest sync offset a clip may carry, either way: 60 s.
+         *
+         * A bound rather than a free Long, because the offset is a NUDGE — a value outside this range is
+         * a bug in whatever produced it (a unit mix-up, most likely) and not an edit the user made.
+         */
+        const val MAX_AUDIO_SYNC_US = 60_000_000L
     }
 }
 

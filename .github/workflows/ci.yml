@@ -52,6 +52,12 @@ jobs:
       # generated-symbol import mistakes that only `build` can see otherwise.
       - name: Check app-tier imports
         run: bash tools/check-app-imports.sh
+      # And again: a rule enforced by a script rather than by review, needing no SDK and
+      # no compile. A backticked test name is copied verbatim into the JVM method name,
+      # so a `.` in it is a Kotlin COMPILE error that ktlint and detekt cannot see — it
+      # has cost two round trips, one per instance, and the module never even builds.
+      - name: Check test names
+        run: python3 tools/check-test-names.py
 
   # Static analysis. A separate job from `domain-tests` for one reason: it needs no
   # test execution and no Android SDK, so it can fail in ~40s instead of after a

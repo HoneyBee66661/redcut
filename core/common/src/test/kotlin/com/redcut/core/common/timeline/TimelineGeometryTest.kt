@@ -32,6 +32,35 @@ class TimelineGeometryTest {
         ),
     )
 
+    /**
+     * A video lane of 4 s then 2 s, and an audio lane of one 10 s clip (schema v3).
+     *
+     * Deliberately of different lengths: 6 s of video against 10 s of audio is where the flat reading and
+     * the lane reading give different answers, which is what the lane tests are about.
+     */
+    private val twoLanes = listOf(
+        LaneSpans(
+            "video",
+            spansOf(listOf(ClipTiming("v1", 4 * oneSecond), ClipTiming("v2", 2 * oneSecond))),
+        ),
+        LaneSpans("audio", spansOf(listOf(ClipTiming("a1", 10 * oneSecond)))),
+    )
+
+    /** The reading a caller with a document passes: [lanes], and no flat `spans`. */
+    private fun lanesGeometry(
+        lanes: List<LaneSpans>,
+        viewportWidthPx: Float = 360f,
+        zoom: TimelineZoom = TimelineZoom.DEFAULT,
+        scrollPx: Float = 0f,
+        density: Float = 1f,
+    ) = TimelineGeometry(
+        viewportWidthPx = viewportWidthPx,
+        lanes = lanes,
+        zoom = zoom,
+        scrollPx = scrollPx,
+        density = density,
+    )
+
     // --- Conversions -------------------------------------------------------
 
     @Test
@@ -693,5 +722,178 @@ class TimelineGeometryTest {
 
         assertThat(geometry.clipAt(7 * oneSecond)).isNull()
         assertThat(geometry.clipAt(9 * oneSecond)).isNull()
+    }
+
+    // --- Lanes (schema v3) -------------------------------------------------
+
+    @Test
+    fun `a document with tracks gets one lane rect per track`() {
+        // Lanes stack from the top of the canvas, one fixed track height each, and every band spans the
+        // whole visible window — the empty track past the last clip is a thing being drawn, not a gap.
+        val geometry = lanesGeometry(twoLanes, zoom = TimelineZoom(60f))
+
+        val lanes = geometry.laneRects()
+        assertThat(lanes.map { it.trackId }).containsExactly("video", "audio").inOrder()
+        assertThat(lanes.map { it.topPx }).containsExactly(0f, geometry.trackHeightPx).inOrder()
+        assertThat(lanes.map { it.bottomPx })
+            .containsExactly(geometry.trackHeightPx, 2f * geometry.trackHeightPx)
+            .inOrder()
+        assertThat(lanes.map { it.startPx }).containsExactly(0f, 0f).inOrder()
+        assertThat(lanes.map { it.endPx }).containsExactly(360f, 360f).inOrder()
+    }
+
+    @Test
+    fun `without lanes there is one lane at the top, exactly as before`() {
+        // The reading the editor passes today, and the one the tests above pin: one lane, no track id,
+        // one track tall. Adding lanes beside it changed nothing about it.
+        val geometry = geometry(spans = threeClips, zoom = TimelineZoom(60f))
+
+        val lane = geometry.laneRects().single()
+        assertThat(lane.trackId).isNull()
+        assertThat(lane.topPx).isEqualTo(0f)
+        assertThat(lane.bottomPx).isEqualTo(geometry.trackHeightPx)
+    }
+
+    @Test
+    fun `a lane starts one track height below the one above it`() {
+        // Density is the only thing that scales a lane's height, the rule the track body already follows:
+        // a taller screen shows more lanes, not taller ones.
+        val geometry = lanesGeometry(twoLanes, density = 2f)
+
+        assertThat(geometry.laneTopPx(0)).isEqualTo(0f)
+        assertThat(geometry.laneTopPx(1)).isEqualTo(2f * TimelineGeometry.TRACK_HEIGHT_DP)
+        assertThat(geometry.laneTopPx(2)).isEqualTo(4f * TimelineGeometry.TRACK_HEIGHT_DP)
+    }
+
+    @Test
+    fun `the timeline is as long as its longest lane, not the sum of them`() {
+        // THE lane property. Lanes run in PARALLEL: the audio clip starts at 0 in its own lane rather
+        // than being laid after the video clips, which is what the flat reading does — 10 s of content
+        // instead of 16 s of it.
+        val geometry = lanesGeometry(twoLanes, zoom = TimelineZoom(60f))
+
+        assertThat(geometry.totalWidthPx)
+            .isWithin(0.001f)
+            .of(600f + TimelineGeometry.END_PADDING_PX)
+        // And the shorter lane is NOT stretched to meet it: the video lane's last clip ends at its own
+        // 6 s (360 px), well inside a width the audio lane set.
+        assertThat(geometry.visibleRectsByLane()[0].rects.last().endPx).isEqualTo(360f)
+    }
+
+    @Test
+    fun `the same instant is the same x in every lane`() {
+        // 5 s is inside the video lane's second clip and inside the audio lane's only clip: two clips at
+        // the same x, one lane apart. The flat reading cannot say that — it lays the second track's clips
+        // after the first's, so the clip covering 5 s would be drawn starting at 16 s.
+        val geometry = lanesGeometry(twoLanes, zoom = TimelineZoom(60f))
+
+        val atFive = geometry.pxFor(5 * oneSecond)
+        assertThat(atFive).isEqualTo(300f)
+        val clipsAtFive = geometry.visibleRectsByLane()
+            .map { lane -> lane.rects.single { it.contains(atFive) }.clipId }
+        assertThat(clipsAtFive).containsExactly("v2", "a1").inOrder()
+    }
+
+    @Test
+    fun `a lane holds its own clips, culled by the flat reading's margin`() {
+        // The draw pass iterates lanes, and each lane's clips are culled by the SAME window plus one
+        // viewport of margin that `visibleRects` documents — not by a second rule that would drift.
+        val lanes = listOf(
+            LaneSpans("video", spansOf((1..10).map { ClipTiming("clip-$it", 10 * oneSecond) })),
+            LaneSpans("audio", listOf(ClipSpan("music", 0, 600 * oneSecond))),
+        )
+        val byLane = lanesGeometry(lanes, zoom = TimelineZoom(60f)).visibleRectsByLane()
+
+        assertThat(byLane.map { it.lane.trackId }).containsExactly("video", "audio").inOrder()
+        assertThat(byLane[0].rects.map { it.clipId }).containsExactly("clip-1", "clip-2").inOrder()
+        // The long audio clip overlaps the window end to end, so it comes back once, whole: a lane
+        // shows the rects its OWN clips have, in content pixels, whatever the viewport is doing.
+        assertThat(byLane[1].rects.single().clipId).isEqualTo("music")
+        assertThat(byLane[1].rects.single().endPx).isEqualTo(36_000f)
+    }
+
+    @Test
+    fun `without lanes the draw pass still iterates exactly one lane`() {
+        // A Canvas with no document yet calls this the day it switches over, and gets what it had.
+        val geometry = geometry(spans = threeClips, zoom = TimelineZoom(60f))
+
+        val byLane = geometry.visibleRectsByLane()
+        assertThat(byLane.single().lane.trackId).isNull()
+        assertThat(byLane.single().rects).isEqualTo(geometry.visibleRects())
+    }
+
+    @Test
+    fun `a lane with no clips is still a rect to draw`() {
+        // An overlay track waiting for its first clip is drawn as empty TRACK, which is the whole reason
+        // `laneRects` spans the window rather than the content — and why a lane with nothing on screen is
+        // returned with no rects rather than dropped from the list.
+        val lanes = listOf(
+            LaneSpans("video", spansOf(listOf(ClipTiming("v1", 4 * oneSecond)))),
+            LaneSpans("overlay", emptyList()),
+        )
+        val byLane = lanesGeometry(lanes, zoom = TimelineZoom(60f)).visibleRectsByLane()
+
+        assertThat(byLane).hasSize(2)
+        assertThat(byLane[1].lane.trackId).isEqualTo("overlay")
+        assertThat(byLane[1].lane.widthPx).isEqualTo(360f)
+        assertThat(byLane[1].rects).isEmpty()
+    }
+
+    @Test
+    fun `the ruler runs to the end of the longest lane`() {
+        // Scrolled to 5 s at the 5 s tick interval: 10 s is drawn because the AUDIO lane runs that far —
+        // the video lane alone would have stopped the ruler at its own 6 s, 300 px short of this.
+        val geometry = lanesGeometry(twoLanes, zoom = TimelineZoom(60f), scrollPx = 300f)
+
+        assertThat(geometry.rulerTicks()).containsExactly(5_000_000L, 10_000_000L).inOrder()
+    }
+
+    @Test
+    fun `a touch is resolved to the lane its y lands in`() {
+        // x = 100 is inside a clip in BOTH lanes: "v1" above, "a1" below. The y is what picks one, and
+        // the same x one lane up is a different clip — which is the answer the flat reading cannot give.
+        val geometry = lanesGeometry(twoLanes, zoom = TimelineZoom(60f))
+        val firstLaneY = geometry.trackHeightPx / 2f
+        val secondLaneY = geometry.laneTopPx(1) + geometry.trackHeightPx / 2f
+
+        assertThat(geometry.hitTest(100f, firstLaneY)).isEqualTo(TimelineHit.Body("v1"))
+        assertThat(geometry.hitTest(100f, secondLaneY)).isEqualTo(TimelineHit.Body("a1"))
+    }
+
+    @Test
+    fun `a lane boundary is not a clip edge`() {
+        // x = 380 is past the video lane's last clip (which ends at 360) and inside its 48 px out-point
+        // target, so it trims "v2" — from the video lane. One lane down, the same x is the audio clip's
+        // BODY, and the edge target must not reach across the boundary to steal it.
+        val geometry = lanesGeometry(twoLanes, zoom = TimelineZoom(60f))
+        val firstLaneY = geometry.trackHeightPx / 2f
+        val secondLaneY = geometry.laneTopPx(1) + geometry.trackHeightPx / 2f
+
+        assertThat(geometry.hitTest(380f, firstLaneY))
+            .isEqualTo(TimelineHit.Edge(clipId = "v2", side = EdgeSide.RIGHT, withinClip = false))
+        assertThat(geometry.hitTest(380f, secondLaneY)).isEqualTo(TimelineHit.Body("a1"))
+    }
+
+    @Test
+    fun `a touch above the first lane or below the last hits nothing`() {
+        val geometry = lanesGeometry(twoLanes, zoom = TimelineZoom(60f))
+
+        assertThat(geometry.hitTest(100f, -1f)).isEqualTo(TimelineHit.None)
+        // The bottom edge belongs to no lane: a band is top-inclusive and bottom-exclusive, so the lane
+        // below starts exactly where the one above stopped and nothing is claimed twice.
+        assertThat(geometry.hitTest(100f, 2f * geometry.trackHeightPx)).isEqualTo(TimelineHit.None)
+    }
+
+    @Test
+    fun `the flat reading is the lane reading taken inside the first lane`() {
+        // The one-argument hit test is unchanged — the same three rules on the single lane a caller
+        // without a document has — and it is stated here as an equality so the two cannot drift.
+        val geometry = geometry(spans = threeClips, zoom = TimelineZoom(60f))
+        val middleOfTheLane = geometry.trackHeightPx / 2f
+
+        assertThat(geometry.hitTest(230f)).isEqualTo(geometry.hitTest(230f, middleOfTheLane))
+        // Below the one track the flat geometry has, there is no timeline at all.
+        assertThat(geometry.hitTest(230f, 1.5f * geometry.trackHeightPx))
+            .isEqualTo(TimelineHit.None)
     }
 }

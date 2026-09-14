@@ -177,6 +177,9 @@ class EditorViewModel @Inject constructor(
             is EditorIntent.SetViewport -> {
                 val clipId = (_state.value.selection as? Selection.Clip)?.clipId ?: return
                 val clip = clipOf(clipId) ?: return
+                // The lane comes from the document, the same way the reorder branch above asks for it:
+                // the selection carries a clip id and nothing else, and the command must name a track.
+                val trackId = history.current.trackIdOf(clip.id) ?: return
                 val updatedRect = ViewportRect(
                     centerX = intent.centerX,
                     centerY = intent.centerY,
@@ -186,7 +189,9 @@ class EditorViewModel @Inject constructor(
                 val newTransform = updatedRect.toTransformSpec(base = clip.transform)
                 if (clip.transform == newTransform) return
                 logger.d(TAG, "viewport ${intent.centerX}, ${intent.centerY} @ ${intent.zoom}x")
-                history.execute(SetTransform(clipId = clipId, transform = newTransform))
+                history.execute(
+                    SetTransform(trackId = trackId, clipId = clipId, transform = newTransform),
+                )
                 autosave()
                 publish()
             }

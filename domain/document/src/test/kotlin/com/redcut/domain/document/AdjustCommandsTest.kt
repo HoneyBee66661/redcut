@@ -228,10 +228,10 @@ class AdjustCommandsTest {
             cropBottom = 0.8f,
         )
 
-        val updated = SetTransform("clip-a", transform).apply(doc)
+        val updated = SetTransform(VIDEO, "clip-a", transform).apply(doc)
         assertThat(updated.clips.single().transform).isEqualTo(transform)
 
         // Identical transform leaves document unchanged
-        assertThat(SetTransform("clip-a", transform).apply(updated)).isEqualTo(updated)
+        assertThat(SetTransform(VIDEO, "clip-a", transform).apply(updated)).isEqualTo(updated)
     }
 }

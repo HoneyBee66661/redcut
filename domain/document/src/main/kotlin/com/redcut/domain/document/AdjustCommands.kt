@@ -139,14 +139,24 @@ data class RenameDocument(val name: String) : EditCommand {
 
 /**
  * Set a clip's crop and zoom transform (spec UI revision 2, §WS F / Task F4).
+ *
+ * Names its lane like every other clip command, and for the same reason: the viewport gesture addresses
+ * the SELECTED clip, so the id it carries came from a frame the user has seen — and a selection that a
+ * ripple, a delete or an undo has since moved must be a no-op rather than a transform applied to a clip
+ * on another track. The lane is not bookkeeping here; it is the difference between "the clip I am looking
+ * at changed" and "a clip I am not looking at changed".
  */
-data class SetTransform(val clipId: String, val transform: TransformSpec) : EditCommand {
+data class SetTransform(
+    val trackId: String,
+    val clipId: String,
+    val transform: TransformSpec,
+) : EditCommand {
     override val label: String get() = "Transform"
 
     override fun apply(doc: EditDocument): EditDocument {
-        val clip = doc.clipById(clipId) ?: return doc
+        val clip = doc.trackById(trackId)?.clipById(clipId) ?: return doc
         if (clip.transform == transform) return doc
-        return doc.withClip(clip.copy(transform = transform))
+        return doc.withClip(trackId, clip.copy(transform = transform))
     }
 }
 

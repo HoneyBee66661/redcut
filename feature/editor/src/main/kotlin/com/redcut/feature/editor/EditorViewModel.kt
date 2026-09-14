@@ -135,67 +135,112 @@ class EditorViewModel @Inject constructor(
         }
     }
 
-    /** Document edits: everything that ends up on the history stack. */
+    /**
+     * Document edits: everything that ends up on the history stack, dispatched by FAMILY.
+     *
+     * The same idea as [onIntent], one level down, and for the same reason: three workstreams' intents
+     * arrive here now — the timeline's cuts, gestures and reorder, the preview viewport, and (through
+     * [EditorIntent.View]) the export sheet. A flat list of ten branches is a switch `detekt` measures
+     * and a reader has to hold; a family is a sub-interface of [EditorIntent.Edit], so its branch is one
+     * line and the family's own `when` is exhaustive over the members that belong to it.
+     *
+     * Five families pass through: the two drag gestures, the Cut stage's tools at the playhead, the drag
+     * that rearranges one lane, and the viewport. An import is not a family — one intent, one branch,
+     * one handler that was already named for it.
+     *
+     * There is still no `else` anywhere: a new intent joins a family (and the compiler makes that
+     * family's `when` handle it) or takes a branch of its own, and either way it cannot fall outside
+     * both. That is what makes a fourth family cheap — its intents, its helper, one line here.
+     */
     private fun applyEdit(intent: EditorIntent.Edit) {
         when (intent) {
-            is EditorIntent.ImportMedia -> importMedia(intent.uris)
+            // The two drag gestures. Each family's own `when` covers its four moments exhaustively.
+            is EditorIntent.TrimGesture -> applyTrimGesture(intent)
+            is EditorIntent.AdjustGesture -> applyAdjustGesture(intent)
 
-            is EditorIntent.BeginTrim -> beginTrim(intent.clipId, intent.edge, intent.sourceTimeUs)
-
-            is EditorIntent.UpdateTrim -> updateTrim(intent.sourceTimeUs)
-
-            EditorIntent.EndTrim, EditorIntent.EndAdjust -> endGesture()
-
-            EditorIntent.CancelTrim, EditorIntent.CancelAdjust -> cancelGesture()
-
+            // The Cut stage's tools at the playhead, and the drag that rearranges one lane.
             is EditorIntent.ApplyCut -> applyCut(intent.tool)
+            is EditorIntent.ApplyReorder -> applyReorder(intent.clipId, intent.toIndex)
 
-            is EditorIntent.ApplyReorder -> {
-                // Inlined rather than a one-call-site private function: detekt's function-count limit is
-                // what surfaced it, and a name with no logic behind it is a name a reader follows for
-                // nothing.
-                logger.d(TAG, "reorder ${intent.clipId} -> ${intent.toIndex}")
-                // The lane the dragged clip is on, asked of the document: the intent carries a clip id
-                // because the SELECTION still does, and a (track, clip) pair is the timeline work's
-                // next step. A clip no lane holds has nothing to reorder, so this is a no-op.
-                val trackId = history.current.trackIdOf(intent.clipId) ?: return
-                history.execute(
-                    ReorderClip(
-                        trackId = trackId,
-                        clipId = intent.clipId,
-                        toIndex = intent.toIndex,
-                    ),
-                )
-                _state.value = _state.value.copy(selection = Selection.Clip(intent.clipId))
-                autosave()
-                publish()
-            }
+            // The preview viewport (WS F): the crop and zoom of the SELECTED clip.
+            is EditorIntent.SetViewport -> applyViewport(intent)
 
+            is EditorIntent.ImportMedia -> importMedia(intent.uris)
+        }
+    }
+
+    /**
+     * The trim gesture's four moments (FR-2.1): the finger went down on an edge, moved, lifted, or the
+     * gesture was abandoned.
+     *
+     * The drag PREVIEWS and only the lift records a history entry — that pairing is what makes these
+     * four one family rather than four unrelated edits, and [applyAdjustGesture] has the same shape.
+     */
+    private fun applyTrimGesture(intent: EditorIntent.TrimGesture) {
+        when (intent) {
+            is EditorIntent.BeginTrim -> beginTrim(intent.clipId, intent.edge, intent.sourceTimeUs)
+            is EditorIntent.UpdateTrim -> updateTrim(intent.sourceTimeUs)
+            EditorIntent.EndTrim -> endGesture()
+            EditorIntent.CancelTrim -> cancelGesture()
+        }
+    }
+
+    /** The adjust gesture's four moments (FR-3.1–3.4, 3.9). See [applyTrimGesture]. */
+    private fun applyAdjustGesture(intent: EditorIntent.AdjustGesture) {
+        when (intent) {
             is EditorIntent.BeginAdjust -> beginAdjust(intent.clipId, intent.adjustment)
             is EditorIntent.UpdateAdjust -> updateAdjust(intent.value)
-
-            is EditorIntent.SetViewport -> {
-                val clipId = (_state.value.selection as? Selection.Clip)?.clipId ?: return
-                val clip = clipOf(clipId) ?: return
-                // The lane comes from the document, the same way the reorder branch above asks for it:
-                // the selection carries a clip id and nothing else, and the command must name a track.
-                val trackId = history.current.trackIdOf(clip.id) ?: return
-                val updatedRect = ViewportRect(
-                    centerX = intent.centerX,
-                    centerY = intent.centerY,
-                    zoom = intent.zoom,
-                    canvasSpec = history.current.canvas,
-                ).clamped()
-                val newTransform = updatedRect.toTransformSpec(base = clip.transform)
-                if (clip.transform == newTransform) return
-                logger.d(TAG, "viewport ${intent.centerX}, ${intent.centerY} @ ${intent.zoom}x")
-                history.execute(
-                    SetTransform(trackId = trackId, clipId = clipId, transform = newTransform),
-                )
-                autosave()
-                publish()
-            }
+            EditorIntent.EndAdjust -> endGesture()
+            EditorIntent.CancelAdjust -> cancelGesture()
         }
+    }
+
+    /**
+     * Moves a clip to a new slot (FR-2.7).
+     *
+     * `ReorderClip` clamps the index and refuses an unknown clip, so there is nothing to validate here —
+     * and the marker the user dragged to came from the same arithmetic the command will apply, which is
+     * what stops the clip landing somewhere they did not point at.
+     *
+     * The lane comes from the document, the way every command in this file obtains one: the intent
+     * carries a clip id because the SELECTION still does, and a `(track, clip)` pair is the timeline
+     * work's next step. A clip no lane holds has nothing to reorder, so this is a no-op.
+     */
+    private fun applyReorder(clipId: String, toIndex: Int) {
+        logger.d(TAG, "reorder $clipId -> $toIndex")
+        val trackId = history.current.trackIdOf(clipId) ?: return
+        history.execute(ReorderClip(trackId = trackId, clipId = clipId, toIndex = toIndex))
+        _state.value = _state.value.copy(selection = Selection.Clip(clipId))
+        autosave()
+        publish()
+    }
+
+    /**
+     * The preview viewport (spec UI revision 2, §WS F / Task F4): the crop and zoom of the SELECTED clip.
+     *
+     * The guards are the feature's rules rather than defensive noise: the viewport is INERT with nothing
+     * selected, and a gesture that lands on the value the clip already has must not put a no-op on the
+     * history stack. What a legal rect is, and how it folds into the clip's transform, is the domain's
+     * ([ViewportRect]) — this function turns a gesture into a command and nothing else.
+     */
+    private fun applyViewport(intent: EditorIntent.SetViewport) {
+        val clipId = (_state.value.selection as? Selection.Clip)?.clipId ?: return
+        val clip = clipOf(clipId) ?: return
+        val trackId = history.current.trackIdOf(clip.id) ?: return
+        val updatedRect = ViewportRect(
+            centerX = intent.centerX,
+            centerY = intent.centerY,
+            zoom = intent.zoom,
+            canvasSpec = history.current.canvas,
+        ).clamped()
+        val newTransform = updatedRect.toTransformSpec(base = clip.transform)
+        if (clip.transform == newTransform) return
+        logger.d(TAG, "viewport ${intent.centerX}, ${intent.centerY} @ ${intent.zoom}x")
+        history.execute(
+            SetTransform(trackId = trackId, clipId = clipId, transform = newTransform),
+        )
+        autosave()
+        publish()
     }
 
     /**
@@ -255,13 +300,6 @@ class EditorViewModel @Inject constructor(
         publish()
     }
 
-    /**
-     * Moves a clip to a new slot (FR-2.7).
-     *
-     * `ReorderClip` clamps the index and refuses an unknown clip, so there is nothing to validate here
-     * — and the marker the user dragged to came from the same arithmetic the command will apply, which
-     * is what stops the clip landing somewhere they did not point at.
-     */
     /**
      * View changes: stage, playhead, selection, history navigation.
      *

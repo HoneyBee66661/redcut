@@ -29,6 +29,17 @@ import com.redcut.domain.document.FrameStep
  *   future intent can quietly fall outside both handlers;
  * * the split is a place a reviewer can check the distinction at a glance instead of inferring it
  *   from twelve handler bodies.
+ *
+ * ### And the same again, one level down
+ *
+ * [Edit] grew the same way for the same reason: three workstreams' intents arrived (the timeline's
+ * cuts and gestures, the preview viewport, the export sheet) and its handler's `when` went back to
+ * being a switch that `detekt` measures. So the two DRAG GESTURES are sub-interfaces of their own —
+ * [TrimGesture] and [AdjustGesture] — and each has four moments that only read as a set when they sit
+ * together. A single-intent family needs no type: [Edit]'s handler covers those directly.
+ *
+ * The rule this keeps: a new intent either joins a family (and the family's own `when` must handle it,
+ * which the compiler checks) or takes a branch of its own. There is still no `else` to fall into.
  */
 sealed interface EditorIntent {
 
@@ -40,6 +51,19 @@ sealed interface EditorIntent {
      * selection, or a history navigation. None of these is an edit, and none is undoable.
      */
     sealed interface View : EditorIntent
+
+    /**
+     * The trim gesture's four moments: the finger went down on an edge, moved, lifted, or the gesture
+     * was abandoned (FR-2.1).
+     *
+     * A family rather than four unrelated [Edit]s, because they are one conversation with the document:
+     * the drag is a PREVIEW and only the lift records a history entry (§7.3's "Undo Trim"), which is a
+     * rule about the four of them together and cannot be read off any one of them.
+     */
+    sealed interface TrimGesture : Edit
+
+    /** The adjust gesture's four moments (FR-3.1–3.4, 3.9). See [TrimGesture] — the same lifecycle. */
+    sealed interface AdjustGesture : Edit
 
     /** Show a different stage. Does not touch the document (spec §7.1). */
     data class SelectStage(val stage: Stage) : View
@@ -86,16 +110,20 @@ sealed interface EditorIntent {
      * The command is applied as a PREVIEW, not pushed: the whole drag is one undo entry, and §7.3's
      * "Undo Trim" is what the user expects to see once, not once per frame of the gesture.
      */
-    data class BeginTrim(val clipId: String, val edge: ClipEdge, val sourceTimeUs: Long) : Edit
+    data class BeginTrim(
+        val clipId: String,
+        val edge: ClipEdge,
+        val sourceTimeUs: Long,
+    ) : TrimGesture
 
     /** The drag moved: the edge is now at [sourceTimeUs]. */
-    data class UpdateTrim(val sourceTimeUs: Long) : Edit
+    data class UpdateTrim(val sourceTimeUs: Long) : TrimGesture
 
     /** The finger lifted: the preview becomes one history entry. */
-    data object EndTrim : Edit
+    data object EndTrim : TrimGesture
 
     /** The gesture was abandoned (a second finger, a system interruption): the preview is rolled back. */
-    data object CancelTrim : Edit
+    data object CancelTrim : TrimGesture
 
     /**
      * Run a Cut tool at the playhead (FR-2.2–2.6).
@@ -123,16 +151,16 @@ sealed interface EditorIntent {
      * Also selects the clip, because a slider and its selection are the same thought: the user reached
      * for the control of the clip they are looking at, and the inspector draws from the selection.
      */
-    data class BeginAdjust(val clipId: String, val adjustment: ClipAdjustment) : Edit
+    data class BeginAdjust(val clipId: String, val adjustment: ClipAdjustment) : AdjustGesture
 
     /** A slider's new value, mid-drag. */
-    data class UpdateAdjust(val value: Float) : Edit
+    data class UpdateAdjust(val value: Float) : AdjustGesture
 
     /** The drag ended: the preview becomes ONE undoable entry, not one per frame. */
-    data object EndAdjust : Edit
+    data object EndAdjust : AdjustGesture
 
     /** The drag was abandoned (a second finger, a system interruption): the preview is rolled back. */
-    data object CancelAdjust : Edit
+    data object CancelAdjust : AdjustGesture
 
     /**
      * Set the preview viewport rect centre and zoom (spec UI revision 2, §WS F / Task F3).

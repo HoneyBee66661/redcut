@@ -6,6 +6,7 @@ import com.redcut.domain.document.ClipAdjustment
 import com.redcut.domain.document.ClipEdge
 import com.redcut.domain.document.TrimClip
 import com.redcut.domain.document.UndoStack
+import com.redcut.domain.document.adjust
 import com.redcut.domain.document.trimmedTo
 
 /**

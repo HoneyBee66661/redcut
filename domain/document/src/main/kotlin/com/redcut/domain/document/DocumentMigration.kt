@@ -23,7 +23,11 @@ package com.redcut.domain.document
  * would be migrated again by the next reader.
  */
 fun EditDocument.promotedFromV1(v1Clips: List<Clip>): EditDocument {
-    if (schemaVersion >= SCHEMA_VERSION) return this
+    // `EditDocument.SCHEMA_VERSION`, not `SCHEMA_VERSION`: a companion object's members are in scope
+    // inside the CLASS body, where the compiler has an implicit companion receiver to look through —
+    // and an extension function has no such receiver, however obviously it is "about" EditDocument.
+    // The bare name here would be a top-level one that does not exist.
+    if (schemaVersion >= EditDocument.SCHEMA_VERSION) return this
     val promoted = if (clips.isEmpty() && v1Clips.isNotEmpty()) {
         // Verbatim and in order. A migration that dropped a clip, sorted them, or re-derived anything
         // would be a migration that lost the user's edit — and the clips are the edit.
@@ -31,5 +35,5 @@ fun EditDocument.promotedFromV1(v1Clips: List<Clip>): EditDocument {
     } else {
         this
     }
-    return promoted.copy(schemaVersion = SCHEMA_VERSION)
+    return promoted.copy(schemaVersion = EditDocument.SCHEMA_VERSION)
 }

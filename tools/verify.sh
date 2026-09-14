@@ -7,16 +7,17 @@
 #
 #   1. tools/check-architecture.sh   no JDK, no network, fails in seconds
 #   2. tools/check-app-imports.sh    the Android-only compile errors that are a grep
-#   3. ktlint + detekt               style and code smells, no Android SDK needed
-#   4. the pure-JVM test tier        :domain:* — the fast tier of spec §12.1
-#   5. the fast-tier budget          the tier is only useful while it stays FAST
+#   3. tools/check-test-names.py     the Kotlin compiler's own rule about test names
+#   4. ktlint + detekt               style and code smells, no Android SDK needed
+#   5. the pure-JVM test tier        :domain:* — the fast tier of spec §12.1
+#   6. the fast-tier budget          the tier is only useful while it stays FAST
 #
 # Usage:
 #   ./tools/verify.sh                             # warnings are warnings
 #   ./tools/verify.sh -Predcut.warningsAsErrors   # exactly what CI adds
 #
 # Everything passed in is forwarded to Gradle, which is how CI can add its flags
-# without a second copy of this script. Exit code is 0 only when all four pass.
+# without a second copy of this script. Exit code is 0 only when all of them pass.
 #
 # WHY THIS EXISTS
 #
@@ -40,6 +41,11 @@
 #   * Phase 0.5 broke `:app` on a missing `import com.redcut.app.BuildConfig` — a
 #     compile error that is invisible on a host with no Android SDK, and which cost a
 #     full CI round trip. Step 2 is the cheap half of that lesson.
+#   * A test named `... 1000 frames is 33.3667 seconds` did not compile. A backticked
+#     name is copied verbatim into the JVM method name, where `.` is reserved — and
+#     ktlint and detekt read the name as an opaque string, so nothing local could see
+#     it. That is now the second CI round trip lost to one decimal point; step 3 is
+#     the grep that ends the class of mistake.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -73,6 +79,16 @@ echo "== App-tier import check ============================================="
 # The Android-only half of the local loop: `:app` and `:feature:*` are never compiled
 # on this host, so a missing generated-symbol import is green here and red in CI.
 bash tools/check-app-imports.sh && echo "  no unqualified generated symbols"
+
+echo
+echo "== Test-name check ==================================================="
+# The compiler's own rule rather than Android's, so it bites on every host — but only
+# at COMPILE time, which is minutes into CI and after a Gradle start locally. A
+# backticked name becomes the JVM method name verbatim, and the compiler rejects
+# `.` `;` `[` `]` `/` `<` `>` `:` `\` in one; ktlint and detekt parse the name as an
+# opaque string and pass. Two instances have already cost a CI round trip each, so
+# the check runs here instead: python3 and a regex, before anything is compiled.
+python3 tools/check-test-names.py
 
 echo
 echo "== Static analysis: ${QUALITY_TASKS[*]} =============================="

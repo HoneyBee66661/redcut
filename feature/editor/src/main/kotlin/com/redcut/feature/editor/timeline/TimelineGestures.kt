@@ -79,7 +79,11 @@ internal class TimelineGestures(
     val scrub: (screenX: Float) -> Unit,
     val scroll: (deltaPx: Float) -> Unit,
     val zoom: (factor: Float) -> Unit,
-    val tap: (screenX: Float) -> Unit,
+    /**
+     * [screenY] is in LANE space — the pointer's own y with the ruler strip taken off — which is
+     * the space the geometry's lane bands and `drawTimeline`'s bands are both measured in.
+     */
+    val tap: (screenX: Float, screenY: Float) -> Unit,
     val trim: TrimGestures,
     val reorder: ReorderGestures,
 )
@@ -98,14 +102,22 @@ internal class TimelineGestures(
  * and a control that only changes selection is a toggle.
  *
  * An edge taps the same way as the body. Empty space past the clips clears the selection.
+ *
+ * ### The y picks the LANE (schema v3)
+ *
+ * [screenY] resolves which track's band was touched BEFORE the x is read, so an x that crosses a clip in
+ * one lane cannot select a clip in another. A y in no lane at all — below the last track — is also empty
+ * space, and clears the selection for the same reason the area past the clips does: there is nothing
+ * there to select.
  */
 internal fun onTimelineTap(
     screenX: Float,
+    screenY: Float,
     geometry: TimelineGeometry,
     onIntent: (EditorIntent) -> Unit,
     selectedClipId: String? = null,
 ) {
-    val hit = geometry.hitTest(screenX)
+    val hit = geometry.hitTest(screenX, screenY)
     val tapped = when (hit) {
         is TimelineHit.Body -> hit.clipId
         is TimelineHit.Edge -> hit.clipId
@@ -138,11 +150,15 @@ private suspend fun AwaitPointerEventScope.trimGesture(
     geometry: TimelineGeometry,
     rulerHeightPx: Float,
     actions: TimelineGestures,
-    onTap: (screenX: Float) -> Unit,
+    onTap: (screenX: Float, screenY: Float) -> Unit,
 ) {
     val down = awaitFirstDown(requireUnconsumed = false)
     if (down.position.y <= rulerHeightPx) return
-    val hit = geometry.hitTest(down.position.x)
+    // The geometry's bands start at the top of the TRACK AREA, which is the pointer's own y once the
+    // ruler strip above it is taken off — the same subtraction `drawTimeline` adds back when it places a
+    // band at `rulerHeight + topPx`. Without it, touch and pixel would disagree by the ruler's height and
+    // the bottom of every lane would be untouchable.
+    val hit = geometry.hitTest(down.position.x, down.position.y - rulerHeightPx)
     if (hit !is TimelineHit.Edge) return
 
     down.consume()
@@ -150,10 +166,12 @@ private suspend fun AwaitPointerEventScope.trimGesture(
 
     var moved = false
     var lastX = down.position.x
+    var lastY = down.position.y
     var pointer = nextPointer(down)
     while (pointer != null && pointer.pressed) {
         pointer.consume()
         lastX = pointer.position.x
+        lastY = pointer.position.y
         val travelled = (pointer.position - down.position).getDistance()
         if (!moved && travelled > viewConfiguration.touchSlop) {
             moved = true
@@ -166,7 +184,7 @@ private suspend fun AwaitPointerEventScope.trimGesture(
         actions.trim.end()
     } else {
         actions.trim.cancel()
-        onTap(lastX)
+        onTap(lastX, lastY - rulerHeightPx)
     }
 }
 
@@ -224,7 +242,9 @@ internal fun timelineGestureHandlers(
                 TimelineZoom(geometry.zoom.pixelsPerSecond * factor).clamped().pixelsPerSecond,
             )
         },
-        tap = { screenX -> onTimelineTap(screenX, geometry, onIntent, selectedClipId) },
+        tap = { screenX, screenY ->
+            onTimelineTap(screenX, screenY, geometry, onIntent, selectedClipId)
+        },
         trim = TrimGestures(
             begin = { clipId, edge, screenX ->
                 onIntent(EditorIntent.BeginTrim(clipId, edge, sourceTimeAt(clipId, screenX)))
@@ -292,7 +312,9 @@ internal fun Modifier.timelineGestures(
                 onDragStart = { offset ->
                     val geometryNow = currentGeometry
                     if (offset.y <= rulerHeightPx) return@detectDragGesturesAfterLongPress
-                    val hit = geometryNow.hitTest(offset.x)
+                    // With y, so the clip picked up is one in THIS lane: a long press in lane 2 with lane
+                    // 1's clips under the same x must not pick one of those up.
+                    val hit = geometryNow.hitTest(offset.x, offset.y - rulerHeightPx)
                     val clipId = (hit as? TimelineHit.Body)?.clipId
                         ?: return@detectDragGesturesAfterLongPress
                     currentActions.reorder.start(clipId, offset.x)
@@ -315,7 +337,9 @@ internal fun Modifier.timelineGestures(
         }
         .pointerInput(rulerHeightPx) {
             detectTapGestures { offset ->
-                if (offset.y > rulerHeightPx) currentActions.tap(offset.x)
+                if (offset.y > rulerHeightPx) {
+                    currentActions.tap(offset.x, offset.y - rulerHeightPx)
+                }
             }
         }
 }

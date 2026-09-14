@@ -22,6 +22,10 @@ import org.junit.Test
  *
  * `onTimelineTap` is a plain function over the geometry and a callback, so it can be tested with no Compose
  * runtime and no finger: the intents it emits ARE the behaviour.
+ *
+ * The y is the LANE (schema v3): a tap resolves which track's band it landed in before it reads x, so the
+ * same x can mean two different clips — or none, below the last track. That is why every case here passes
+ * a y, and why the flat geometry they share draws its one lane over `0..TRACK_HEIGHT_DP`.
  */
 class TimelineTapTest {
 
@@ -36,9 +40,13 @@ class TimelineTapTest {
         density = 1f,
     )
 
-    private fun intentsFor(screenX: Float, selectedClipId: String?): List<EditorIntent> {
+    private fun intentsFor(
+        screenX: Float,
+        selectedClipId: String?,
+        screenY: Float = LANE_MIDDLE_Y,
+    ): List<EditorIntent> {
         val sent = mutableListOf<EditorIntent>()
-        onTimelineTap(screenX, geometry(), sent::add, selectedClipId)
+        onTimelineTap(screenX, screenY, geometry(), sent::add, selectedClipId)
         return sent
     }
 
@@ -81,4 +89,19 @@ class TimelineTapTest {
         assertThat(intentsFor(5f, selectedClipId = "clip-0"))
             .containsExactly(EditorIntent.ClearSelection)
     }
+
+    @Test
+    fun `a tap below the last lane hits nothing, however many clips that x crosses`() {
+        // 30 px is the middle of clip-0, and this tap is the same x one pixel below the track. The lane is
+        // resolved from y FIRST, so there is no track there to hold a clip: the selection clears instead of
+        // switching to a clip the finger is not on.
+        assertThat(intentsFor(30f, selectedClipId = "clip-0", screenY = LANE_BELOW_Y))
+            .containsExactly(EditorIntent.ClearSelection)
+    }
 }
+
+/** The middle of the one lane the flat reading draws: half a 56 dp track at density 1. */
+private const val LANE_MIDDLE_Y = TimelineGeometry.TRACK_HEIGHT_DP / 2f
+
+/** One pixel below that lane: a y in no band at all, which is what the area past the last track is. */
+private const val LANE_BELOW_Y = TimelineGeometry.TRACK_HEIGHT_DP + 1f

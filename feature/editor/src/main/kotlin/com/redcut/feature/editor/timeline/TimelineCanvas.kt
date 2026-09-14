@@ -20,7 +20,6 @@ import com.redcut.core.common.timeline.ClipRect
 import com.redcut.core.common.timeline.ClipSpan
 import com.redcut.core.common.timeline.TimelineGeometry
 import com.redcut.core.common.timeline.TimelineZoom
-import com.redcut.core.common.timeline.spansOf
 import com.redcut.core.media.ThumbnailKey
 import com.redcut.domain.document.EditDocument
 import com.redcut.domain.document.reorderMarkerUs
@@ -29,7 +28,7 @@ import com.redcut.feature.editor.EditorIntent
 import com.redcut.feature.editor.Selection
 import com.redcut.feature.editor.ToolState
 import com.redcut.feature.editor.clipIdOrNull
-import com.redcut.feature.editor.toClipTimings
+import com.redcut.feature.editor.laneSpans
 
 /**
  * The timeline surface (spec §7.1): a custom Compose `Canvas`, not a row of composables.
@@ -42,6 +41,15 @@ import com.redcut.feature.editor.toClipTimings
  * [TimelineDraw] paints them. This composable is the wiring: state in, draw calls out. That split is
  * why the timeline has tests at all — a `Canvas` that computed its own rectangles could only be
  * verified by looking at it.
+ *
+ * ### Lanes, and what is below the last one
+ *
+ * The document's tracks are drawn as LANES (schema v3): one band per track, stacked from
+ * the top of the track area — below the ruler — one track height each. This surface
+ * fills the container it is given rather than sizing itself to the lane count, so a
+ * document with more tracks than fit shows the first ones and the rest are NOT drawn.
+ * That is the honest behaviour for a timeline with no vertical scroll gesture: a lane
+ * the user cannot scroll to is better absent than half-drawn.
  *
  * ### Gestures, and who owns which surface
  *
@@ -172,10 +180,11 @@ private data class ReorderDrag(val clipId: String, val targetIndex: Int, val las
 /**
  * The layer: everything the timeline derives from the document and the viewport, in one value.
  *
- * The pipeline is the point, and it is worth reading as a chain: clips → spans (prefix-summed start
- * positions) → geometry (zoom, scroll, density) → rects (which clips are on screen and how wide) →
- * slices (which frames the filmstrip asks for) → images (the ones that arrived). Each step is tested
- * somewhere in the fast tier or in CI; this function is only their order.
+ * The pipeline is the point, and it is worth reading as a chain: clips → lanes (one per
+ * track, with the domain's own starts) → geometry (zoom, scroll, density) → lane bands
+ * with their culled clips → slices (which frames the filmstrip asks for) → images (the
+ * ones that arrived). Each step is tested somewhere in the fast tier or in CI; this
+ * function is only their order.
  */
 @Composable
 private fun rememberTimelineLayer(
@@ -187,25 +196,37 @@ private fun rememberTimelineLayer(
     onThumbnail: suspend (sourceId: String, uri: String, positionUs: Long) -> ImageBitmap?,
 ): TimelineLayer {
     val clipsById = remember(document) { document.clips.associateBy { it.id } }
-    val spans = remember(document) { spansOf(document.toClipTimings()) }
+    // LANES, not one flat list (schema v3): every track's clips with the starts the DOMAIN
+    // derives. The flat reading laid one track's clips after another's — true for a
+    // document with one track and a lie about a document with two.
+    val lanes = remember(document) { document.laneSpans() }
+    val spans = remember(lanes) { lanes.flatMap { it.spans } }
     val spansByClip = remember(spans) { spans.associateBy { it.clipId } }
     // Two steps, because the scroll that centres the playhead is a function OF a geometry: build it at 0,
     // ask where the playhead should sit, then keep that offset. The alternative — a static helper taking
     // every input the geometry already holds — is the same arithmetic written twice.
     val unscrolled = TimelineGeometry(
         viewportWidthPx = viewportWidthPx,
-        spans = spans,
         zoom = TimelineZoom(zoomPxPerSecond),
         scrollPx = 0f,
         density = density,
+        // `lanes` and NOT `spans`: a caller passes one reading or the other, and this
+        // caller has the document. Passing both would leave the flat members answering
+        // about an empty list.
+        lanes = lanes,
     )
     val geometry = unscrolled.copy(scrollPx = unscrolled.scrollCentering(playheadUs))
-    val rects = geometry.visibleRects()
+    // Per lane, so the draw pass gets a band and its clips as one value and cannot pair a
+    // lane with another lane's clips. The flat list below is built here rather than carried
+    // on the layer, because its two readers are per CLIP, not per lane — the filmstrip's
+    // slice inputs and the gesture layer's spans — and they ask a clip id a question.
+    val lanesOnScreen = geometry.visibleRectsByLane()
+    val rects = lanesOnScreen.flatMap { it.rects }
     val requests = rememberSliceRequests(document, clipsById, rects, spans)
     val images = rememberThumbnails(requests, onThumbnail)
     return TimelineLayer(
         geometry = geometry,
-        rects = rects,
+        lanes = lanesOnScreen,
         slices = requests,
         images = images,
         clipsById = clipsById,

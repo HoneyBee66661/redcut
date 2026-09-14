@@ -12,6 +12,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.redcut.core.common.timeline.ClipRect
 import com.redcut.core.common.timeline.ClipSpan
+import com.redcut.core.common.timeline.LaneClips
 import com.redcut.core.common.timeline.LaneRect
 import com.redcut.core.common.timeline.TimelineGeometry
 import com.redcut.core.media.ThumbnailKey
@@ -76,12 +77,21 @@ internal data class Track(val top: Float, val height: Float)
  * Everything the timeline derives from the document and the viewport.
  *
  * A value rather than free-floating locals, so the composable can read as "derive this, then draw it"
- * and the derivation lives in one readable pipeline: clips → spans → geometry → rects → slices →
- * images. It is also what keeps the draw call's parameter list short enough to read.
+ * and the derivation lives in one readable pipeline: clips → lanes → geometry → lane bands with their
+ * clips → slices → images. It is also what keeps the draw call's parameter list short enough to read.
  */
 internal data class TimelineLayer(
     val geometry: TimelineGeometry,
-    val rects: List<ClipRect>,
+    /**
+     * One entry per lane, in the document's order: the band, and the clips to draw inside it.
+     *
+     * Bands and clips TOGETHER, because a rect says nothing about where it is drawn
+     * vertically — a pass holding only a flat rect list would have to ask a second time
+     * which lane it was iterating, and could answer that differently from the pass that
+     * built them. That is the bug that appears only on the first project with two tracks,
+     * which is the project this reading is for.
+     */
+    val lanes: List<LaneClips>,
     val slices: List<SliceRequest>,
     val images: Map<ThumbnailKey, ImageBitmap>,
     /**
@@ -109,7 +119,7 @@ internal data class TimelineMarks(
     val markerUs: Long? = null,
 )
 
-/** The whole timeline, painted. The order is the layering: lane, ruler, clips, marker, playhead. */
+/** The whole timeline: one pass per lane, then the ruler, the marker and the playhead. */
 internal fun DrawScope.drawTimeline(
     layer: TimelineLayer,
     paint: TimelinePaint,
@@ -126,27 +136,48 @@ internal fun DrawScope.drawTimeline(
     // a clip's marks that came from a second call could only ever be accidentally identical.
     val ticks = layer.geometry.rulerTicks()
 
-    // The lane first, so the clips land ON a track instead of floating on the window's background, and so the
-    // culling below is invisible: what is not drawn as a clip is still drawn as lane (task A5).
-    layer.geometry.laneRects().forEach { lane ->
-        drawLane(lane, layer.geometry, track, paint.ruler)
+    // ONE iteration per LANE, and BOTH halves come from the same entry: the band from the
+    // lane's own `topPx`/`bottomPx`, the clips from that lane's own culled rects. So lane
+    // 2's clips are drawn inside lane 2 and cannot land in lane 1, and where a band sits is
+    // the geometry's `laneTopPx` rather than a counter kept here. `topPx` is 0 on the first
+    // lane, which is why a one-track document still draws the single band it always drew.
+    //
+    // The ruler is drawn AFTER the bands, where it used to be drawn between them: the two
+    // occupy disjoint y ranges — the strip ends at `rulerHeight`, every band starts there —
+    // so the order cannot change a pixel, and drawing it once outside the loop keeps it one
+    // tick selection rather than one per lane.
+    layer.lanes.forEach { lane ->
+        val band = Track(
+            top = rulerHeight + lane.lane.topPx,
+            height = lane.lane.bottomPx - lane.lane.topPx,
+        )
+        // The lane first, so the clips land ON a track instead of floating on the window's
+        // background, and so the culling is invisible: what is not drawn as a clip is still
+        // drawn as lane (task A5).
+        drawLane(lane.lane, layer.geometry, band, paint.ruler)
+        lane.rects.forEach { rect ->
+            // Two ids, because the outline means "the clip the user is working with": selected, or under
+            // the finger during a drag, which has not selected it yet.
+            val picked = marks.selectedClipId == rect.clipId ||
+                marks.draggedClipId == rect.clipId
+            drawClip(
+                rect = rect,
+                slices = layer.slices.filter { it.clipId == rect.clipId },
+                images = layer.images,
+                selected = picked,
+                draggedEdge = marks.draggedEdge?.takeIf { marks.trimmedClipId == rect.clipId },
+                topTicks = layer.geometry.ticksForClipTop(ticks, rect),
+                geometry = layer.geometry,
+                track = band,
+                paint = paint,
+            )
+        }
     }
     drawRuler(ticks, layer.geometry, rulerHeight, paint.ruler)
-    layer.rects.forEach { rect ->
-        drawClip(
-            rect = rect,
-            slices = layer.slices.filter { it.clipId == rect.clipId },
-            images = layer.images,
-            // The clip under the finger is outlined like a selected one: during a drag the user needs
-            // to know which clip they picked up, and the drag has not selected it yet.
-            selected = marks.selectedClipId == rect.clipId || marks.draggedClipId == rect.clipId,
-            draggedEdge = marks.draggedEdge?.takeIf { marks.trimmedClipId == rect.clipId },
-            topTicks = layer.geometry.ticksForClipTop(ticks, rect),
-            geometry = layer.geometry,
-            track = track,
-            paint = paint,
-        )
-    }
+    // The marker and the playhead are anchored to the FIRST lane, which is the whole track
+    // area a one-track document has. Which lane a reorder drag's clip belongs to is not in
+    // the marks yet (see TimelineMarks); the marker previews a slot, and this is where it
+    // is drawn until the pair travels with the drag.
     marks.markerUs?.let { us ->
         val screenX = layer.geometry.pxFor(us) - layer.geometry.visibleStartPx
         drawReorderMarker(screenX, track, paint.reorderMarker)

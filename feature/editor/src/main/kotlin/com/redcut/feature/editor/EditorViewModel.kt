@@ -9,8 +9,6 @@ import com.redcut.core.common.logging.RedcutLogger
 import com.redcut.core.media.MediaSourceReader
 import com.redcut.core.media.SourceReadResult
 import com.redcut.domain.document.Clip
-import com.redcut.domain.document.ClipAdjustment
-import com.redcut.domain.document.ClipEdge
 import com.redcut.domain.document.CompoundCommand
 import com.redcut.domain.document.CutTool
 import com.redcut.domain.document.EditDocument
@@ -19,15 +17,12 @@ import com.redcut.domain.document.ImportRejection
 import com.redcut.domain.document.RenameDocument
 import com.redcut.domain.document.ReorderClip
 import com.redcut.domain.document.SetTransform
-import com.redcut.domain.document.TrimClip
 import com.redcut.domain.document.UndoStack
 import com.redcut.domain.document.ViewportRect
-import com.redcut.domain.document.adjust
 import com.redcut.domain.document.commandFor
 import com.redcut.domain.document.planImport
 import com.redcut.domain.document.steppedPlayheadUs
 import com.redcut.domain.document.timelineDurationUs
-import com.redcut.domain.document.trimmedTo
 import com.redcut.domain.project.ProjectStore
 import com.redcut.domain.project.SavedProject
 import com.redcut.domain.project.nextUntitledName
@@ -97,6 +92,25 @@ class EditorViewModel @Inject constructor(
     private val _state = MutableStateFlow(history.toUiState(stage = Stage.Cut))
 
     /**
+     * The live-gesture half of the editor: the drags that preview while the finger is down and commit
+     * as one history entry when it lifts. See [GestureSession] for why it is a class of its own.
+     *
+     * It is built with lambdas rather than values because it must see THIS class's current history and
+     * state on every call — `history` is replaced wholesale when a saved project is reopened, and a
+     * captured stack would quietly drag the new project's edits onto the old project's history.
+     */
+    private val gestures = GestureSession(
+        logger = logger,
+        history = { history },
+        state = { _state.value },
+        publishState = { next ->
+            _state.value = next
+            publish()
+        },
+        persist = ::autosave,
+    )
+
+    /**
      * Reopens the project the user was last in (the device pass's "my clip disappeared").
      *
      * `init` rather than a screen-side call, so every entry point to the editor — back navigation, process
@@ -145,18 +159,22 @@ class EditorViewModel @Inject constructor(
      * line and the family's own `when` is exhaustive over the members that belong to it.
      *
      * Five families pass through: the two drag gestures, the Cut stage's tools at the playhead, the drag
-     * that rearranges one lane, and the viewport. An import is not a family — one intent, one branch,
-     * one handler that was already named for it.
+     * that rearranges one lane, and the viewport. The gestures are handed on whole — the four moments of
+     * each, and the preview/commit pairing that makes them one edit, belong to the gesture lifecycle
+     * rather than to this class, so they live in [GestureSession] and this class keeps one line each.
+     * An import is not a family — one intent, one branch, one handler that was already named for it.
      *
      * There is still no `else` anywhere: a new intent joins a family (and the compiler makes that
      * family's `when` handle it) or takes a branch of its own, and either way it cannot fall outside
-     * both. That is what makes a fourth family cheap — its intents, its helper, one line here.
+     * both. That is what makes a fourth family cheap — its intents, its helper wherever that
+     * responsibility belongs, and one line here.
      */
     private fun applyEdit(intent: EditorIntent.Edit) {
         when (intent) {
-            // The two drag gestures. Each family's own `when` covers its four moments exhaustively.
-            is EditorIntent.TrimGesture -> applyTrimGesture(intent)
-            is EditorIntent.AdjustGesture -> applyAdjustGesture(intent)
+            // The two drag gestures, handed whole to the session that owns their lifecycle. Each
+            // family's `when` — four moments, exhaustive — is there rather than here.
+            is EditorIntent.TrimGesture -> gestures.applyTrim(intent)
+            is EditorIntent.AdjustGesture -> gestures.applyAdjust(intent)
 
             // The Cut stage's tools at the playhead, and the drag that rearranges one lane.
             is EditorIntent.ApplyCut -> applyCut(intent.tool)
@@ -166,32 +184,6 @@ class EditorViewModel @Inject constructor(
             is EditorIntent.SetViewport -> applyViewport(intent)
 
             is EditorIntent.ImportMedia -> importMedia(intent.uris)
-        }
-    }
-
-    /**
-     * The trim gesture's four moments (FR-2.1): the finger went down on an edge, moved, lifted, or the
-     * gesture was abandoned.
-     *
-     * The drag PREVIEWS and only the lift records a history entry — that pairing is what makes these
-     * four one family rather than four unrelated edits, and [applyAdjustGesture] has the same shape.
-     */
-    private fun applyTrimGesture(intent: EditorIntent.TrimGesture) {
-        when (intent) {
-            is EditorIntent.BeginTrim -> beginTrim(intent.clipId, intent.edge, intent.sourceTimeUs)
-            is EditorIntent.UpdateTrim -> updateTrim(intent.sourceTimeUs)
-            EditorIntent.EndTrim -> endGesture()
-            EditorIntent.CancelTrim -> cancelGesture()
-        }
-    }
-
-    /** The adjust gesture's four moments (FR-3.1–3.4, 3.9). See [applyTrimGesture]. */
-    private fun applyAdjustGesture(intent: EditorIntent.AdjustGesture) {
-        when (intent) {
-            is EditorIntent.BeginAdjust -> beginAdjust(intent.clipId, intent.adjustment)
-            is EditorIntent.UpdateAdjust -> updateAdjust(intent.value)
-            EditorIntent.EndAdjust -> endGesture()
-            EditorIntent.CancelAdjust -> cancelGesture()
         }
     }
 
@@ -240,63 +232,6 @@ class EditorViewModel @Inject constructor(
             SetTransform(trackId = trackId, clipId = clipId, transform = newTransform),
         )
         autosave()
-        publish()
-    }
-
-    /**
-     * Marks a control as being dragged, and selects its clip.
-     *
-     * No command is previewed yet: a drag that has not moved the slider has not changed anything, and
-     * previewing the value it already has would put a no-op on the history the moment the finger went
-     * down. The first [updateAdjust] is what starts the preview.
-     */
-    private fun beginAdjust(clipId: String, adjustment: ClipAdjustment) {
-        if (history.current.clipById(clipId) == null) return
-        logger.d(TAG, "adjust ${adjustment.name.lowercase()} of $clipId")
-        _state.value = _state.value.copy(
-            tool = ToolState.Adjusting(clipId, adjustment),
-            selection = Selection.Clip(clipId),
-        )
-        publish()
-    }
-
-    /**
-     * One frame of a slider drag: preview, so the document — and therefore the preview and the timeline —
-     * follows the finger, and `UndoStack` collapses the whole drag into a single entry on commit.
-     */
-    private fun updateAdjust(value: Float) {
-        val adjusting = (_state.value.tool as? ToolState.Adjusting) ?: return
-        val command = history.current
-            .adjust(adjusting.clipId, adjusting.adjustment, value) ?: return
-        history.preview(command)
-        publish()
-    }
-
-    /**
-     * Ends whichever gesture is open: a trim drag or a slider drag, committing it as ONE entry.
-     *
-     * One function for both because the lifecycle is the same one — a preview is open, the finger has
-     * lifted, and what the document holds right now becomes the edit. The undo label comes from the
-     * command that was previewed, so nothing here needs to know WHICH gesture it is closing; and a
-     * gesture that never moved anything commits nothing, because `UndoStack` refuses to record a
-     * command that changed nothing.
-     */
-    private fun endGesture() {
-        if (_state.value.tool is ToolState.Idle) return
-        history.commit()
-        autosave()
-        _state.value = _state.value.copy(tool = ToolState.Idle)
-        publish()
-    }
-
-    /**
-     * Abandons whichever gesture is open: the document goes back to what it held before the finger went
-     * down. The same pairing as [endGesture], and for the same reason.
-     */
-    private fun cancelGesture() {
-        if (_state.value.tool is ToolState.Idle) return
-        history.abortPreview()
-        _state.value = _state.value.copy(tool = ToolState.Idle)
         publish()
     }
 
@@ -396,62 +331,6 @@ class EditorViewModel @Inject constructor(
         history.execute(command)
         autosave()
         publish()
-    }
-
-    /**
-     * Starts a trim gesture (FR-2.1).
-     *
-     * A preview, not a command: the whole drag is ONE history entry (§7.3's "Undo Trim"), and the
-     * document changes on every frame of the gesture so the timeline and the stage body follow the
-     * finger live.
-     *
-     * The clip is looked up fresh rather than trusted from the intent: the id came from a hit test
-     * against a frame the user saw, and a clip deleted since then (an undo, a ripple) must not start
-     * a gesture against nothing.
-     */
-    private fun beginTrim(clipId: String, edge: ClipEdge, sourceTimeUs: Long) {
-        val clip = clipOf(clipId) ?: return
-        val command = trimCommandFor(clip, edge, sourceTimeUs) ?: return
-        logger.d(TAG, "trim ${edge.name.lowercase()} of $clipId to $sourceTimeUs")
-        history.preview(command)
-        _state.value = _state.value.copy(
-            tool = ToolState.Trimming(clipId = clipId, edge = edge, sourceTimeUs = sourceTimeUs),
-        )
-        publish()
-    }
-
-    /** The drag moved. Ignored when no trim is in flight, which is not an error: taps race drags. */
-    private fun updateTrim(sourceTimeUs: Long) {
-        val trimming = _state.value.tool as? ToolState.Trimming ?: return
-        val clip = clipOf(trimming.clipId) ?: return
-        // Rebuilt from the CURRENT clip on every frame. That is what makes the held edge invariant:
-        // the drag value only ever moves the edge the gesture started on, and the other end keeps
-        // whatever the last preview put there.
-        val command = trimCommandFor(clip, trimming.edge, sourceTimeUs) ?: return
-        history.preview(command)
-        _state.value = _state.value.copy(tool = trimming.copy(sourceTimeUs = sourceTimeUs))
-        publish()
-    }
-
-    /**
-     * The command a trim drag means.
-     *
-     * `trimmedTo` gives the INTENT (one edge moves), and `TrimClip` owns the clamping — so a drag past
-     * the end of the source is recorded as the user's intent and applied as the limit. The UI learns
-     * what it actually got by reading the document back, not by duplicating the rule.
-     */
-    private fun trimCommandFor(clip: Clip, edge: ClipEdge, sourceTimeUs: Long): TrimClip? {
-        val (inUs, outUs) = clip.trimmedTo(edge, sourceTimeUs)
-        // Null for a clip no track holds: the drag arrived with a clip id, and the command it means
-        // needs the lane too. Unreachable for a document built by the commands (clips are derived from
-        // tracks), and null rather than a `!!` because a gesture must not be able to crash the editor.
-        val trackId = history.current.trackIdOf(clip.id) ?: return null
-        return TrimClip(
-            trackId = trackId,
-            clipId = clip.id,
-            sourceInUs = inUs,
-            sourceOutUs = outUs,
-        )
     }
 
     private fun clipOf(clipId: String): Clip? =

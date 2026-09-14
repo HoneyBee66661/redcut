@@ -220,7 +220,14 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      # `packages` is passed EXPLICITLY because the action's default is `tools platform-tools`, and
+      # Google's SDK repository no longer publishes a `tools` package (repository2-1.xml lists
+      # `cmdline-tools` and `platform-tools` and nothing else). The action's own `sdkmanager tools`
+      # step then exits 1 — "Failed to find package 'tools'" — before a single Gradle task runs, so
+      # this job went red on every branch at once while the other four jobs stayed green.
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
       - uses: gradle/actions/setup-gradle@v4
       - name: JNI ABI versions agree
         # The version lives in two files in two languages. A comment asking people to

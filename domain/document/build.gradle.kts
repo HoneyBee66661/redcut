@@ -13,4 +13,8 @@ plugins {
 
 dependencies {
     implementation(libs.kotlinx.serialization.json)
+    // The frame grid (WS T): SourceRef's exact rate and the frame arithmetic that reads it. Both
+    // modules are pure JVM, so the edge is legal — rule 1 forbids a pure module depending on
+    // :core:media, :core:ui, :engine:*, :feature:* or :app, and this is none of them.
+    implementation(project(":core:common"))
 }

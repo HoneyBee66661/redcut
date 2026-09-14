@@ -35,13 +35,67 @@ package com.redcut.domain.document
  *
  * The lane is therefore a precondition, exactly like "the clip exists": unmet, the command returns the
  * document unchanged. Nothing here creates a track, and nothing moves a clip between tracks.
+ *
+ * ### A locked lane, without a rule anyone has to remember
+ *
+ * Schema v3 gave a lane `Track.isLocked`. What makes every command honour it is not a convention but the
+ * two halves below: [touchedTrackIds] is abstract, so a command cannot be written without declaring the
+ * lanes it touches, and [after] is the single gate that reads the declaration on the way to [apply].
+ * "EVERY command honours the lock" has been broken twice by a sweep that missed the command landing
+ * after it, so the rule belongs to the compiler now.
  */
 sealed interface EditCommand {
     /** Human-readable, shown as "Undo <label>" (spec §7.3). */
     val label: String
 
+    /**
+     * The lanes this command would touch, given the document it is applied to.
+     *
+     * It has no body on purpose: a command added tomorrow does not build until it answers this, which is the
+     * point — the alternative is a rule a reviewer has to remember, and the last two of those were
+     * forgotten by the very sweep that introduced them. (The keyword `abstract` would be redundant here —
+     * a bodiless member of an interface already carries it — and detekt says so.)
+     *
+     * The set is what the command ADDRESSES, not what it would provably change: a trim whose values
+     * already match the clip still reports its lane. A precondition that fails today can hold tomorrow,
+     * so a report that varied with the preconditions would be a hole a locked lane could slip through.
+     *
+     * Empty is a real answer and it means "no lane": [RenameDocument] edits the project's name, and
+     * [AddSource] adds media the timeline has not placed yet. A lane the document does not have is
+     * reported too — the refusal that follows is one the command would have got anyway, because a lane
+     * that does not exist cannot be locked.
+     */
+    fun touchedTrackIds(document: EditDocument): Set<String>
+
     fun apply(doc: EditDocument): EditDocument
 }
+
+// ---------------------------------------------------------------------------
+// The gate
+// ---------------------------------------------------------------------------
+
+/**
+ * [command] applied — unless it would touch a locked lane, and then the document comes back unchanged.
+ *
+ * The one place a lock is honoured. Every command travels this path, because [UndoStack.execute] and
+ * [UndoStack.preview] both call it, so there is no way to reach an [EditCommand.apply] through the stack
+ * that skipped the check. A command added later inherits the guard by existing: it answers
+ * [EditCommand.touchedTrackIds] because the compiler makes it, and this function is what reads it.
+ *
+ * A refusal is a plain no-op, in the same shape as a failed precondition — identical document, no
+ * movement of [EditDocument.revision], no history entry. That last one is a decision rather than a side
+ * effect: a refused command is not an edit, and an entry for something that never happened costs the
+ * user two taps to get past, one to undo it and one to redo.
+ *
+ * A lock on a lane the command does not touch is none of its business, which is what keeps the guarantee
+ * from turning into a freeze.
+ */
+fun EditDocument.after(command: EditCommand): EditDocument =
+    if (command.touchedTrackIds(this).any { trackById(it)?.isLocked == true }) {
+        this
+    } else {
+        command.apply(this)
+    }
 
 // ---------------------------------------------------------------------------
 // Composition
@@ -69,6 +123,14 @@ data class CompoundCommand(
 
     override fun apply(doc: EditDocument): EditDocument =
         commands.fold(doc) { current, command -> command.apply(current) }
+
+    /**
+     * The union of its parts'. A compound carries no lane of its own — there is no `trackId` field to
+     * read instead — so a part that touches a locked lane refuses the WHOLE compound: half an import
+     * applied is a state the user cannot undo their way back out of.
+     */
+    override fun touchedTrackIds(document: EditDocument): Set<String> =
+        commands.flatMapTo(mutableSetOf()) { it.touchedTrackIds(document) }
 }
 
 // ---------------------------------------------------------------------------
@@ -85,6 +147,9 @@ data class AddSource(val source: SourceRef) : EditCommand {
     } else {
         doc.copy(sources = doc.sources + source)
     }
+
+    /** No lane: this adds media the timeline has not placed yet. */
+    override fun touchedTrackIds(document: EditDocument): Set<String> = emptySet()
 }
 
 /**
@@ -123,6 +188,8 @@ data class AppendClip(
         )
         return doc.withTrackClips(trackId, track.clips + clip)
     }
+
+    override fun touchedTrackIds(document: EditDocument): Set<String> = setOf(trackId)
 }
 
 // ---------------------------------------------------------------------------
@@ -165,6 +232,8 @@ data class TrimClip(
         if (newIn == clip.sourceInUs && newOut == clip.sourceOutUs) return doc
         return doc.withClip(trackId, clip.copy(sourceInUs = newIn, sourceOutUs = newOut))
     }
+
+    override fun touchedTrackIds(document: EditDocument): Set<String> = setOf(trackId)
 }
 
 /**
@@ -201,6 +270,8 @@ data class SplitClip(
 
         return doc.replaceClip(trackId, clipId, listOf(left, right))
     }
+
+    override fun touchedTrackIds(document: EditDocument): Set<String> = setOf(trackId)
 }
 
 /**
@@ -230,6 +301,8 @@ data class CutLeft(val trackId: String, val clipId: String, val atSourceUs: Long
         val (_, tail) = clip.splitAtSource(atSourceUs, clip.id)
         return doc.withClip(trackId, tail)
     }
+
+    override fun touchedTrackIds(document: EditDocument): Set<String> = setOf(trackId)
 }
 
 /** Remove everything in the active clip after the playhead (FR-2.3). See [CutLeft]. */
@@ -245,6 +318,8 @@ data class CutRight(val trackId: String, val clipId: String, val atSourceUs: Lon
         val (head, _) = clip.splitAtSource(atSourceUs, clip.id)
         return doc.withClip(trackId, head)
     }
+
+    override fun touchedTrackIds(document: EditDocument): Set<String> = setOf(trackId)
 }
 
 /**
@@ -270,6 +345,9 @@ data class DeleteClip(val trackId: String, val clipId: String) : EditCommand {
             .withTrackClips(trackId, track.clips.filterNot { it.id == clipId })
             .copy(effects = doc.effects.filterNot { it.scope.isScopedTo(clipId) })
     }
+
+    /** Its own lane alone: effects are scoped to a clip, and an effect is not a lane. */
+    override fun touchedTrackIds(document: EditDocument): Set<String> = setOf(trackId)
 }
 
 /**
@@ -307,6 +385,8 @@ data class MergeClips(val trackId: String, val clipIds: List<String>) : EditComm
         mergedClips.add(run.startIndex, merged)
         return doc.withTrackClips(trackId, mergedClips)
     }
+
+    override fun touchedTrackIds(document: EditDocument): Set<String> = setOf(trackId)
 }
 
 /**
@@ -333,6 +413,8 @@ data class ReorderClip(val trackId: String, val clipId: String, val toIndex: Int
         reordered.add(to, reordered.removeAt(from))
         return doc.withTrackClips(trackId, reordered)
     }
+
+    override fun touchedTrackIds(document: EditDocument): Set<String> = setOf(trackId)
 }
 
 /**
@@ -358,6 +440,8 @@ data class DuplicateClip(
         clips.add(index + 1, duplicate)
         return doc.withTrackClips(trackId, clips)
     }
+
+    override fun touchedTrackIds(document: EditDocument): Set<String> = setOf(trackId)
 }
 
 // ---------------------------------------------------------------------------

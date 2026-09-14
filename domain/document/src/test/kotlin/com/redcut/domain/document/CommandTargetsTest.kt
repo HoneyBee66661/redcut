@@ -13,25 +13,33 @@ import org.junit.jupiter.api.Test
  *
  * A hand-written list of commands goes stale one command at a time, and it goes stale SILENTLY: the next
  * command is simply not checked, which is the failure this design exists to end. So the commands under
- * test are [EditCommand::class.sealedSubclasses] — what the compiler knows, not what this file remembers
- * — and [TARGETS] is compared against that BOTH ways: a command with no row fails, and a row naming a
- * command that no longer exists fails too.
+ * test come from the COMPILER — `EditCommand`'s Java sealed-type `PermittedSubclasses` attribute, the
+ * list the compiler writes when it accepts an implementor — and [TARGETS] is compared against that
+ * BOTH ways: a command with no row fails, and a row naming a command that no longer exists fails too.
  *
  * `sealed` is what makes the enumeration complete rather than merely current: an implementor has to live
  * in this module and this package, so no other module can add a command this file would not see.
+ *
+ * Why not `KClass.sealedSubclasses`: that call needs `kotlin-reflect`, which is not on this module's test
+ * classpath, and CI compiles with `-Werror`, so the "reflection API not found in compilation classpath"
+ * warning is a BUILD FAILURE there (it happened: run 34861176344, `:domain:document:compileTestKotlin`).
+ * It looked green locally only because the local gate does not pass `-Predcut.warningsAsErrors=true`.
+ * The class-file attribute answers the same question with no dependency and no warning.
  */
 class CommandTargetsTest {
 
     @Test
     fun `the enumeration is real, and every command has a table row`() {
-        val subclasses = EditCommand::class.sealedSubclasses
-        // Asserted first: a reflection call that returned nothing would leave every test below green
+        val subclasses = requireNotNull(EditCommand::class.java.permittedSubclasses) {
+            "EditCommand is not a sealed type, so this file would check nothing at all"
+        }
+        // Asserted first: a compiler that recorded no implementor would leave every test below green
         // while checking nothing at all.
         assertTrue(subclasses.isNotEmpty()) {
-            "sealedSubclasses found no command, so this file is vacuous"
+            "the compiler recorded no command, so this file is vacuous"
         }
 
-        val enumerated = subclasses.map { it.java.simpleName }.sorted()
+        val enumerated = subclasses.map { it.simpleName }.sorted()
         assertEquals(TARGETS.keys.sorted(), enumerated) {
             "the table and the sealed hierarchy disagree: a command has no row, or a row names " +
                 "a command that is gone"

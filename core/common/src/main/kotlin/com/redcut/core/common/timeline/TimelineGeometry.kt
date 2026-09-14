@@ -87,6 +87,20 @@ data class ClipSpan(
     val endUs: Long get() = startUs + durationUs
 }
 
+/**
+ * One lane of a document: a track, and the clips it holds, in the order the document keeps them.
+ *
+ * A projection rather than a `Track`, for the reason [ClipSpan] is one: the geometry is asked about
+ * lane spans, so it can be exercised with two hand-written lists instead of a document with sources,
+ * effect stacks and history behind it — and it cannot start depending on a field the drawing code has
+ * no business reading.
+ *
+ * [trackId] travels with the clips because which clips overlap in TIME is a per-track fact, and that
+ * is the whole difference between this reading and the flat one: two lanes' clips start at 0 side by
+ * side instead of one lane's being laid after the other's.
+ */
+data class LaneSpans(val trackId: String, val spans: List<ClipSpan>)
+
 /** Where one clip lands on screen, in pixels, relative to the timeline's left edge. */
 data class ClipRect(
     val clipId: String,
@@ -113,15 +127,40 @@ data class ClipRect(
 }
 
 /**
- * The horizontal extent of a track's lane, in content pixels: the band a track occupies on screen.
+ * The band one lane occupies on screen, in content pixels: its horizontal extent, and its vertical one.
  *
- * Unlike [ClipRect] it carries no id, because a lane is not a document entity — nothing selects it and no
- * command edits it; it is the space a track's clips sit in. What it has to answer is where the empty part of
- * the timeline is, which is why it is allowed to extend past the content: see `laneRects`.
+ * [trackId] is the document's track when the caller had a document, and NULL for the flat reading — the
+ * single lane a caller without one draws. Null therefore does not mean "unknown"; it means the one lane,
+ * and there is exactly one of them, which is why the flat case needs no id to tell lanes apart. A lane is
+ * still not a document entity — nothing selects it and no command edits it — but which track is under a
+ * touch is a question the hit test has to answer, and the id is what answers it.
+ *
+ * Horizontally this is the VISIBLE WINDOW rather than the content: see `TimelineGeometry.laneRects` for why
+ * the empty part of the timeline has to read as track. Vertically it is the band [topPx] to [bottomPx],
+ * which is one track tall and starts where the lane above it ended.
+ *
+ * The defaults describe a lane one track tall at density 1, which is what the flat reading IS, so a
+ * hand-written lane can be written the way it reads (`LaneRect(0f, 360f)`). The geometry never relies on
+ * them: every lane it derives from `TimelineGeometry.lanes` carries its own density-scaled band.
  */
-data class LaneRect(val startPx: Float, val endPx: Float) {
+data class LaneRect(
+    val startPx: Float,
+    val endPx: Float,
+    val trackId: String? = null,
+    val topPx: Float = 0f,
+    val bottomPx: Float = TimelineGeometry.TRACK_HEIGHT_DP,
+) {
     val widthPx: Float get() = endPx - startPx
 }
+
+/**
+ * What a draw pass draws in one lane: the band, and the clips in it that are on screen.
+ *
+ * The two are one value because they are one question. A [ClipRect] says nothing about where it is
+ * drawn vertically, so a draw pass holding only rects would have to ask again which lane it was
+ * iterating — and could answer that differently from the pass that built them.
+ */
+data class LaneClips(val lane: LaneRect, val rects: List<ClipRect>)
 
 /** What is under a touch, which is the whole reason the geometry exists. */
 sealed interface TimelineHit {
@@ -157,12 +196,18 @@ enum class EdgeSide { LEFT, RIGHT }
  *
  * [viewportWidthPx] and [scrollPx] come from the Canvas; [zoom] and [density] from the user and
  * the device. Everything else is derived, and nothing is stored twice: [totalWidthPx] is a
- * function of the spans and the zoom, and [maxScrollPx] of the total and the viewport.
+ * function of the clips the geometry was given and the zoom, and [maxScrollPx] of the total and
+ * the viewport.
  */
 data class TimelineGeometry(
     val viewportWidthPx: Float,
     /**
-     * The clips this geometry is about, in document order.
+     * The clips this geometry is about, in document order — the ONE-LANE reading.
+     *
+     * This is what a caller without track information passes, and it is what the editor passes today:
+     * every clip in it occupies the single lane [laneRects] returns. A caller that HAS the document's
+     * tracks passes [lanes] instead — one or the other, never both — and this is not deprecated by
+     * that: a timeline with one track is a real thing to draw, and this is its reading.
      *
      * A constructor property rather than a `var` filled in later: the whole value is compared,
      * copied and recreated on every recomposition, so hidden mutable state would make two
@@ -174,11 +219,52 @@ data class TimelineGeometry(
     val scrollPx: Float = 0f,
     /** Device density, for the dp-sized touch target. Passed in, never read from a Context. */
     val density: Float = 1f,
+    /**
+     * The document's tracks as lanes (schema v3), for a caller that HAS a document.
+     *
+     * ### Which reading a caller passes
+     *
+     * [spans] is the one-lane reading — what a caller with no track information has, and what the editor
+     * passes today. This is the reading a caller with a document has. A caller passes ONE of them, never
+     * both: a caller that has the tracks passes [lanes] and stops passing [spans].
+     *
+     * Where both are set, `lanes` is what the lane reading uses, and [spans] is left to the one function
+     * defined on it, the flat [hitTest] — which is a contract violation rather than a supported state,
+     * and is why no member below reads both to decide anything.
+     *
+     * It is the LAST parameter so that the positional call a caller already makes —
+     * `TimelineGeometry(width, spans, zoom, scroll, density)` — keeps compiling and keeps meaning what it
+     * meant. Adding a parameter is not a change to the reading that was there before it.
+     */
+    val lanes: List<LaneSpans> = emptyList(),
 ) {
 
-    /** Total width of the timeline content, in pixels. */
+    /**
+     * This geometry's lanes as (track id, clips), with the flat reading as one lane that has no id.
+     *
+     * The ONE place that decides how many lanes there are, so that [laneRects], [visibleRectsByLane], the
+     * lane [hitTest] and the content end cannot disagree about it. A draw pass iterating rects built from
+     * one rule while the touch path resolves bands from another is a bug that only appears on the first
+     * project with two tracks — which is the project this change is for.
+     */
+    private val laneReadings: List<Pair<String?, List<ClipSpan>>>
+        get() = if (lanes.isEmpty()) listOf(null to spans) else lanes.map { it.trackId to it.spans }
+
+    /**
+     * Where the content ends, in microseconds: the furthest of the lanes' last clips, or null when no
+     * lane holds a clip at all.
+     *
+     * With lanes the timeline is as long as its LONGEST one, because the lanes run in PARALLEL — a second
+     * track's clips are laid BESIDE the first's, not after them. Summing the lanes would be the flat
+     * reading's arithmetic, and it is exactly the arithmetic this reading exists to replace. The flat case
+     * is the same expression over one lane, so a caller that passes [spans] gets the length it always got.
+     */
+    private val contentEndUs: Long?
+        get() = laneReadings.mapNotNull { it.second.lastOrNull()?.endUs }.maxOrNull()
+
+    /** Total width of the timeline content, in pixels: the longest lane's end, plus the end padding. */
     val totalWidthPx: Float
-        get() = spans.foldWidth() + END_PADDING_PX
+        get() = (contentEndUs?.let { pxFor(it) } ?: 0f) + END_PADDING_PX
 
     /** How far the content can be scrolled before its end reaches the viewport's right edge. */
     val maxScrollPx: Float get() = (totalWidthPx - viewportWidthPx).coerceAtLeast(0f)
@@ -306,11 +392,56 @@ data class TimelineGeometry(
      * A lane clamped to the content would instead leave the area past the last clip looking like a hole in
      * the timeline, and that edge is one the user drags a clip towards.
      *
-     * One entry today: this geometry knows nothing about the document's tracks, so every clip it is given
-     * occupies one lane. The return type is a list rather than a single rect because each track gets its own
-     * — and a draw pass that already loops over lanes is the one that will not have to change when it does.
+     * One rect per lane, in the document's order. An EMPTY lane gets one too, and that is the point rather
+     * than an oversight: a track waiting for its first clip is drawn as empty track, which is the same
+     * reason the band spans the window instead of the content.
+     *
+     * ### Vertically: lanes stack from the top, and there is nothing to scroll
+     *
+     * Each lane is [trackHeightPx] tall and starts where the one above it ended — [laneTopPx] is the whole
+     * of that layout — so the canvas is a window onto the TOP of the stack. The lanes start at the top of
+     * the canvas and a lane past its bottom is simply not drawn: this geometry maps x and knows no canvas
+     * height, and a vertical scroll model with no gesture behind it would be a number nobody can change.
+     * The height lives in the draw pass, which is where the clipping belongs.
+     *
+     * The flat reading ([lanes] empty) is ONE lane with a null [LaneRect.trackId], and that is what the
+     * editor draws today.
      */
-    fun laneRects(): List<LaneRect> = listOf(LaneRect(visibleStartPx, visibleEndPx))
+    fun laneRects(): List<LaneRect> = laneReadings.mapIndexed { index, lane ->
+        val top = laneTopPx(index)
+        LaneRect(visibleStartPx, visibleEndPx, lane.first, top, top + trackHeightPx)
+    }
+
+    /**
+     * The top of the lane at [index], in pixels from the top edge of the canvas.
+     *
+     * This is the whole of the vertical layout: lanes are stacked in the document's order, one track
+     * height apart, and the first starts at the canvas's own top. It is a function rather than a field
+     * because a lane's position is DERIVED from how many lanes are above it, the same way a clip's start
+     * is a prefix sum rather than a stored time — a stored `y` is the second source of truth that goes
+     * stale the moment a track is added above it.
+     */
+    fun laneTopPx(index: Int): Float = index * trackHeightPx
+
+    /**
+     * The lanes to draw and the clips each holds, culled exactly as [visibleRects] culls (UI revision 2).
+     *
+     * This is what a draw pass iterates: one entry per lane, in document order, each carrying its band and
+     * the rects to draw inside it. The culling is [visibleRects]'s own rule — one viewport of margin on each
+     * side, applied per lane instead of re-derived — because a second culling rule is a second answer to
+     * "what is on screen", and it would drift from the first the moment either changed. A lane whose clips
+     * are a scroll away culls to an EMPTY list and is still returned: the empty track is the thing the lane
+     * exists to draw.
+     *
+     * One entry in the flat case, which is what makes this safe to call from a Canvas that has no document
+     * yet: it is [visibleRects] again, with the lane those rects belong to named.
+     */
+    fun visibleRectsByLane(): List<LaneClips> {
+        val bands = laneRects()
+        return laneReadings.mapIndexed { index, lane ->
+            LaneClips(bands[index], copy(spans = lane.second).visibleRects())
+        }
+    }
 
     /**
      * What a touch at [screenX] hits (FR-2.1).
@@ -365,6 +496,33 @@ data class TimelineGeometry(
     }
 
     /**
+     * What a touch at ([screenX], [screenY]) hits, when the geometry was given [lanes] (FR-2.1).
+     *
+     * The lane is resolved from the y FIRST — the band that contains it, top edge inclusive and bottom edge
+     * exclusive — and only then do the three rules above apply, to THAT lane's clips. The rules themselves
+     * are written once, in [hitTest]: a lane's touch is the flat reading restricted to the lane's clips, so
+     * the lane is asked the question in the shape the answer already has rather than answered twice.
+     *
+     * Two consequences fall out of the ORDER, rather than out of a second rule:
+     *
+     * - **A y in no lane's band is [TimelineHit.None]**, however many clips that x crosses. The lanes start
+     *   at the top of the canvas and the area below the last track is not a track.
+     * - **A lane boundary is not a clip edge.** An edge target is 48 dp wide and would otherwise reach
+     *   across the boundary into the lane below, where the user is pointing at a different track entirely:
+     *   a clip's out-point would be grabbed by a finger that is one lane down from it. Resolving y first is
+     *   what stops that, and it is the reason this overload exists at all.
+     *
+     * The flat reading is the same arithmetic with one band: a y inside the first track height is the whole
+     * timeline, and a y outside it is nothing.
+     */
+    fun hitTest(screenX: Float, screenY: Float): TimelineHit {
+        val bands = laneRects()
+        val index = bands.indexOfFirst { screenY >= it.topPx && screenY < it.bottomPx }
+        val lane = laneReadings.getOrNull(index) ?: return TimelineHit.None
+        return copy(spans = lane.second).hitTest(screenX)
+    }
+
+    /**
      * How far a clip's edge target reaches, which is the touch target BOUNDED BY THE CLIP ITSELF.
      *
      * The bound is a fraction of the clip rather than half of it, and the difference is a bug the device
@@ -391,12 +549,15 @@ data class TimelineGeometry(
      * line: the smallest round interval (seconds, then minutes) whose on-screen width is at least
      * [MIN_TICK_SPACING_PX]. Pure arithmetic again — the ruler needs no font measurement and no
      * Context.
+     *
+     * With lanes the content ends at the LONGEST lane's last clip, which is what [contentEndUs] is: the
+     * ruler measures the times the project has, and a lane that stops earlier does not shorten it.
      */
     fun rulerTicks(): List<Long> {
-        val contentEndUs = spans.lastOrNull()?.endUs ?: return emptyList()
+        val endUs = contentEndUs ?: return emptyList()
         val intervalUs = rulerIntervalUs()
         val firstTick = ceilToInterval(usFor(visibleStartPx), intervalUs)
-        val limitPx = minOf(visibleEndPx, pxFor(contentEndUs))
+        val limitPx = minOf(visibleEndPx, pxFor(endUs))
 
         val ticks = mutableListOf<Long>()
         var tick = firstTick
@@ -440,11 +601,18 @@ data class TimelineGeometry(
         return ((us + intervalUs - 1) / intervalUs) * intervalUs
     }
 
-    /** The clip the playhead is inside, which is what FR-2.2/FR-2.3/FR-2.5 act on. */
+    /**
+     * The clip the playhead is inside, which is what FR-2.2/FR-2.3/FR-2.5 act on.
+     *
+     * Defined on the flat [spans] reading, and left that way deliberately: with lanes, a playhead at a
+     * time that two lanes both cover belongs to whichever lane the UI has decided is being worked on,
+     * and which track that is has no answer in this class. A caller that passes [lanes] resolves the
+     * lane first — the order the lane [hitTest] already uses — and asks this of that lane's clips. The
+     * consequence to know about: called on a geometry given [lanes], this answers null, because the
+     * flat reading it is defined on is empty.
+     */
     fun clipAt(playheadUs: Long): ClipSpan? =
         spans.firstOrNull { playheadUs >= it.startUs && playheadUs < it.endUs }
-
-    private fun List<ClipSpan>.foldWidth(): Float = lastOrNull()?.let { pxFor(it.endUs) } ?: 0f
 
     companion object {
         /** Microseconds in a second — the constant every conversion above divides by. */

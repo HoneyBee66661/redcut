@@ -24,16 +24,22 @@ import org.junit.runner.RunWith
  *
  * WHAT IS COVERED TODAY, AND WHAT IS NOT
  *
- * Covered: a cold start (`startActivityAndWait`), the composition root's Hilt graph and
- * the Home screen it renders, the Editor destination (its ViewModel, the single immutable
- * UI state, the stage bar), each of the three stage bodies, the Settings destination, and
- * the back navigation between them. Those are the paths Phase 0 has, and they are the
- * ones NFR-1's "cold start < 1.5 s" is measured against.
+ * Covered: a cold start (`startActivityAndWait`), the composition root's Hilt graph and the
+ * project gallery the Home destination renders — its header, the new-project control that
+ * opens a project, and the project grid — the Editor destination that control leads to (its
+ * ViewModel, the single immutable UI state, the bar that exits and exports, the transport
+ * strip, the tracks, the stage tabs and each of the three stage bodies), the Settings
+ * destination, and the back navigation between them. Those are the paths Phase 0 has, and
+ * they are the ones NFR-1's "cold start < 1.5 s" is measured against.
  *
- * NOT covered yet, and named here so the gap is a known one rather than an oversight:
- * the timeline's scroll path and the import path — neither exists before Phase 1.5 and
- * 1.3. Spec §11 asks for "app start + first timeline scroll"; this file gains the scroll
- * step in the same commit that gives the timeline something to scroll.
+ * NOT covered yet, and named here so the gap is a known one rather than an oversight: the
+ * timeline's SCROLL. Spec §11 asks for "app start + first timeline scroll", and this walk
+ * reaches the timeline without ever scrolling it, because it never puts a clip on one — an
+ * empty timeline has no content to pan. Clips arrive through the SAF picker (FR-1.1), and
+ * that picker is the system's DocumentsUI rather than this app: driving its chrome from here
+ * would trade this file's one honest signal (a label moved) for a step that breaks when the
+ * picker's does. The scroll step lands with a walk that can put a clip on the timeline
+ * without one.
  *
  * WHY A MISSING LABEL IS A HARD FAILURE
  *
@@ -67,7 +73,11 @@ class BaselineProfileGenerator {
         pressHome()
         startActivityAndWait()
 
-        // --- Home -> Editor --------------------------------------------------
+        // --- Home (the project gallery) -> Editor ----------------------------
+        // The new-project control is the entry: it is what creates a project and opens the
+        // editor, so it is the one control on this screen that leads anywhere. Nothing here
+        // touches a project card — the names in that grid are placeholder data, and a walk
+        // that clicked one would break when the placeholder does.
         requireLabel(HOME_OPEN_EDITOR).click()
 
         // --- The three stages ------------------------------------------------
@@ -77,7 +87,9 @@ class BaselineProfileGenerator {
 
         // --- Editor -> Home -> Settings --------------------------------------
         requireLabel(EDITOR_BACK).click()
-        requireLabel(HOME_SETTINGS).click()
+        // By description rather than by text: this one is an icon, and an icon draws no word
+        // for `By.text` to find. See [requireDescription].
+        requireDescription(HOME_SETTINGS).click()
         requireLabel(SETTINGS_BACK).click()
     }
 
@@ -96,6 +108,32 @@ class BaselineProfileGenerator {
                     "that screen.",
             )
 
+    /**
+     * Waits for a content DESCRIPTION to appear and returns its node.
+     *
+     * The same wait and the same hard failure as [requireLabel], for the controls that are
+     * reachable only this way. The gallery's settings entry is an `IconButton` holding an `Icon`,
+     * and the only label it has is that `Icon`'s `contentDescription` — the accessibility tree
+     * carries no word for it, so `By.text` searches for something that was never there and times
+     * out on a control that is on screen and working. `By.desc` asks the tree the question the
+     * control can actually answer.
+     *
+     * This is not a lenient second chance for a label that moved: the two helpers ask DIFFERENT
+     * questions, and neither falls back to the other. A walk that reached for this one where the
+     * screen draws text would be looking for the wrong node rather than for the right one by
+     * another name.
+     *
+     * The sentence it fails with is deliberately the same shape as [requireLabel]'s, so a red job
+     * names the description it could not find in the words the reader already knows how to act on.
+     */
+    private fun MacrobenchmarkScope.requireDescription(description: String): UiObject2 =
+        device.wait(Until.findObject(By.desc(description)), LABEL_TIMEOUT_MS)
+            ?: error(
+                "Baseline profile generation could not find \"$description\". Either the UI " +
+                    "changed and this generator was not updated, or the app never reached " +
+                    "that screen.",
+            )
+
     private companion object {
         /** The app under test. Kept in one place: a rename is an edit here, not a hunt. */
         const val TARGET_PACKAGE = "com.redcut.app"
@@ -103,12 +141,24 @@ class BaselineProfileGenerator {
         /** Generous for a debug build on an emulator, and finite on purpose. */
         const val LABEL_TIMEOUT_MS = 5_000L
 
-        // The labels the app owns today (HomeScreen, EditorScreen, SettingsScreen). Literals
-        // rather than resource ids because uiautomator matches the accessibility tree, and
-        // strings are what a user-facing editor exposes there.
-        const val HOME_OPEN_EDITOR = "Open the editor"
+        // The words the screens carry, each named with the SCREEN that owns it. They are not
+        // stable literals: they are what a user-facing editor exposes to the accessibility tree,
+        // and they move whenever the UI does — which is what happened to this list. UI revision 1
+        // replaced Home with a project gallery and renamed every one of them, and this file went
+        // on matching a screen that no longer existed.
+        //
+        //   HOME_OPEN_EDITOR   the gallery's new-project button   feature/home HomeScreen
+        //   HOME_SETTINGS      the gallery's header settings icon feature/home HomeScreen
+        //   EDITOR_BACK        the editor bar's exit button       feature/editor EditorLayout
+        //   SETTINGS_BACK      the settings bar's back button     feature/settings SettingsScreen
+        //
+        // Literals rather than resource ids because uiautomator matches the accessibility tree —
+        // and text is not the only thing it exposes there: HOME_SETTINGS is an `IconButton`'s
+        // `contentDescription` and is matched by [requireDescription], because an icon-only
+        // control draws no word for `By.text` to find.
+        const val HOME_OPEN_EDITOR = "Open New Project"
         const val HOME_SETTINGS = "Settings"
-        const val EDITOR_BACK = "Projects"
+        const val EDITOR_BACK = "Exit"
         const val SETTINGS_BACK = "Back"
 
         /** Spec §4.2's three stages, in the order the stage bar shows them. */

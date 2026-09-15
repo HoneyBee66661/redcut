@@ -22,6 +22,7 @@ import com.redcut.core.common.timeline.TimelineGeometry
 import com.redcut.core.common.timeline.TimelineZoom
 import com.redcut.core.media.ThumbnailKey
 import com.redcut.domain.document.EditDocument
+import com.redcut.domain.document.TrackKind
 import com.redcut.domain.document.reorderMarkerUs
 import com.redcut.domain.document.reorderTargetIndex
 import com.redcut.feature.editor.EditorIntent
@@ -183,8 +184,8 @@ private data class ReorderDrag(val clipId: String, val targetIndex: Int, val las
  * The pipeline is the point, and it is worth reading as a chain: clips → lanes (one per
  * track, with the domain's own starts) → geometry (zoom, scroll, density) → lane bands
  * with their culled clips → slices (which frames the filmstrip asks for) → images (the
- * ones that arrived). Each step is tested somewhere in the fast tier or in CI; this
- * function is only their order.
+ * ones that arrived), with the AUDIO lanes' ids riding along beside them (D3). Each step
+ * is tested somewhere in the fast tier or in CI; this function is only their order.
  */
 @Composable
 private fun rememberTimelineLayer(
@@ -202,6 +203,17 @@ private fun rememberTimelineLayer(
     val lanes = remember(document) { document.laneSpans() }
     val spans = remember(lanes) { lanes.flatMap { it.spans } }
     val spansByClip = remember(spans) { spans.associateBy { it.clipId } }
+    // The AUDIO lanes' ids (D3): the draw pass reads audio-ness off the lane band it is already
+    // iterating, and the filmstrip skips those lanes' clips — an audio source has no frames.
+    // Keyed on the document like every projection above it. A document without AUDIO lanes
+    // yields an empty set, and the flat reading's lane carries no track id at all, so both
+    // draw as they always drew.
+    val audioTrackIds = remember(document) {
+        document.tracks
+            .filter { it.kind == TrackKind.AUDIO }
+            .map { it.id }
+            .toSet()
+    }
     // Two steps, because the scroll that centres the playhead is a function OF a geometry: build it at 0,
     // ask where the playhead should sit, then keep that offset. The alternative — a static helper taking
     // every input the geometry already holds — is the same arithmetic written twice.
@@ -231,6 +243,7 @@ private fun rememberTimelineLayer(
         images = images,
         clipsById = clipsById,
         spansByClip = spansByClip,
+        audioTrackIds = audioTrackIds,
     )
 }
 
@@ -314,7 +327,7 @@ private fun buildReorderGestures(
     )
 }
 
-/** The seven timeline colours, read from the theme where reading it is legal. */
+/** The eight timeline colours, read from the theme where reading it is legal. */
 @Composable
 private fun rememberTimelinePaint(): TimelinePaint = TimelinePaint(
     clip = MaterialTheme.colorScheme.surfaceVariant,
@@ -324,6 +337,7 @@ private fun rememberTimelinePaint(): TimelinePaint = TimelinePaint(
     playhead = PLAYHEAD_RED,
     trimEdge = MaterialTheme.colorScheme.tertiary,
     reorderMarker = MaterialTheme.colorScheme.secondary,
+    audioWaveform = MaterialTheme.colorScheme.onSurfaceVariant,
 )
 
 /**
@@ -339,6 +353,14 @@ private fun rememberTimelinePaint(): TimelinePaint = TimelinePaint(
  * with no viewport and wrong for this one — the filmstrip would then ask for every slice of a
  * ten-minute clip to draw one screen of it. Nothing outside the window can be drawn, so nothing
  * outside it is requested.
+ *
+ * ### The clips that ask for nothing (D3)
+ *
+ * A clip whose track is AUDIO is excluded before any slice arithmetic runs: an audio source has
+ * no frames to decode, so no [SliceRequest] and no [ThumbnailKey] is ever built for it and the
+ * thumbnail loader is never asked. The audio-ness it reads is the TRACK's (`Track.kind`), the
+ * same fact the draw pass reads off the lane band — and the body those clips draw instead is a
+ * synthesized waveform, not a strip of missing thumbnails.
  */
 @Composable
 private fun rememberSliceRequests(
@@ -352,6 +374,9 @@ private fun rememberSliceRequests(
     return TimelineSlices.requests(
         rects.mapNotNull { rect ->
             val clip = clipsById[rect.clipId] ?: return@mapNotNull null
+            // An audio clip sits on an AUDIO lane and its source has no frames: skipping here is
+            // what keeps onThumbnail from ever being called for one (D3).
+            if (document.trackOf(clip.id)?.kind == TrackKind.AUDIO) return@mapNotNull null
             val source = sourcesById[clip.sourceId] ?: return@mapNotNull null
             val span = spans.firstOrNull { it.clipId == rect.clipId } ?: return@mapNotNull null
             ClipSliceInput(

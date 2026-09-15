@@ -1,5 +1,6 @@
 package com.redcut.feature.editor.timeline
 
+import android.graphics.Paint
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -7,9 +8,12 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.redcut.core.common.timeline.ClipRect
 import com.redcut.core.common.timeline.ClipSpan
 import com.redcut.core.common.timeline.LaneClips
@@ -19,6 +23,7 @@ import com.redcut.core.media.ThumbnailKey
 import com.redcut.domain.document.Clip
 import com.redcut.domain.document.ClipEdge
 import kotlin.math.roundToInt
+import kotlin.random.Random
 
 /**
  * The drawing primitives of the timeline.
@@ -52,6 +57,16 @@ internal data class TimelinePaint(
     val trimEdge: Color,
     /** The slot a reorder drag would drop into (FR-2.7). */
     val reorderMarker: Color,
+    /**
+     * The audio body's waveform and label colour (D3).
+     *
+     * The container/content pairing a Material chip uses: the clip's fill is `surfaceVariant`, and
+     * what an audio clip draws ON itself is `onSurfaceVariant`, so the motif reads against both the
+     * resting and the selected fill. Deliberately NOT a gesture colour — the trim edge, the reorder
+     * slot and the selection each own theirs, and a body that borrowed one would blur the signal
+     * the gesture drew.
+     */
+    val audioWaveform: Color,
 )
 
 /**
@@ -101,6 +116,20 @@ internal data class TimelineLayer(
      */
     val clipsById: Map<String, Clip>,
     val spansByClip: Map<String, ClipSpan>,
+    /**
+     * The ids of the document's AUDIO lanes (D3).
+     *
+     * Audio-ness is a fact about the TRACK a clip sits on — the kind lives on the domain's track,
+     * and a clip on its own says nothing about whether it holds picture or sound — while the lane
+     * band the draw pass iterates carries only the track's id. The kinds therefore ride along
+     * here, resolved to ids once per document, and the lane loop asks its band's id this one
+     * question instead of reaching for the document.
+     *
+     * Defaulted EMPTY, which means "no audio lanes": the flat reading a caller without a document
+     * draws, and every document that predates audio, answer false per lane and render exactly as
+     * they always did.
+     */
+    val audioTrackIds: Set<String> = emptySet(),
 )
 
 /**
@@ -151,6 +180,11 @@ internal fun DrawScope.drawTimeline(
             top = rulerHeight + lane.lane.topPx,
             height = lane.lane.bottomPx - lane.lane.topPx,
         )
+        // Audio-ness is the LANE's fact (D3), read off the id the band carries: a track the
+        // document marked AUDIO draws its clips as sound. The flat reading has no track id at
+        // all, and a null id is the video rendering every document drew before audio existed.
+        val trackId = lane.lane.trackId
+        val isAudio = trackId != null && trackId in layer.audioTrackIds
         // The lane first, so the clips land ON a track instead of floating on the window's
         // background, and so the culling is invisible: what is not drawn as a clip is still
         // drawn as lane (task A5).
@@ -170,6 +204,7 @@ internal fun DrawScope.drawTimeline(
                 geometry = layer.geometry,
                 track = band,
                 paint = paint,
+                isAudio = isAudio,
             )
         }
     }
@@ -213,6 +248,14 @@ internal fun DrawScope.drawRuler(
  *
  * The filmstrip is clipped to the clip's rectangle, so a slice cannot bleed over a neighbour however
  * the clip has been zoomed or scrolled.
+ *
+ * ### The two bodies (D3)
+ *
+ * [isAudio] picks the body: an AUDIO lane's clip has no frames to show — an audio clip holds sound,
+ * not pictures, so its thumbnails are never even requested — and draws as sound instead, in
+ * [drawAudioBody]. Every other clip draws the filmstrip it always drew, which is also what the
+ * default is: a caller that does not know a lane's kind renders video, the reading the timeline had
+ * before audio existed.
  */
 internal fun DrawScope.drawClip(
     rect: ClipRect,
@@ -224,6 +267,7 @@ internal fun DrawScope.drawClip(
     geometry: TimelineGeometry,
     track: Track,
     paint: TimelinePaint,
+    isAudio: Boolean = false,
 ) {
     val left = rect.startPx - geometry.visibleStartPx
     clipRect(
@@ -237,7 +281,17 @@ internal fun DrawScope.drawClip(
             topLeft = Offset(left, track.top),
             size = Size(rect.widthPx, track.height),
         )
-        slices.forEach { slice -> drawSlice(slice, images, geometry, track) }
+        if (isAudio) {
+            drawAudioBody(
+                left = left,
+                widthPx = rect.widthPx,
+                track = track,
+                seed = rect.clipId.hashCode(),
+                paint = paint,
+            )
+        } else {
+            slices.forEach { slice -> drawSlice(slice, images, geometry, track) }
+        }
         if (selected) {
             drawRect(
                 color = paint.selectionBorder,
@@ -262,6 +316,76 @@ internal fun DrawScope.drawClip(
         // clip to nothing, its edge line would otherwise scribble over the neighbour.
         draggedEdge?.let { edge -> drawTrimEdge(edge, left, rect.widthPx, track, paint) }
     }
+}
+
+/**
+ * An AUDIO clip's body (D3): the flat fill [drawClip] already laid down, the waveform motif that
+ * says SOUND, and the label that names it.
+ *
+ * ### The waveform is synthesized, never decoded
+ *
+ * There is no sample access in the draw path, and the body must not gain one: a body that read the
+ * mixer would redraw on every audio change and put playback behind drawing. The bars are
+ * pseudo-levels from a [Random] seeded by the clip's own id, so the same clip draws the same shape
+ * at every zoom and in every session, and the bar COUNT comes from the clip's drawn width — which
+ * is its duration at the current zoom. A wider clip is more sound, not a different sound: zooming
+ * re-samples the motif more finely without re-rolling it, and a trim changes only the density.
+ *
+ * ### The label
+ *
+ * The plan asked for "a labelled lane — the label is what proves the track is there": the band is
+ * drawn whether or not a clip sits in it, and the label is what tells the user what the band is
+ * FOR. DrawScope has no text primitive, so the label goes through the native canvas with a paint
+ * of its own — one per clip per pass, a rounding error next to the decodes the video pass asks for,
+ * and the reason no signature grows to carry a TextMeasurer here.
+ */
+private fun DrawScope.drawAudioBody(
+    left: Float,
+    widthPx: Float,
+    track: Track,
+    seed: Int,
+    paint: TimelinePaint,
+) {
+    // The wave's band sits below the label's line and clears the body's bottom edge, so the motif
+    // and the label do not fight for the same pixels; the clip's own clipping bounds everything.
+    val bandTop = track.top + WAVE_BAND_TOP_DP.dp.toPx()
+    val bandBottom = track.top + track.height - WAVE_BAND_BOTTOM_DP.dp.toPx()
+    val middle = (bandTop + bandBottom) / 2f
+    val amplitude = (bandBottom - bandTop) / 2f
+    drawLine(
+        color = paint.audioWaveform,
+        start = Offset(left, middle),
+        end = Offset(left + widthPx, middle),
+        strokeWidth = WAVE_CENTERLINE_WIDTH_PX,
+    )
+    // One bar per WAVE_BAR_PITCH_PX, capped so a long clip at a high zoom cannot turn one body
+    // into hundreds of draw calls in one pass (NFR-8). Past the cap the bars SPREAD OUT rather
+    // than stop, so the body reads as sound across its whole width whatever the zoom.
+    val barCount = (widthPx / WAVE_BAR_PITCH_PX).toInt().coerceIn(1, WAVE_MAX_BARS)
+    val step = widthPx / barCount
+    val levels = Random(seed)
+    repeat(barCount) { bar ->
+        val level = WAVE_MIN_LEVEL + levels.nextFloat() * (WAVE_MAX_LEVEL - WAVE_MIN_LEVEL)
+        val halfHeight = level * amplitude
+        val x = left + step * bar + step / 2f
+        drawLine(
+            color = paint.audioWaveform,
+            start = Offset(x, middle - halfHeight),
+            end = Offset(x, middle + halfHeight),
+            strokeWidth = WAVE_BAR_WIDTH_PX,
+        )
+    }
+    val label = Paint().apply {
+        isAntiAlias = true
+        textSize = AUDIO_LABEL_TEXT_SIZE_SP.sp.toPx()
+        color = paint.audioWaveform.toArgb()
+    }
+    drawContext.canvas.nativeCanvas.drawText(
+        AUDIO_CLIP_LABEL,
+        left + AUDIO_LABEL_INSET_DP.dp.toPx(),
+        track.top + AUDIO_LABEL_BASELINE_DP.dp.toPx(),
+        label,
+    )
 }
 
 /**
@@ -417,3 +541,32 @@ private const val PLAYHEAD_WIDTH_PX = 3f
 private const val PLAYHEAD_TRACK_MULTIPLE = 3f
 private const val TRIM_EDGE_PX = 4f
 private const val REORDER_MARKER_PX = 6f
+
+/**
+ * The audio body's geometry (D3), in the same raw pixels as the strokes above.
+ *
+ * The band insets are the one exception and are in dp, because they are POSITIONS inside the
+ * fixed 56 dp track — a stroke's width in raw px is density-independent by design, a position
+ * inside the track is not, and a band that did not scale with the lane would drift into the
+ * label at one density and leave the bottom bare at another.
+ */
+private const val WAVE_BAND_TOP_DP = 22f
+private const val WAVE_BAND_BOTTOM_DP = 8f
+private const val AUDIO_LABEL_INSET_DP = 8f
+private const val AUDIO_LABEL_BASELINE_DP = 16f
+
+/** The waveform motif: pitch, cap, stroke, and the level range the bars swing across. */
+private const val WAVE_BAR_PITCH_PX = 6f
+private const val WAVE_MAX_BARS = 128
+private const val WAVE_BAR_WIDTH_PX = 2f
+private const val WAVE_MIN_LEVEL = 0.2f
+private const val WAVE_MAX_LEVEL = 1f
+private const val WAVE_CENTERLINE_WIDTH_PX = 1f
+
+/**
+ * The audio label: the word the plan asked for ("a labelled lane — the label is what proves the
+ * track is there"), and where its line sits: size in sp so it follows the user's font scale,
+ * baseline in dp like the band above, so label and wave keep the same geometry everywhere.
+ */
+private const val AUDIO_CLIP_LABEL = "AUDIO"
+private const val AUDIO_LABEL_TEXT_SIZE_SP = 10f

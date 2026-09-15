@@ -295,6 +295,31 @@ class ProjectFileTest {
     }
 
     @Test
+    fun `the new canvas presets survive the round trip to text and back`() {
+        val newPresets = listOf(
+            CanvasSpec.SQUARE_1080,
+            CanvasSpec.PORTRAIT_4_5_1080,
+            CanvasSpec.PORTRAIT_3_4_1080,
+            CanvasSpec.LANDSCAPE_4_3_1080,
+        )
+        newPresets.forEach { preset ->
+            val project = project().copy(
+                document = project().document.copy(
+                    tracks = listOf(videoTrack(Clip(
+                        id = "clip-${preset.name}",
+                        sourceId = "src-1",
+                        sourceInUs = 0,
+                        sourceOutUs = 4 * oneSecond,
+                    ))),
+                ),
+            )
+            val encoded = ProjectCodec.encode(project)
+            val decoded = ProjectCodec.decode(encoded)!!
+            assertThat(decoded).isEqualTo(project)
+        }
+    }
+
+    @Test
     fun `text that is not a project is null rather than an exception`() {
         // A corrupt or half-written file is a project the user cannot open — worth telling them, not worth
         // crashing the editor they opened to look at a different one.

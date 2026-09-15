@@ -55,5 +55,12 @@ data class OutputSpec(
          */
         fun preview(canvas: CanvasSpec): OutputSpec =
             OutputSpec(width = canvas.width, height = canvas.height)
+
+        /**
+         * The export target that follows [canvas] geometry: same dimensions, same
+         * orientation, at the standard frame rate.
+         */
+        fun fromCanvas(canvas: CanvasSpec): OutputSpec =
+            OutputSpec(width = canvas.width, height = canvas.height)
     }
 }

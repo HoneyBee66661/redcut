@@ -170,6 +170,7 @@ class CommandTargetsTest {
          * with the model, for nothing.
          */
         val FIXTURE_TRANSFORM = requireNotNull(SAMPLE.clipById("c1")).transform
+        val FIXTURE_KEY = listOf(Keyframe(0L, 0.1f))
 
         /** A command that addresses no lane: the two of them are named in the empty-set test. */
         val NO_LANES: Set<String> = emptySet()
@@ -204,6 +205,10 @@ class CommandTargetsTest {
             "RenameDocument" to Expectation(RenameDocument("Renamed"), NO_LANES),
             "ReorderClip" to Expectation(ReorderClip(VIDEO, "c1", 1), ON_VIDEO),
             "SetFades" to Expectation(SetFades(VIDEO, "c1", SEC, 0L), ON_VIDEO),
+            "SetKeyframes" to Expectation(
+                SetKeyframes(VIDEO, "c1", KeyframableProperty.CROP_LEFT, FIXTURE_KEY),
+                ON_VIDEO,
+            ),
             "SetMuted" to Expectation(SetMuted(VIDEO, "c1", true), ON_VIDEO),
             "SetReverse" to Expectation(SetReverse(VIDEO, "c1", true), ON_VIDEO),
             "SetSpeed" to Expectation(SetSpeed(VIDEO, "c1", ClipRanges.SPEED_MAX), ON_VIDEO),

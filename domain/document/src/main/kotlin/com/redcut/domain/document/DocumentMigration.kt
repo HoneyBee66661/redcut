@@ -16,11 +16,11 @@ package com.redcut.domain.document
  *
  * Every rule finishes by bringing the version stamp forward, so whichever runs FIRST can make the next
  * one look at an up-to-date document and do nothing. They therefore run newest source version first —
- * [promotedFromV2], then [promotedFromV1] — which is what keeps each rule in front of the files it owns;
- * [promotedFromV2] additionally refuses anything not stamped exactly `2`, so a v1 document is left for the
- * rule that knows where v1 kept its clips. [promotedFromV1] is the exception that has to accept
- * everything below the tracks format, including a document with no stamp at all, because it is the only
- * rule that can.
+ * [promotedFromV3], then [promotedFromV2], then [promotedFromV1] — which is what keeps each rule in front
+ * of the files it owns; [promotedFromV3] and [promotedFromV2] additionally refuse anything not stamped
+ * exactly their own version, so a v1 or v2 document is left for the rule that knows where its clips live.
+ * [promotedFromV1] is the exception that has to accept everything below the tracks format, including a
+ * document with no stamp at all, because it is the only rule that can.
  */
 
 /**
@@ -63,6 +63,36 @@ fun EditDocument.promotedFromV2(v2Tracks: List<Track>): EditDocument {
  * claimed both would stamp one of them v3 before the other rule saw it (see the file note on order).
  */
 private const val V2_VERSION = 2
+
+/**
+ * Schema v3 → v4: the clips gained a `keyframes` map, defaulted empty.
+ *
+ * ### Why this rule exists at all, when the change is additive
+ *
+ * The v2 → v3 rule moved keys; this one has nothing to move. A v3 file's clips simply lack the
+ * `keyframes` key, and the codec's own decode already fills it with its default — the empty map — before
+ * this rule is ever asked a question. What the rule DOES is advance the stamp: a v3 file arrives with
+ * `schemaVersion` 3, and a document that still says 3 when a v5 migration exists would be migrated as
+ * though it were a v3-era document again. The migration therefore runs newest first, like the two before
+ * it, and is the one not allowed to touch anything but the stamp — the whole contractual content of v4 is
+ * "an old file decodes with empty keyframes", and any key it found would be this build's own wire shape.
+ *
+ * The refusal is by exact stamp, the same band the v2 rule uses, so a v2 file stays in front of the rule
+ * that owns it: stamping one v4 from here would make its clips invisible to [promotedFromV2].
+ */
+fun EditDocument.promotedFromV3(): EditDocument {
+    if (schemaVersion != V3_VERSION) return this
+    return copy(schemaVersion = EditDocument.SCHEMA_VERSION)
+}
+
+/**
+ * The version whose clips had no keyframes field: the format [promotedFromV3] upgrades.
+ *
+ * A band rather than "anything below the current version", for the reason the v2 rule's version band
+ * exists: a v1 or v2 file belongs to the rule that knows where its clips live, and stamping one v4 from
+ * here would put it past the migration that can still find them.
+ */
+private const val V3_VERSION = 3
 
 /**
  * Schema v1 → v2: a flat clip list becomes one video track holding it.

@@ -11,6 +11,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import com.redcut.domain.document.ViewportRect
 import com.redcut.domain.document.snappedToCentre
@@ -26,6 +28,9 @@ import com.redcut.domain.document.snappedToCentre
  * preview stage. Renders the viewport rect outline and snap guide lines over the preview
  * frame when a clip is selected. When no clip is selected, gestures and overlay are completely
  * inert and invisible.
+ *
+ * Also applies the selected clip's transform (FR-3.5 rotate, FR-3.6 flip, FR-3.8 fit) on
+ * the preview surface. Keyframing is a later workstream (lane K, task K1).
  */
 @Composable
 internal fun EditorViewport(
@@ -37,6 +42,7 @@ internal fun EditorViewport(
     val selection = state.selection as? Selection.Clip
     val clip = selection?.let { state.document.clipById(it.clipId) }
     val isClipSelected = clip != null
+    val transform = clip?.transform
 
     val initialRect = remember(clip?.id, clip?.transform, state.document.canvas) {
         clip?.let {
@@ -56,7 +62,22 @@ internal fun EditorViewport(
             },
         ),
     ) {
-        content()
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .then(
+                    if (transform != null) {
+                        Modifier
+                            .rotate(transform.rotationDegrees)
+                            .graphicsLayer(
+                                scaleX = if (transform.flipHorizontal) -1f else 1f,
+                                scaleY = if (transform.flipVertical) -1f else 1f,
+                            )
+                    } else Modifier,
+                ),
+        ) {
+            content()
+        }
         if (isClipSelected) {
             ViewportOverlay(
                 rect = currentRect,

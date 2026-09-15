@@ -33,6 +33,10 @@ class ClipAdjustmentTest {
         fadeInMs: Long = 0L,
         fadeOutMs: Long = 0L,
         reverse: Boolean = false,
+        rotationDegrees: Float = 0f,
+        flipHorizontal: Boolean = false,
+        flipVertical: Boolean = false,
+        fitMode: FitMode = FitMode.FIT,
     ) = Clip(
         id = id,
         sourceId = "src-1",
@@ -44,6 +48,12 @@ class ClipAdjustmentTest {
         fadeInMs = fadeInMs,
         fadeOutMs = fadeOutMs,
         reverse = reverse,
+        transform = TransformSpec(
+            rotationDegrees = rotationDegrees,
+            flipHorizontal = flipHorizontal,
+            flipVertical = flipVertical,
+            fit = fitMode,
+        ),
     )
 
     private fun document(clip: Clip = clip()) = EditDocument(
@@ -81,6 +91,10 @@ class ClipAdjustmentTest {
                 fadeInMs = 400L,
                 fadeOutMs = 900L,
                 reverse = true,
+                rotationDegrees = 90f,
+                flipHorizontal = true,
+                flipVertical = true,
+                fitMode = FitMode.FILL,
             ),
         )
 
@@ -128,6 +142,45 @@ class ClipAdjustmentTest {
         assertThat(
             doc.adjust("clip-a", ClipAdjustment.REVERSE, 1f)!!.apply(doc).clips.single().reverse,
         ).isTrue()
+        assertThat(
+            doc.adjust("clip-a", ClipAdjustment.FLIP_HORIZONTAL, 0.6f)!!.apply(doc)
+                .clips.single().transform.flipHorizontal,
+        ).isTrue()
+        assertThat(
+            doc.adjust("clip-a", ClipAdjustment.FLIP_VERTICAL, 0.6f)!!.apply(doc)
+                .clips.single().transform.flipVertical,
+        ).isTrue()
+        assertThat(
+            doc.adjust("clip-a", ClipAdjustment.FLIP_HORIZONTAL, 0.1f)!!.apply(doc)
+                .clips.single().transform.flipHorizontal,
+        ).isFalse()
+    }
+
+    @Test
+    fun `rotation adjustment produces a SetTransform with the given degrees`() {
+        val doc = document(clip())
+        val after = doc.adjust("clip-a", ClipAdjustment.ROTATION, 180f)!!.apply(doc)
+
+        assertThat(after.clips.single().transform.rotationDegrees).isEqualTo(180f)
+    }
+
+    @Test
+    fun `fit mode adjustment maps ordinal to FitMode entry`() {
+        val doc = document(clip(fitMode = FitMode.FIT))
+        val afterFill = doc.adjust("clip-a", ClipAdjustment.FIT_MODE, 1f)!!.apply(doc)
+
+        assertThat(afterFill.clips.single().transform.fit).isEqualTo(FitMode.FILL)
+
+        val afterStretch = afterFill
+            .adjust("clip-a", ClipAdjustment.FIT_MODE, 2f)!!.apply(afterFill)
+        assertThat(afterStretch.clips.single().transform.fit)
+            .isEqualTo(FitMode.STRETCH)
+
+        // Going back to FIT
+        val afterFit = afterStretch
+            .adjust("clip-a", ClipAdjustment.FIT_MODE, 0f)!!.apply(afterStretch)
+        assertThat(afterFit.clips.single().transform.fit)
+            .isEqualTo(FitMode.FIT)
     }
 
     @Test
@@ -160,12 +213,20 @@ class ClipAdjustmentTest {
     fun `a switch reports itself as one, and the sliders do not`() {
         assertThat(ClipAdjustment.MUTE.isSwitch).isTrue()
         assertThat(ClipAdjustment.REVERSE.isSwitch).isTrue()
+        assertThat(ClipAdjustment.FLIP_HORIZONTAL.isSwitch).isTrue()
+        assertThat(ClipAdjustment.FLIP_VERTICAL.isSwitch).isTrue()
         assertThat(ClipAdjustment.SPEED.isSwitch).isFalse()
         assertThat(ClipAdjustment.VOLUME.isSwitch).isFalse()
+        assertThat(ClipAdjustment.ROTATION.isSwitch).isFalse()
+        assertThat(ClipAdjustment.FIT_MODE.isSwitch).isFalse()
 
         // The inspector renders switch rows at 0/1 and slider rows in their own units, so a step of 1
         // for a switch is part of the same claim.
         assertThat(ClipAdjustment.MUTE.step).isEqualTo(1f)
         assertThat(ClipAdjustment.FADE_IN.step).isEqualTo(ClipAdjustment.FADE_STEP_MS)
+        assertThat(ClipAdjustment.ROTATION.step).isEqualTo(ClipAdjustment.ROTATION_STEP)
+        assertThat(ClipAdjustment.ROTATION.range.start).isEqualTo(ClipAdjustment.ROTATION_MIN)
+        assertThat(ClipAdjustment.ROTATION.range.endInclusive)
+            .isEqualTo(ClipAdjustment.ROTATION_MAX)
     }
 }

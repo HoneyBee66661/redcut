@@ -38,6 +38,18 @@ enum class ClipAdjustment {
     /** FR-3.9: the switch turns reverse on above [SWITCH_THRESHOLD]. */
     REVERSE,
 
+    /** FR-3.5: rotation in degrees, 0–360. */
+    ROTATION,
+
+    /** FR-3.6: horizontal flip as a switch. */
+    FLIP_HORIZONTAL,
+
+    /** FR-3.6: vertical flip as a switch. */
+    FLIP_VERTICAL,
+
+    /** FR-3.8: canvas fit mode — Fit / Fill / Stretch (ordinal mapped to SetTransform). */
+    FIT_MODE,
+
     ;
 
     /**
@@ -47,14 +59,16 @@ enum class ClipAdjustment {
      * CONTROL rather than of the value, so it belongs next to the enum rather than in a `when` in the
      * inspector.
      */
-    val isSwitch: Boolean get() = this == MUTE || this == REVERSE
+    val isSwitch: Boolean get() = this == MUTE || this == REVERSE ||
+        this == FLIP_HORIZONTAL || this == FLIP_VERTICAL
 
     /** The step a slider moves in, in the control's own unit. */
     val step: Float
         get() = when (this) {
             SPEED, VOLUME -> SLIDER_STEP
             FADE_IN, FADE_OUT -> FADE_STEP_MS
-            MUTE, REVERSE -> 1f
+            ROTATION -> ROTATION_STEP
+            MUTE, REVERSE, FLIP_HORIZONTAL, FLIP_VERTICAL, FIT_MODE -> 1f
         }
 
     /**
@@ -71,7 +85,9 @@ enum class ClipAdjustment {
             SPEED -> ClipRanges.SPEED_MIN..ClipRanges.SPEED_MAX
             VOLUME -> ClipRanges.VOLUME_MIN..ClipRanges.VOLUME_MAX
             FADE_IN, FADE_OUT -> 0f..ClipRanges.FADE_MAX_MS.toFloat()
-            MUTE, REVERSE -> 0f..1f
+            ROTATION -> ROTATION_MIN..ROTATION_MAX
+            FIT_MODE -> 0f..(FitMode.entries.size - 1).toFloat()
+            MUTE, REVERSE, FLIP_HORIZONTAL, FLIP_VERTICAL -> 0f..1f
         }
 
     companion object {
@@ -88,6 +104,15 @@ enum class ClipAdjustment {
 
         /** 100 ms per step: fine enough for a fade, coarse enough to land on a round number. */
         const val FADE_STEP_MS = 100f
+
+        /** 1 degree per step for rotation. */
+        const val ROTATION_STEP = 1f
+
+        /** Lower end of rotation range. */
+        const val ROTATION_MIN = 0f
+
+        /** Upper end of rotation range. */
+        const val ROTATION_MAX = 360f
     }
 }
 
@@ -106,6 +131,10 @@ fun EditDocument.currentValueOf(clipId: String, adjustment: ClipAdjustment): Flo
         ClipAdjustment.FADE_OUT -> clip.fadeOutMs.toFloat()
         ClipAdjustment.MUTE -> if (clip.muted) 1f else 0f
         ClipAdjustment.REVERSE -> if (clip.reverse) 1f else 0f
+        ClipAdjustment.ROTATION -> clip.transform.rotationDegrees
+        ClipAdjustment.FLIP_HORIZONTAL -> if (clip.transform.flipHorizontal) 1f else 0f
+        ClipAdjustment.FLIP_VERTICAL -> if (clip.transform.flipVertical) 1f else 0f
+        ClipAdjustment.FIT_MODE -> clip.transform.fit.ordinal.toFloat()
     }
 }
 
@@ -140,5 +169,21 @@ fun EditDocument.adjust(clipId: String, adjustment: ClipAdjustment, value: Float
         ClipAdjustment.MUTE -> SetMuted(trackId, clipId, value >= ClipAdjustment.SWITCH_THRESHOLD)
         ClipAdjustment.REVERSE ->
             SetReverse(trackId, clipId, value >= ClipAdjustment.SWITCH_THRESHOLD)
+        ClipAdjustment.ROTATION ->
+            SetTransform(trackId, clipId, clip.transform.copy(rotationDegrees = value))
+        ClipAdjustment.FLIP_HORIZONTAL ->
+            SetTransform(
+                trackId, clipId,
+                clip.transform.copy(flipHorizontal = value >= ClipAdjustment.SWITCH_THRESHOLD),
+            )
+        ClipAdjustment.FLIP_VERTICAL ->
+            SetTransform(
+                trackId, clipId,
+                clip.transform.copy(flipVertical = value >= ClipAdjustment.SWITCH_THRESHOLD),
+            )
+        ClipAdjustment.FIT_MODE -> {
+            val mode = FitMode.entries.getOrElse(value.toInt()) { FitMode.FIT }
+            SetTransform(trackId, clipId, clip.transform.copy(fit = mode))
+        }
     }
 }

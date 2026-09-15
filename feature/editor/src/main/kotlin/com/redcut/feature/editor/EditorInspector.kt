@@ -1,9 +1,15 @@
 package com.redcut.feature.editor
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
@@ -11,8 +17,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import com.redcut.domain.document.ClipAdjustment
+import com.redcut.domain.document.FitMode
 import com.redcut.domain.document.currentValueOf
 import kotlin.math.roundToInt
 
@@ -52,12 +60,21 @@ internal fun Inspector(state: EditorUiState, onIntent: (EditorIntent) -> Unit) {
             return@Column
         }
         ClipAdjustment.entries.forEach { adjustment ->
+            if (adjustment == ClipAdjustment.FIT_MODE) return@forEach
             val value = state.document.currentValueOf(clipId, adjustment) ?: return@forEach
             AdjustmentRow(
                 adjustment = adjustment,
                 clipId = clipId,
                 value = value,
                 openTool = state.tool,
+                onIntent = onIntent,
+            )
+        }
+        val clip = state.document.clipById(clipId)
+        if (clip != null) {
+            FitModeRow(
+                current = clip.transform.fit,
+                clipId = clipId,
                 onIntent = onIntent,
             )
         }
@@ -150,6 +167,9 @@ private fun ClipAdjustment.label(): String = when (this) {
     ClipAdjustment.FADE_OUT -> "Fade out"
     ClipAdjustment.MUTE -> "Mute"
     ClipAdjustment.REVERSE -> "Reverse"
+    ClipAdjustment.ROTATION -> "Rotate"
+    ClipAdjustment.FLIP_HORIZONTAL -> "Flip horizontally"
+    ClipAdjustment.FLIP_VERTICAL -> "Flip vertically"
 }
 
 /**
@@ -165,9 +185,83 @@ private fun ClipAdjustment.readout(value: Float): String = when (this) {
     ClipAdjustment.SPEED -> "${(value * HUNDRED).roundToInt() / HUNDRED.toFloat()}×"
     ClipAdjustment.VOLUME -> "${(value * HUNDRED).roundToInt()} %"
     ClipAdjustment.FADE_IN, ClipAdjustment.FADE_OUT -> "${value.roundToInt()} ms"
-    ClipAdjustment.MUTE, ClipAdjustment.REVERSE -> {
+    ClipAdjustment.MUTE, ClipAdjustment.REVERSE, ClipAdjustment.FLIP_HORIZONTAL,
+    ClipAdjustment.FLIP_VERTICAL -> {
         if (value >= ClipAdjustment.SWITCH_THRESHOLD) "on" else "off"
     }
+    ClipAdjustment.ROTATION -> "${value.roundToInt()}°"
 }
 
 private const val HUNDRED = 100f
+
+/**
+ * A segmented row of buttons for the canvas-fit mode: Fit, Fill, Stretch (FR-3.8).
+ *
+ * Each mode tells the renderer how to map the source frame onto the canvas: Fit keeps
+ * the aspect ratio with letterboxing, Fill keeps the aspect ratio and fills the canvas
+ * (cropping if needed), Stretch ignores aspect ratios and fills the canvas entirely.
+ *
+ * Fires the same adjust-gesture intents as any other inspector row, with [ClipAdjustment.FIT_MODE]
+ * carrying the ordinal (0 = Fit, 1 = Fill, 2 = Stretch) through the existing slider/switch pipeline.
+ */
+@Composable
+private fun FitModeRow(
+    current: FitMode,
+    clipId: String,
+    onIntent: (EditorIntent) -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
+        Text(
+            text = "Canvas fit",
+            style = MaterialTheme.typography.labelLarge,
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            FitMode.entries.forEach { mode ->
+                val selected = mode == current
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(SEGMENTED_SHAPE)
+                        .background(
+                            if (selected) MaterialTheme.colorScheme.primaryContainer
+                            else MaterialTheme.colorScheme.surfaceVariant,
+                        )
+                        .border(
+                            width = if (selected) SEGMENTED_BORDER_WIDTH else 0.dp,
+                            color = MaterialTheme.colorScheme.primary,
+                            shape = SEGMENTED_SHAPE,
+                        )
+                        .clickable(enabled = !selected) {
+                            onIntent(
+                                EditorIntent.BeginAdjust(clipId, ClipAdjustment.FIT_MODE),
+                            )
+                            onIntent(
+                                EditorIntent.UpdateAdjust(mode.ordinal.toFloat()),
+                            )
+                            onIntent(EditorIntent.EndAdjust)
+                        }
+                        .padding(vertical = SEGMENTED_PADDING_V),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = mode.label(),
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun FitMode.label(): String = when (this) {
+    FitMode.FIT -> "Fit"
+    FitMode.FILL -> "Fill"
+    FitMode.STRETCH -> "Stretch"
+}
+
+private val SEGMENTED_SHAPE = RoundedCornerShape(8.dp)
+private val SEGMENTED_BORDER_WIDTH = 1.dp
+private val SEGMENTED_PADDING_V = 6.dp

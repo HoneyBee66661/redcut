@@ -324,11 +324,7 @@ internal fun ColumnScope.BottomToolbar(state: EditorUiState, onIntent: (EditorIn
             when (state.stage) {
                 Stage.Cut -> CutTools(state = state, onIntent = onIntent)
                 Stage.Edit -> Inspector(state = state, onIntent = onIntent)
-                Stage.Effect -> Text(
-                    text = "The effect stage arrives with the render graph's effects.",
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(start = 8.dp),
-                )
+                Stage.Effect -> TextTools(state = state, onIntent = onIntent)
             }
         }
     }

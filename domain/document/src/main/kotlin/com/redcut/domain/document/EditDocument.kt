@@ -215,9 +215,11 @@ data class EditDocument(
          * contents became [TrackItem]s ([Clip] or [Gap]), the lanes gained the attributes [Track]
          * carries, and the document gained [sequences]. Neither is a compatible read, which is why
          * :domain:project's codec migrates an older file on the way in rather than letting the keys it
-         * no longer names fall on the floor.
+         * no longer names fall on the floor. `4` is the keyframes version: clips gained a `keyframes`
+         * map (WS K). Unlike the first two it IS a compatible read — the field is defaulted empty, so a
+         * v3 file decodes with no keyframes and only its stamp is advanced (see [promotedFromV3]).
          */
-        const val SCHEMA_VERSION = 3
+        const val SCHEMA_VERSION = 4
     }
 }
 

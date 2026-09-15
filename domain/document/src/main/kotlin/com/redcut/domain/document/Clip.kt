@@ -98,6 +98,29 @@ data class Clip(
      * second copy of the track, and refusing that here is cheaper than reasoning about it in the mixer.
      */
     val audioSyncOffsetUs: Long = 0,
+    /**
+     * This clip's keyframed properties, one key list per property, each in time order (WS K).
+     *
+     * ### How a keyframed property coexists with the static one
+     *
+     * The clip still carries its static [transform] — that is the value when a property has NO keys, and
+     * it is what every reader written before keyframes continues to use. A property that appears in this
+     * map is keyframed: the resolver (in :domain:render, feeding both preview and export) interpolates
+     * [Keyframe]s over the property's own timeline and overrides the static value where it has keys. One
+     * key is a constant — the property holds that key's value at every time (spec §13.1, FR-3 note) — so
+     * "constant" and "animated" are degrees of the same storage shape rather than two kinds of field.
+     *
+     * ### The storage shape
+     *
+     * A map of property -> keys, rather than one flat list, so that adding a key to one property cannot
+     * disturb another's and the resolver can ask "what is the CROP_LEFT worth at time t" without
+     * filtering a shared list. Each list is stored sorted by [Keyframe.timeUs] with no duplicates — the
+     * invariant `KeyframeInterpolation` requires, and the transport's add/remove at the playhead keeps.
+     *
+     * Defaulted empty, so every document written before v4 decodes with no keyframes at all — the whole
+     * v3 -> v4 migration is this default (see [EditDocument.promotedFromV3]).
+     */
+    val keyframes: Map<KeyframableProperty, List<Keyframe>> = emptyMap(),
 ) : TrackItem {
     init {
         require(sourceInUs >= 0) { "sourceInUs must be >= 0, was $sourceInUs" }

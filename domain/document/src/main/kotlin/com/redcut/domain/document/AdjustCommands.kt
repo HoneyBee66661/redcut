@@ -175,4 +175,41 @@ data class SetTransform(
     override fun touchedTrackIds(document: EditDocument): Set<String> = setOf(trackId)
 }
 
+/**
+ * Set one clip property's keyframe list (WS K).
+ *
+ * Replaces the whole key list for [property] — the transport toggles "a key exists at the playhead or
+ * not", and expressing that as a full-list write is what keeps the command idempotent and undoable in
+ * one step (an add and a remove are both "here is the new list for this property"). The [Keyframe]s are
+ * the caller's responsibility to keep sorted and unique, which the transport's add-at-the-playhead and
+ * remove-at-the-playhead both maintain.
+ *
+ * An empty list REMOVES the property from the clip's keyframes map rather than leaving a keyed entry
+ * holding nothing: a property with no keys IS the static property, and a map entry that says "keyframed
+ * but with no keys" would make the resolver special-case a value no user can reach. That removal is what
+ * makes the diamond's toggle, which deletes the last key at the playhead, put the clip exactly back to
+ * the pre-keyframe state.
+ */
+data class SetKeyframes(
+    val trackId: String,
+    val clipId: String,
+    val property: KeyframableProperty,
+    val keys: List<Keyframe>,
+) : EditCommand {
+    override val label: String get() = "Keyframe"
+
+    override fun apply(doc: EditDocument): EditDocument {
+        val clip = doc.trackById(trackId)?.clipById(clipId) ?: return doc
+        val keyframes = if (keys.isEmpty()) {
+            clip.keyframes - property
+        } else {
+            clip.keyframes + (property to keys)
+        }
+        if (clip.keyframes == keyframes) return doc
+        return doc.withClip(trackId, clip.copy(keyframes = keyframes))
+    }
+
+    override fun touchedTrackIds(document: EditDocument): Set<String> = setOf(trackId)
+}
+
 private const val MICROS_PER_MILLI = 1_000L

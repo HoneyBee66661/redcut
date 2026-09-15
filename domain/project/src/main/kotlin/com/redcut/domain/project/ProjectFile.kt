@@ -6,6 +6,7 @@ import com.redcut.domain.document.Track
 import com.redcut.domain.document.TrackKind
 import com.redcut.domain.document.promotedFromV1
 import com.redcut.domain.document.promotedFromV2
+import com.redcut.domain.document.promotedFromV3
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
@@ -118,15 +119,29 @@ object ProjectCodec {
      * format used is read through a view of its own ([V1Project] for a v1 file's flat `clips`,
      * [V2Project] for a v2 track's `clips`) rather than migrated after the decode: by then, it is gone.
      *
-     * The v2 rule runs first — both rules stamp the version forward, so the order is what keeps each one
-     * in front of the files it owns (see `EditDocument.promotedFromV2`).
+     * The v3 rule runs first — it only advances the stamp of an already-complete v4-shaped document, so it
+     * is the least invasive and the first in the newest-first order — then the v2 rule, then the v1 rule:
+     * each stamps the version forward, and the order is what keeps each one in front of the files it owns
+     * (see `EditDocument.promotedFromV3`).
      */
     fun decode(text: String): SavedProject? = runCatching {
         val project = json.decodeFromString<SavedProject>(text)
         val v2Tracks = json.decodeFromString<V2Project>(text).document.tracks.map { it.toTrack() }
         val v1Clips = json.decodeFromString<V1Project>(text).document.clips
-        project.promoteV2Tracks(v2Tracks).promoteV1Clips(v1Clips)
+        project.promoteV3().promoteV2Tracks(v2Tracks).promoteV1Clips(v1Clips)
     }.getOrNull()
+
+    /**
+     * Advances the stamp of a v3 file, whose clips already decoded with empty keyframes.
+     *
+     * A v3 file is structurally identical to a v4 one — the only difference is the new defaulted field,
+     * which the codec's own decode has already filled — so there is nothing to move and no old view to
+     * read it through. The one thing left is the version stamp, and advancing it here is what keeps a
+     * future v5 migration able to tell a v3 file from a v4 one. Run first, before [promoteV2Tracks],
+     * because it is the newest rule and the newest-first order is what keeps each rule in front of the
+     * files it owns.
+     */
+    private fun SavedProject.promoteV3(): SavedProject = copy(document = document.promotedFromV3())
 
     /**
      * Hands the codec's v2 reading of `tracks` to the document's own migration rule.

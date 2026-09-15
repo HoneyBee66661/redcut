@@ -4,6 +4,7 @@ import com.google.common.truth.Truth.assertThat
 import com.redcut.domain.document.CanvasSpec
 import com.redcut.domain.document.Clip
 import com.redcut.domain.document.EditDocument
+import com.redcut.domain.document.FitMode
 import com.redcut.domain.document.SourceRef
 import com.redcut.domain.document.Track
 import com.redcut.domain.document.TrackKind
@@ -243,6 +244,54 @@ class ProjectFileTest {
 
         assertThat(after.document.schemaVersion).isEqualTo(EditDocument.SCHEMA_VERSION)
         assertThat(after.document.tracks).isEqualTo(before.document.tracks)
+    }
+
+    // --- The committed v3 fixture -----------------------------------------------------------
+
+    /**
+     * The committed v3 file, off the CLASSPATH, for the same reason [v2Fixture] is read there rather
+     * than by path: Gradle puts `src/test/resources` on the classpath, so the test finds the file from
+     * wherever it happens to run.
+     */
+    private fun v3Fixture(): String =
+        requireNotNull(javaClass.getResourceAsStream("/v3-project.json")) {
+            "the committed v3 fixture is missing from the test classpath"
+        }.use { it.readBytes().toString(Charsets.UTF_8) }
+
+    @Test
+    fun `the committed v3 fixture is still a v3 file with no keyframes key`() {
+        // Asserted on the BYTES rather than through a decode, for the same reason V2FixtureDumpTest is:
+        // a v4-shaped file decodes perfectly well and yields the same empty keyframes, so only the raw
+        // text can say the migration test is reading what it claims to. There was no writer for the v3
+        // wire shape by the time this fixture was committed — v3 was already one version back — so what
+        // pins it to v3 is this guard, not a producer that could no longer exist.
+        val text = v3Fixture()
+
+        assertThat(text).contains(""""schemaVersion":3""")
+        assertThat(text).doesNotContain(""""keyframes":""")
+    }
+
+    @Test
+    fun `a v3 file opens as a v4 document with empty keyframes on its clips`() {
+        // The "old file, missing new fields" direction: a file written by the v3 build has clips with no
+        // `keyframes` key anywhere, and it must open with those fields at their defaults — the migration
+        // that could not invent the field is the migration that does nothing but advance the stamp. The
+        // static values a v3 file DID store have to survive, because a v3 crop the user set is still a
+        // crop: `clip-cropped` keeps its crop rect and its volume, and both clips read back with no
+        // keyframes at all.
+        val opened = ProjectCodec.decode(v3Fixture())!!
+
+        assertThat(opened.document.schemaVersion).isEqualTo(EditDocument.SCHEMA_VERSION)
+        assertThat(opened.document.tracks).hasSize(1)
+        assertThat(opened.document.clips.map { it.id })
+            .containsExactly("clip-plain", "clip-cropped")
+            .inOrder()
+        assertThat(opened.document.clips.all { it.keyframes.isEmpty() }).isTrue()
+        val cropped = opened.document.clipById("clip-cropped")!!
+        assertThat(cropped.transform.cropLeft).isEqualTo(0.1f)
+        assertThat(cropped.transform.rotationDegrees).isEqualTo(2.5f)
+        assertThat(cropped.transform.fit).isEqualTo(FitMode.FILL)
+        assertThat(cropped.volume).isEqualTo(0.5f)
     }
 
     @Test

@@ -4,7 +4,8 @@ import com.google.common.truth.Truth.assertThat
 import org.junit.jupiter.api.Test
 
 /**
- * The document's upgrade rules — v1 → v2 and v2 → v3 — as rules about documents, not JSON tricks.
+ * The document's upgrade rules — v1 → v2, v2 → v3 and v3 → v4 — as rules about documents, not JSON
+ * tricks.
  *
  * The file-level half of the same story lives in :domain:project, where a real payload of each version
  * is decoded. This half is here because each rule has decisions in it — when a document is old, what
@@ -233,5 +234,60 @@ class DocumentMigrationTest {
 
         assertThat(promoted.schemaVersion).isEqualTo(EditDocument.SCHEMA_VERSION)
         assertThat(promoted.tracks).isEqualTo(listOf(Track.MAIN))
+    }
+
+    // --- v3 → v4: the clips gained a keyframes map, defaulted empty -------------------------------
+
+    /**
+     * A v3 document as it exists once the codec has read it: the stamp says 3 and every clip carries
+     * whatever the file stored — which, for a file written before v4, never includes a `keyframes` key.
+     */
+    private fun v3Document() = EditDocument(
+        schemaVersion = 3,
+        id = "doc-3",
+        name = "Holiday",
+        sources = listOf(source("s1")),
+        tracks = listOf(videoTrack(clip("c1", "s1", 0L, oneSecond))),
+        revision = 7L,
+    )
+
+    @Test
+    fun `a v3 document is promoted to the current version and nothing else changes`() {
+        // The whole claim of the v4 migration: it advances the STAMP and nothing else, because the
+        // field it was added for already decodes on its default. The user's edit — sources, lanes, the
+        // revision — has to arrive untouched, exactly as the earlier rules promised.
+        val before = v3Document()
+
+        val after = before.promotedFromV3()
+
+        assertThat(after.schemaVersion).isEqualTo(EditDocument.SCHEMA_VERSION)
+        assertThat(after.id).isEqualTo("doc-3")
+        assertThat(after.name).isEqualTo("Holiday")
+        assertThat(after.sources).isEqualTo(before.sources)
+        assertThat(after.tracks).isEqualTo(before.tracks)
+        assertThat(after.canvas).isEqualTo(CanvasSpec.PORTRAIT_1080)
+        assertThat(after.revision).isEqualTo(7L)
+    }
+
+    @Test
+    fun `a v3 clip that never heard of keyframes holds the empty map, not a crash`() {
+        // The additive direction in the model: a clip built the way every v3-era writer built one — no
+        // keyframes argument — holds an empty keyframe map. That is what makes "an old file decodes on
+        // defaults" true before any codec is involved, and it is why the migration has nothing to move.
+        val clip = clip("c1", "s1", 0L, oneSecond)
+
+        assertThat(clip.keyframes).isEmpty()
+    }
+
+    @Test
+    fun `a v2 document is not the v3 rule's business`() {
+        // The stamp band, the same one the v2 rule uses: a v2 file belongs to the rule that knows where
+        // its clips are, and stamping it v4 from here would put it past [promotedFromV2] forever.
+        val v2 = v2Document()
+
+        val untouched = v2.promotedFromV3()
+
+        assertThat(untouched).isEqualTo(v2)
+        assertThat(untouched.schemaVersion).isEqualTo(2)
     }
 }

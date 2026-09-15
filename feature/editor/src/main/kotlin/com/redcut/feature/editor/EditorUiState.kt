@@ -18,9 +18,11 @@ import com.redcut.domain.document.UndoStack
  * lets it skip recomposition when the state is unchanged. Every field here is a
  * `val` of an immutable type (`EditDocument` is a data class of immutable values).
  *
- * Still absent, because nothing produces them yet: `playback` and the export's own progress (spec Phase
- * 4.1-4.5). Each arrives with the phase that gives it meaning — a field added empty now would be a field
- * every screen has to pass a default for, and the first real one would have to argue with it.
+ * Still absent, because nothing produces it yet: the export's own progress (spec Phase 4.1-4.5). It arrives
+ * with the phase that gives it meaning — a field added empty now would be a field every screen has to pass a
+ * default for, and the first real one would have to argue with it. `playback` was the other entry on this
+ * list, and it has landed with FR-2.10, which is the shape that promise predicted: the field arrived
+ * together with the flow that fills it, rather than ahead of it.
  */
 @Immutable
 data class EditorUiState(
@@ -34,6 +36,16 @@ data class EditorUiState(
      * undo must not step through it. The same distinction the stage already has.
      */
     val playheadUs: Long = 0L,
+    /**
+     * What the preview is doing (§7.2, FR-2.10).
+     *
+     * A snapshot of the renderer rather than a place to change it: the player is what knows whether it is
+     * playing and where it is, and this is the copy the UI draws. It is in this object, and not read from
+     * the renderer by each composable that wants it, for the reason the object exists at all — the
+     * transport strip's button and the timeline's playhead are two readings of one moment, and two readers
+     * are how they come to disagree.
+     */
+    val playback: PlaybackState = PlaybackState(),
     /** What the user has selected (§7.2). */
     val selection: Selection = Selection.None,
     /**
@@ -68,6 +80,23 @@ data class EditorUiState(
 }
 
 /**
+ * What the preview is doing, as a value the UI state can carry (§7.2's `playback`).
+ *
+ * Two facts and no third, and the RENDERER is the source of truth for both: [isPlaying] is the player's own
+ * answer rather than the last request made of it, and [positionUs] is where the composition is on the
+ * timeline — the same axis as [EditorUiState.playheadUs], which is what makes the playhead able to follow
+ * playback at all (FR-2.10).
+ *
+ * The defaults describe a renderer holding nothing: stopped, at the start. That is what makes this type
+ * additive for every construction that predates it.
+ */
+@Immutable
+data class PlaybackState(
+    val isPlaying: Boolean = false,
+    val positionUs: Long = 0L,
+)
+
+/**
  * Whether the history can move, and what the next move would be called.
  *
  * [Ready] carries the flags rather than the stack so the UI never holds the mutable
@@ -98,6 +127,7 @@ sealed interface HistoryState {
 internal fun UndoStack.toUiState(
     stage: Stage,
     playheadUs: Long = 0L,
+    playback: PlaybackState = PlaybackState(),
     selection: Selection = Selection.None,
     tool: ToolState = ToolState.Idle,
     import: ImportReport? = null,
@@ -111,6 +141,7 @@ internal fun UndoStack.toUiState(
     ),
     stage = stage,
     playheadUs = playheadUs,
+    playback = playback,
     selection = selection,
     tool = tool,
     import = import,

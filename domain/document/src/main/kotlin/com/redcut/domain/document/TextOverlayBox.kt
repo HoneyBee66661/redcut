@@ -62,6 +62,12 @@ data class TextOverlayBox(
      * move. A box with no room to move is pinned to the centre — see the type's KDoc.
      */
     fun movedToCentre(centerX: Float, centerY: Float): TextOverlayBox {
+        // The identity case, checked on the SAME arithmetic both callers use: a drag that asks for the
+        // centre the box already has returns the box itself, so a gesture that ends where it started
+        // commits to nothing (UndoStack.commit compares base against current). Without this, the
+        // re-derivation below turns `left + width/2` back into `left - ulp`, and a no-move drag records
+        // a "Move text" entry that changed nothing.
+        if (centerX == this.centerX && centerY == this.centerY) return this
         val halfWidth = width / HALF_DIVISOR
         val halfHeight = height / HALF_DIVISOR
         // The degenerate branch is a guard against `coerceIn(min, max)` being handed min > max, which

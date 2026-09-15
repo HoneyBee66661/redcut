@@ -201,4 +201,20 @@ sealed interface EditorIntent {
      * frame size in exactly the same terms — and so the state cannot hold a size the domain does not have.
      */
     data class SetExportResolution(val resolution: CanvasSpec) : View
+
+    /**
+     * Add or remove a keyframe at the playhead for the selected clip's keyframable property (WS K).
+     *
+     * An [Edit]: keying a clip changes the document and is worth one undo entry, the same as any other
+     * edit. The property acted on is derived from the selection and the clip's own keyframes map (see
+     * the transport helpers), so this intent carries no property of its own — the transport keys the
+     * clip's active keyframable property, and the per-property picker is the inspector's later card.
+     */
+    data object ToggleKeyframe : Edit
+
+    /** Move the playhead to the previous key of the selected clip's active keyframable property. */
+    data object PrevKeyframe : View
+
+    /** Move the playhead to the next key of the selected clip's active keyframable property. */
+    data object NextKeyframe : View
 }

@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.redcut.core.common.IdSource
 import com.redcut.core.common.di.IoDispatcher
+import com.redcut.core.common.keyframe.KeyframeInterpolation
 import com.redcut.core.common.logging.RedcutLogger
 import com.redcut.core.media.MediaSourceReader
 import com.redcut.core.media.PreviewRenderer
@@ -16,9 +17,13 @@ import com.redcut.domain.document.CutTool
 import com.redcut.domain.document.EditDocument
 import com.redcut.domain.document.FrameStep
 import com.redcut.domain.document.ImportRejection
+import com.redcut.domain.document.KeyframableProperty
+import com.redcut.domain.document.Keyframe
 import com.redcut.domain.document.RenameDocument
 import com.redcut.domain.document.ReorderClip
+import com.redcut.domain.document.SetKeyframes
 import com.redcut.domain.document.SetTransform
+import com.redcut.domain.document.TransformSpec
 import com.redcut.domain.document.UndoStack
 import com.redcut.domain.document.ViewportRect
 import com.redcut.domain.document.commandFor
@@ -204,7 +209,8 @@ class EditorViewModel @Inject constructor(
      * that rearranges one lane, and the viewport. The gestures are handed on whole — the four moments of
      * each, and the preview/commit pairing that makes them one edit, belong to the gesture lifecycle
      * rather than to this class, so they live in [GestureSession] and this class keeps one line each.
-     * An import is not a family — one intent, one branch, one handler that was already named for it.
+     * An import is not a family — one intent, one branch, one handler that was already named for it —
+     * and neither is the keyframe transport's toggle (WS K): one intent, one branch, one handler.
      *
      * There is still no `else` anywhere: a new intent joins a family (and the compiler makes that
      * family's `when` handle it) or takes a branch of its own, and either way it cannot fall outside
@@ -224,6 +230,8 @@ class EditorViewModel @Inject constructor(
 
             // The preview viewport (WS F): the crop and zoom of the SELECTED clip.
             is EditorIntent.SetViewport -> applyViewport(intent)
+
+            is EditorIntent.ToggleKeyframe -> toggleKeyframe()
 
             is EditorIntent.ImportMedia -> importMedia(intent.uris)
         }
@@ -275,6 +283,58 @@ class EditorViewModel @Inject constructor(
         )
         autosave()
         publish()
+    }
+
+    /**
+     * The transport diamond: add or remove a key at the playhead for the selected clip's active
+     * keyframable property (WS K).
+     *
+     * Toggle, derived from the state: if the active property already has a key exactly at the playhead's
+     * local time, remove it; otherwise add one holding the property's current value there. Removing the
+     * LAST key empties the property's list, which [SetKeyframes] turns into removing the property from
+     * the clip's keyframes map — so the clip returns exactly to its pre-keyframe state. The current value
+     * is the interpolated one when the property is already animated, and the clip's static transform value
+     * when it is not (the one-key-equals-a-constant rule, spec §13.1).
+     */
+    private fun toggleKeyframe() {
+        val state = _state.value
+        val transport = keyframeTransport(history.current, state.selection, state.playheadUs)
+            ?: return
+        val clip = history.current.clipById(transport.clipId) ?: return
+        val trackId = history.current.trackIdOf(transport.clipId) ?: return
+        val existing = clip.keyframes[transport.property].orEmpty()
+        val hasKeyAt = existing.any { it.timeUs == transport.localUs }
+        val keys = if (hasKeyAt) {
+            existing.filterNot { it.timeUs == transport.localUs }
+        } else {
+            val value = keyframeValueAt(clip, transport.property, transport.localUs)
+            (existing + Keyframe(transport.localUs, value)).sortedBy { it.timeUs }
+        }
+        if (keys == existing) return
+        val verb = if (hasKeyAt) "remove" else "add"
+        logger.d(TAG, "keyframe $verb ${transport.property} @ ${transport.localUs}")
+        history.execute(SetKeyframes(trackId, transport.clipId, transport.property, keys))
+        autosave()
+        publish()
+    }
+
+    /**
+     * Move the playhead to the previous or next key of the selected clip's active keyframable property.
+     */
+    private fun moveToAdjacentKey(forward: Boolean) {
+        val state = _state.value
+        val transport = keyframeTransport(history.current, state.selection, state.playheadUs)
+            ?: return
+        val keys = history.current.clipById(transport.clipId)
+            ?.keyframes
+            ?.get(transport.property)
+            .orEmpty()
+        val target = if (forward) {
+            keys.firstOrNull { it.timeUs > transport.localUs }
+        } else {
+            keys.lastOrNull { it.timeUs < transport.localUs }
+        } ?: return
+        movePlayhead(transport.clipStartUs + target.timeUs)
     }
 
     /**
@@ -331,6 +391,13 @@ class EditorViewModel @Inject constructor(
 
             is EditorIntent.SetExportResolution ->
                 _state.value = _state.value.withExportResolution(intent.resolution)
+
+            // The keyframe transport's two VIEW moves: jump the playhead to the previous or next key of
+            // the selected clip's active keyframable property. Moving the playhead is not an edit, so
+            // undo must not step through it — the same rule every other playhead move follows.
+            EditorIntent.PrevKeyframe -> moveToAdjacentKey(forward = false)
+
+            EditorIntent.NextKeyframe -> moveToAdjacentKey(forward = true)
         }
     }
 
@@ -618,4 +685,71 @@ class EditorViewModel @Inject constructor(
         const val UNTITLED_ID = "untitled"
         const val UNTITLED_NAME = "Untitled project"
     }
+}
+
+/**
+ * The transport's reading of the keyframe state for [document], [selection] and [playheadUs].
+ *
+ * Shared by the UI (to enable the diamond and the prev/next arrows and to show the keyed state) and by
+ * the ViewModel (to act), so the two can never disagree about which property the diamond points at.
+ */
+internal data class KeyframeTransport(
+    val clipId: String,
+    val property: KeyframableProperty,
+    val clipStartUs: Long,
+    val localUs: Long,
+)
+
+/**
+ * The selected clip's active keyframable property and the playhead's position within it, or null when
+ * the transport has nothing to act on.
+ *
+ * Null covers both "nothing selected" and "the playhead is not over the selected clip": a key can only
+ * be added where the clip actually plays, so a playhead sitting over a different clip leaves the diamond
+ * inert. The active property is the first keyframable property the clip has actually keyed (in enum
+ * order, so the answer is stable regardless of map ordering), falling back to
+ * [KeyframableProperty.CROP_LEFT] when the clip has no keys at all — the property the transform/crop
+ * block makes keyframable first. The property list is read from the model's own
+ * [KeyframableProperty.entries], never fabricated here.
+ */
+internal fun keyframeTransport(
+    document: EditDocument,
+    selection: Selection,
+    playheadUs: Long,
+): KeyframeTransport? {
+    val clipId = (selection as? Selection.Clip)?.clipId ?: return null
+    val clip = document.clipById(clipId) ?: return null
+    val clipStartUs = document.timeline.firstOrNull { it.clip.id == clipId }?.startUs ?: return null
+    val localUs = playheadUs - clipStartUs
+    if (localUs < 0L || localUs >= clip.timelineDurationUs) return null
+    val property = KeyframableProperty.entries.firstOrNull { it in clip.keyframes }
+        ?: KeyframableProperty.CROP_LEFT
+    return KeyframeTransport(clipId, property, clipStartUs, localUs)
+}
+
+/**
+ * The value a new key should hold: [property]'s on-screen value on [clip] at [localUs].
+ *
+ * When the property is already keyframed, that is the interpolated value at the playhead — so a key
+ * dropped mid-animation does not snap the property, it freezes where it was heading. When the property
+ * has no keys yet, it is the clip's static transform value, which is what "one key = constant" means:
+ * the first key captures the value the property already has.
+ *
+ * A pure function beside [keyframeTransport] rather than a method of the ViewModel, for the same reason
+ * that one is: it is the transport's reading of the document, both paths that act on a keyframe need it
+ * to agree, and a plain JVM test reaches it without a ViewModel.
+ */
+internal fun keyframeValueAt(clip: Clip, property: KeyframableProperty, localUs: Long): Float {
+    val existing = clip.keyframes[property].orEmpty()
+    if (existing.isEmpty()) return property.valueIn(clip.transform)
+    return KeyframeInterpolation.linear(existing.map { it.toSample() }, localUs)
+}
+
+/** The static value of [property] on [transform] — the fallback when the property has no keys. */
+internal fun KeyframableProperty.valueIn(transform: TransformSpec): Float = when (this) {
+    KeyframableProperty.CROP_LEFT -> transform.cropLeft
+    KeyframableProperty.CROP_TOP -> transform.cropTop
+    KeyframableProperty.CROP_RIGHT -> transform.cropRight
+    KeyframableProperty.CROP_BOTTOM -> transform.cropBottom
+    KeyframableProperty.ROTATION_DEGREES -> transform.rotationDegrees
 }

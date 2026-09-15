@@ -39,6 +39,25 @@ class SourceImportTest {
         probe: SourceProbe = probe(),
     ) = ProbedSource(uri = uri, displayName = name, probe = probe)
 
+    /** The music bed's shape: a container the probe found sound in and no picture at all (FR-1.6). */
+    private fun audioProbe(durationUs: Long = 180_000_000L) = probe(
+        durationUs = durationUs,
+        width = 0,
+        height = 0,
+        videoCodec = "",
+        audioCodec = "audio/mp4a-latm",
+        hasAudio = true,
+    )
+
+    /** The shape neither branch of the policy can use: no picture, and no sound either. */
+    private fun neitherProbe() = probe(
+        width = 0,
+        height = 0,
+        videoCodec = "",
+        audioCodec = null,
+        hasAudio = false,
+    )
+
     // --- Acceptance --------------------------------------------------------
 
     @Test
@@ -96,21 +115,71 @@ class SourceImportTest {
         assertThat(SourceImportPolicy.normalizeFrameRate(59.94f)).isEqualTo(59.94f)
     }
 
+    // --- The music bed, accepted rather than refused (FR-1.6) --------------
+
+    @Test
+    fun `an audio-only file is accepted as a music bed rather than refused for having no video`() {
+        // FR-1.6, and the MVP scope line "single video track + one audio bed": "no video track" stopped
+        // being a reason to refuse a file once there was somewhere for its sound to go. The codec check
+        // is skipped for it — the supported set is a set of VIDEO codecs (spec §8.2), so asking it about
+        // a song would refuse every song ever imported.
+        val outcome = SourceImportPolicy.accept(
+            id = "src-1",
+            probed = probed(name = "song.m4a", probe = audioProbe()),
+        )
+
+        assertThat(outcome).isInstanceOf(ImportOutcome.Accepted::class.java)
+        val source = (outcome as ImportOutcome.Accepted).source
+        assertThat(source.displayName).isEqualTo("song.m4a")
+        assertThat(source.durationUs).isEqualTo(180_000_000L)
+        assertThat(source.hasAudio).isTrue()
+        assertThat(source.audioCodec).isEqualTo("mp4a-latm")
+        // The audio-only shape as STORED: no dimensions and no video codec. That is what makes the
+        // derived readings agree with this verdict instead of a flag beside it that could contradict it.
+        assertThat(source.width).isEqualTo(0)
+        assertThat(source.height).isEqualTo(0)
+        assertThat(source.videoCodec).isEmpty()
+        assertThat(source.isAudioOnly).isTrue()
+        assertThat(source.hasVideo).isFalse()
+    }
+
+    @Test
+    fun `a video with sound is a video source and not a music bed`() {
+        // Sound WITH picture rides on the video layer, so only a source with no picture at all is a bed.
+        // This is the branch that decides which lane an import lands on, so it is asserted directly.
+        val source = acceptedSource(probe(hasAudio = true))
+
+        assertThat(source.hasVideo).isTrue()
+        assertThat(source.isAudioOnly).isFalse()
+    }
+
     // --- Rejection, one case per reason (FR-1.4) ---------------------------
 
     @Test
-    fun `an audio-only file is refused for having no video track, not for its codec`() {
+    fun `a file with neither picture nor sound is still refused for having no video track`() {
+        // The rejection that survives D1, with its old name and its old sentence — because that
+        // sentence is still exactly true of the file it is now raised for.
         val outcome = SourceImportPolicy.accept(
             id = "src-1",
-            probed = probed(
-                name = "song.m4a",
-                probe = probe(width = 0, height = 0, videoCodec = ""),
-            ),
+            probed = probed(name = "mystery.bin", probe = neitherProbe()),
         )
 
         val rejection = (outcome as ImportOutcome.Rejected).rejection
         assertThat(rejection).isInstanceOf(ImportRejection.NoVideoTrack::class.java)
-        assertThat(rejection.message).contains("song.m4a")
+        assertThat(rejection.message).contains("mystery.bin")
+    }
+
+    @Test
+    fun `an audio-only file is still held to the clip duration floor`() {
+        // Being a music bed exempts a source from the CODEC check and from nothing else: every clip's
+        // out-point and the whole timeline come from this number, and a song is not exempt from that.
+        val outcome = SourceImportPolicy.accept(
+            id = "src-1",
+            probed = probed(name = "blip.m4a", probe = audioProbe(durationUs = 60_000L)),
+        )
+
+        assertThat((outcome as ImportOutcome.Rejected).rejection)
+            .isInstanceOf(ImportRejection.TooShort::class.java)
     }
 
     @Test
@@ -228,8 +297,8 @@ class SourceImportTest {
     fun `an import where every file is refused is empty and has nothing to undo`() {
         val plan = planImport(
             probed = listOf(
-                probed(name = "a.m4a", probe = probe(width = 0, height = 0, videoCodec = "")),
-                probed(name = "b.m4a", probe = probe(width = 0, height = 0, videoCodec = "")),
+                probed(name = "a.bin", uri = "content://media/1", probe = neitherProbe()),
+                probed(name = "b.bin", uri = "content://media/2", probe = neitherProbe()),
             ),
             trackId = VIDEO,
             sourceId = { "src-$it" },
@@ -253,6 +322,110 @@ class SourceImportTest {
 
         assertThat(plan.isEmpty).isTrue()
         assertThat(plan.rejected).isEmpty()
+    }
+
+    // --- Which lane an accepted file lands on, and seeding it (FR-1.6) -----
+
+    @Test
+    fun `an audio-only source is routed to the audio lane and a video source to the video lane`() {
+        val plan = planImport(
+            probed = listOf(
+                probed(name = "film.mp4", uri = "content://media/1"),
+                probed(name = "song.m4a", uri = "content://media/2", probe = audioProbe()),
+            ),
+            trackId = VIDEO,
+            sourceId = { "src-$it" },
+            clipId = { "clip-$it" },
+        )
+
+        // The source decides, not the caller and not a guess: the probe is the only thing that knows
+        // which of these two files is a music bed.
+        assertThat(plan.commands.filterIsInstance<AppendClip>().map { it.trackId })
+            .containsExactly(VIDEO, Track.AUDIO_ID).inOrder()
+        assertThat(plan.commands.filterIsInstance<AppendClip>().map { it.clipId })
+            .containsExactly("clip-0", "clip-1").inOrder()
+    }
+
+    @Test
+    fun `an audio-only clip spans the whole of its source`() {
+        val plan = planImport(
+            probed = listOf(probed(name = "song.m4a", probe = audioProbe())),
+            trackId = VIDEO,
+            sourceId = { "src-$it" },
+            clipId = { "clip-$it" },
+        )
+
+        assertThat(plan.commands.filterIsInstance<AppendClip>().single()).isEqualTo(
+            AppendClip(
+                trackId = Track.AUDIO_ID,
+                clipId = "clip-0",
+                sourceId = "src-0",
+                sourceInUs = 0L,
+                sourceOutUs = 180_000_000L,
+            ),
+        )
+    }
+
+    @Test
+    fun `the first audio import seeds the audio lane once however many songs are selected`() {
+        val plan = planImport(
+            probed = listOf(
+                probed(name = "one.m4a", uri = "content://media/1", probe = audioProbe()),
+                probed(name = "two.m4a", uri = "content://media/2", probe = audioProbe()),
+            ),
+            trackId = VIDEO,
+            sourceId = { "src-$it" },
+            clipId = { "clip-$it" },
+        )
+
+        // Two songs are two clips on ONE music bed. A seed per audio source would be a second lane
+        // whose clips the mixer has no shape for — and the plan is where that is prevented.
+        val seeds = plan.commands.filterIsInstance<AddTrack>()
+        assertThat(seeds).hasSize(1)
+        assertThat(seeds.single().track.id).isEqualTo(Track.AUDIO_ID)
+        assertThat(seeds.single().track.kind).isEqualTo(TrackKind.AUDIO)
+        // Before the first thing that addresses the lane, or the AppendClip would name a lane the
+        // document does not have and be a silent no-op.
+        assertThat(plan.commands.indexOfFirst { it is AddTrack })
+            .isLessThan(plan.commands.indexOfFirst { it is AppendClip })
+    }
+
+    @Test
+    fun `a video-only import lands every clip on the video lane and seeds no audio lane`() {
+        val plan = planImport(
+            probed = listOf(
+                probed(name = "a.mp4", uri = "content://media/1", probe = probe(hasAudio = false)),
+                probed(name = "b.mp4", uri = "content://media/2", probe = probe(hasAudio = false)),
+            ),
+            trackId = VIDEO,
+            sourceId = { "src-$it" },
+            clipId = { "clip-$it" },
+        )
+
+        // The regression half of an additive change: a batch with no music bed in it plans exactly what
+        // it planned before, down to the command count — no lane is created for a project with no sound.
+        assertThat(plan.commands).hasSize(4)
+        assertThat(plan.commands.filterIsInstance<AddTrack>()).isEmpty()
+        assertThat(plan.commands.filterIsInstance<AppendClip>().map { it.trackId })
+            .containsExactly(VIDEO, VIDEO).inOrder()
+    }
+
+    @Test
+    fun `the caller can name the lane the music bed lands on`() {
+        val plan = planImport(
+            probed = listOf(probed(name = "song.m4a", probe = audioProbe())),
+            trackId = VIDEO,
+            sourceId = { "src-$it" },
+            clipId = { "clip-$it" },
+            audioTrackId = "track-audio-bed",
+        )
+
+        // The seed is built from the id the plan ROUTES to, not from the model's default: a lane created
+        // under one id while the clip went to another is a music bed appended to nothing.
+        assertThat(plan.commands.filterIsInstance<AddTrack>().single().track.id)
+            .isEqualTo("track-audio-bed")
+        assertThat(plan.commands.filterIsInstance<AppendClip>().single().trackId)
+            .isEqualTo("track-audio-bed")
     }
 
     // --- The plan against the real commands ---------------------------------

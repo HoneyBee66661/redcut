@@ -21,7 +21,19 @@ data class SourceProbe(
     val videoCodec: String = "",
     val audioCodec: String? = null,
     val hasAudio: Boolean = false,
-)
+) {
+    /**
+     * True when the container reported a picture track the policy could judge.
+     *
+     * Derived from the three facts above rather than reported by the platform, because no platform
+     * reports it: a probe that found no video track leaves the dimensions at zero and the codec blank,
+     * and that ABSENCE is the fact. Naming it here is what lets [SourceImportPolicy.accept] ask the
+     * question once instead of repeating the three-way test — and it is the same reading
+     * [SourceRef.hasVideo] applies to what the policy stored, so the probe's shape and the document's
+     * shape cannot come apart.
+     */
+    val hasVideo: Boolean get() = width > 0 && height > 0 && videoCodec.isNotBlank()
+}
 
 /** One file that was read: where it came from, what it is called, what the probe found. */
 data class ProbedSource(
@@ -53,7 +65,15 @@ private const val QUARTER_TURNS = 4
 sealed interface ImportRejection {
     val message: String
 
-    /** The container has no video track — audio-only, or something else entirely. */
+    /**
+     * The container has neither picture nor sound — so there is nothing to import it AS.
+     *
+     * Not the audio-only case any more: an audio-only file is a music bed and is accepted (FR-1.6).
+     * What is left for this reason is the file that reported no video track and no audio track either,
+     * which is a container RedCut has nothing to do with. The name is kept because a rejection reason
+     * is a wire value a report and a test compare, and the sentence it produces is still exactly true
+     * of the file it is now raised for.
+     */
     data class NoVideoTrack(val displayName: String) : ImportRejection {
         override val message: String get() = "\"$displayName\" has no video track."
     }
@@ -146,20 +166,39 @@ object SourceImportPolicy {
     /**
      * Assesses one probed file.
      *
-     * Order matters: the reason a user is shown should be the most specific true one, so
-     * "no video track" is checked before "unsupported codec" (an audio file's codec is
-     * irrelevant), and duration is checked last, after the file is known to be a video.
+     * ### What may enter, and as what (FR-1.3, FR-1.6)
+     *
+     * Two shapes are importable: a file with a picture track this app decodes, and a file that is
+     * sound and nothing else — the music bed of FR-1.6, which the MVP scope line ("single video track
+     * + one audio bed") admits as exactly one kind of second source. A file with neither is refused,
+     * and it is refused by the same reason it always was, because that reason is exactly true of it.
+     *
+     * ### Why the codec check is skipped for a music bed
+     *
+     * The supported-codec set is a set of VIDEO codecs (spec §8.2), so asking it about an audio-only
+     * file is a category error that would refuse every song ever imported. This is the one place the
+     * two shapes diverge, and it is a branch rather than a second `accept`, because everything else —
+     * the duration floor, the unknown-duration refusal, the normalisation, the stored shape — is the
+     * same judgement for both and two functions would be two places for them to drift apart.
+     *
+     * ### Order
+     *
+     * The reason a user is shown should be the most specific true one, so the "nothing to import"
+     * check comes first (it is the only one that can be raised for both shapes), the codec check next
+     * (an audio file's video codec does not exist to be wrong), and duration last — after the file is
+     * known to be something the timeline can hold, since that is the check that needs a length.
      */
     fun accept(id: String, probed: ProbedSource): ImportOutcome {
         val probe = probed.probe
         val name = probed.displayName
+        val hasVideo = probe.hasVideo
 
-        if (probe.width <= 0 || probe.height <= 0 || probe.videoCodec.isBlank()) {
+        if (!hasVideo && !probe.hasAudio) {
             return ImportOutcome.Rejected(ImportRejection.NoVideoTrack(name))
         }
 
-        val codec = normalizeCodec(probe.videoCodec)
-        if (codec !in SUPPORTED_VIDEO_CODECS) {
+        val codec = if (hasVideo) normalizeCodec(probe.videoCodec) else ""
+        if (hasVideo && codec !in SUPPORTED_VIDEO_CODECS) {
             return ImportOutcome.Rejected(ImportRejection.UnsupportedCodec(name, probe.videoCodec))
         }
 
@@ -177,8 +216,13 @@ object SourceImportPolicy {
                 uri = probed.uri,
                 displayName = name,
                 durationUs = probe.durationUs,
-                width = probe.width,
-                height = probe.height,
+                // An audio-only source is stored with NO dimensions and a blank codec, which is what
+                // makes [SourceRef.hasVideo] — and so [SourceRef.isAudioOnly] — reproduce this verdict
+                // on the stored value instead of a second flag that could contradict it. Zeroing them
+                // here also drops whatever a probe reported for a file it found no picture in: a stray
+                // 1920 from a container that guessed is a size the render path would try to use.
+                width = if (hasVideo) probe.width else 0,
+                height = if (hasVideo) probe.height else 0,
                 rotationDegrees = normalizeRotation(probe.rotationDegrees),
                 frameRate = normalizeFrameRate(probe.frameRate),
                 hasAudio = probe.hasAudio,
@@ -215,32 +259,63 @@ data class ImportPlan(
  * the same rule the rest of [EditCommand] follows, because a command that invents its own
  * id cannot be compared, replayed, or asserted on.
  *
- * [trackId] is the lane every clip of this import lands on, supplied by the caller for the
- * same reason the ids are: which lane an imported file belongs on is a decision about the
- * DOCUMENT ("the video lane", and later "the audio one"), and a planner that guessed it could
- * not be told otherwise. It is one track for the whole batch because one import is one act.
- *
  * Refused files yield no commands at all, and are reported instead: silently dropping one
  * of five selected videos is how a user concludes the import button is broken.
+ *
+ * ### Which lane an accepted file lands on (FR-1.6)
+ *
+ * Two lanes, and the source itself decides between them rather than the caller or a guess:
+ * a source with picture goes to [trackId], and a source that is sound and nothing else — a
+ * music bed — goes to [audioTrackId]. The distinction is a fact about the file
+ * ([SourceRef.isAudioOnly]), which is why it is not a parameter: a caller that had to say
+ * "and this one is audio" for every selection would be re-reporting what the probe already
+ * found, and would get it wrong exactly when it mattered.
+ *
+ * The two LANE IDS are the caller's, though, for the reason the entity ids are: which lane a
+ * project's video lives on is a decision about the DOCUMENT, and a planner that guessed it
+ * could not be told otherwise. [audioTrackId] defaults to [Track.AUDIO_ID] — the one audio
+ * lane the model names — rather than to [trackId], because a default of the video lane would
+ * put the music bed on the picture lane, which is the one placement that is certainly wrong.
+ * A caller written before the bed existed keeps its exact signature and gets the right lane.
+ *
+ * ### Seeding the audio lane (D2)
+ *
+ * The first accepted audio source is preceded by an [AddTrack] creating [audioTrackId], so a
+ * plan is sufficient on its own: a first audio import into a fresh document — one video lane,
+ * no audio lane — lands the bed on a lane that exists, without the caller having to know
+ * whether this is that first import.
+ *
+ * It is idempotent in the two ways it has to be. Within one plan, only the FIRST audio source
+ * emits the seed, so importing two songs creates the lane once. Across plans, [AddTrack] is a
+ * no-op when the lane is already there, so the second audio import emits a seed that does
+ * nothing rather than a second lane — which is also why the planner does not need to see the
+ * document to answer "does this project have an audio lane yet".
  */
 fun planImport(
     probed: List<ProbedSource>,
     trackId: String,
     sourceId: (index: Int) -> String,
     clipId: (index: Int) -> String,
+    audioTrackId: String = Track.AUDIO_ID,
 ): ImportPlan {
     val commands = mutableListOf<EditCommand>()
     val accepted = mutableListOf<SourceRef>()
     val rejected = mutableListOf<ImportRejection>()
+    var seededAudioLane = false
 
     probed.forEachIndexed { index, item ->
         when (val outcome = SourceImportPolicy.accept(sourceId(index), item)) {
             is ImportOutcome.Accepted -> {
                 val source = outcome.source
+                val isBed = source.isAudioOnly
+                if (isBed && !seededAudioLane) {
+                    seededAudioLane = true
+                    commands += AddTrack(audioLaneNamed(audioTrackId))
+                }
                 accepted += source
                 commands += AddSource(source)
                 commands += AppendClip(
-                    trackId = trackId,
+                    trackId = if (isBed) audioTrackId else trackId,
                     clipId = clipId(index),
                     sourceId = source.id,
                     sourceInUs = 0L,
@@ -254,3 +329,17 @@ fun planImport(
 
     return ImportPlan(commands = commands, accepted = accepted, rejected = rejected)
 }
+
+/**
+ * The lane a first audio import seeds: an empty AUDIO lane with [audioTrackId].
+ *
+ * Built from the id the caller ROUTES to rather than from a constant, so the lane the plan
+ * creates is the lane the plan appends to: a seed named [Track.AUDIO_ID] while the clips went
+ * to an id the caller chose would append the music bed to a lane that does not exist, and
+ * [AppendClip] would then quietly do nothing.
+ *
+ * Empty on purpose — a lane's sound-state attributes ([Track.volume], [Track.muted]) are the
+ * mix, and the mix of a bed nobody has touched yet is the defaults.
+ */
+private fun audioLaneNamed(audioTrackId: String): Track =
+    Track(id = audioTrackId, kind = TrackKind.AUDIO)

@@ -4,6 +4,8 @@ import com.redcut.domain.document.AppliedEffect
 import com.redcut.domain.document.Clip
 import com.redcut.domain.document.EditDocument
 import com.redcut.domain.document.SourceRef
+import com.redcut.domain.document.Track
+import com.redcut.domain.document.TrackKind
 import com.redcut.domain.document.videoTrack
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -80,6 +82,53 @@ internal fun document(
     effects = effects,
     revision = revision,
 )
+
+/**
+ * The audio-only shape a probe reports for a song (FR-1.6): sound, and no picture at all.
+ *
+ * The zero dimensions and the blank video codec are load-bearing rather than cosmetic: they are what
+ * make `SourceRef.isAudioOnly` true, which is what the importer routes a music bed on. A fixture that
+ * wanted a bed and only left the audio codec unset would be a VIDEO source with no sound.
+ */
+internal fun audioSource(id: String, durationUs: Long = 10 * SEC): SourceRef = SourceRef(
+    id = id,
+    uri = "content://fixture/$id",
+    displayName = "$id.m4a",
+    durationUs = durationUs,
+    width = 0,
+    height = 0,
+    videoCodec = "",
+    hasAudio = true,
+    audioCodec = "audio/mp4a-latm",
+)
+
+/** An AUDIO lane holding [clips], under [id] — the music bed of FR-1.6 lives on one. */
+internal fun audioTrack(clips: List<Clip>, id: String = Track.AUDIO_ID): Track =
+    Track(id = id, kind = TrackKind.AUDIO, items = clips)
+
+/**
+ * A document with NO video lane: one audio lane holding [clips].
+ *
+ * The shape WS D makes legal — the MVP's "single video track + one audio bed" with the video half
+ * absent — and the one every "nothing requires a video track to exist" claim is tested against.
+ */
+internal fun audioOnlyDocument(
+    clips: List<Clip> = listOf(clip("a1", "a1", 0L, 3 * SEC)),
+): EditDocument = EditDocument(
+    id = "doc-audio-only",
+    name = "Music bed",
+    sources = listOf(audioSource("a1")),
+    tracks = listOf(audioTrack(clips)),
+)
+
+/** The MVP's two-lane shape: [clips] on the video lane, [audioClips] on the audio one BESIDE it. */
+internal fun twoLaneDocument(clips: List<Clip>, audioClips: List<Clip>): EditDocument =
+    EditDocument(
+        id = "doc-two-lanes",
+        name = "Two lanes",
+        sources = listOf(source("s1"), audioSource("a1")),
+        tracks = listOf(videoTrack(clips), audioTrack(audioClips)),
+    )
 
 /**
  * Three clips over one source, contiguous in the source, covering 7 s of timeline:

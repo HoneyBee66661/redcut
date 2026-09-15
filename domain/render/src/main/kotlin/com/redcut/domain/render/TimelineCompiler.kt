@@ -6,6 +6,8 @@ import com.redcut.domain.document.EditDocument
 import com.redcut.domain.document.EffectScope
 import com.redcut.domain.document.SourceRef
 import com.redcut.domain.document.TimeRange
+import com.redcut.domain.document.TrackKind
+import com.redcut.domain.document.positionedClips
 
 /**
  * The one function that turns an [EditDocument] into a [RenderGraph] — spec §4.3,
@@ -104,14 +106,11 @@ object TimelineCompiler {
             layers = videoLayers + overlayLayers(document, slots, graphDurationUs),
             output = output,
             transitions = dissolveTransitions(document.effects, slots),
-            // Rule D4 / FR-3.2: per-clip gain, mute and fades already live on the
-            // layers above, so the only things left here are the master gain and the
-            // music bed. `EditDocument` has no `audioBed` field yet even though
-            // FR-1.6 names one, and the graph must not pretend otherwise — an
-            // invented bed would be a music track the user never added. The field
-            // exists on [AudioGraph] so that adding it later is an additive model
-            // change rather than a graph migration.
-            audio = AudioGraph(),
+            // Rule D4 / FR-3.2: per-clip gain, mute and fades already live on the layers above, so the
+            // only things left here are the master gain and the music bed. The bed comes from the
+            // document's AUDIO lane (FR-1.6, WS D) — the lane IS the music bed, which is why there is
+            // no `audioBed` field on `EditDocument` to read instead. See [musicBed].
+            audio = AudioGraph(music = musicBed(document)),
         )
     }
 
@@ -135,7 +134,20 @@ object TimelineCompiler {
     }
 
     /**
-     * The live clips, in document order, laid out contiguously from 0.
+     * The live clips of the document's VIDEO lanes, in lane order and then in-lane order, laid out
+     * contiguously from 0.
+     *
+     * ### Why the lanes are filtered, and what that makes legal
+     *
+     * Only a VIDEO lane holds picture, so only a VIDEO lane contributes layers to the video render.
+     * What this replaces was a walk of `document.clips` — the flattened view over every lane — which
+     * was the same list while a document had one lane and becomes a category error the moment it has
+     * two: an AUDIO lane's clip is sound, and emitting it as a [RenderLayer.Video] would ask the mapper
+     * to decode a song as footage. That is also what makes an AUDIO-ONLY document legal (FR-1.6, D4):
+     * with no video lane there are no slots, so the graph is a valid empty video whose audio — the bed
+     * below — is untouched. Nothing here requires a video lane to exist.
+     *
+     * ### Liveness
      *
      * A clip is live when it is enabled AND its `sourceId` resolves. A disabled clip
      * is not in the render at all, and a clip whose source is not in
@@ -152,23 +164,72 @@ object TimelineCompiler {
     private fun compiledSlots(document: EditDocument): List<CompiledSlot> {
         var cursor = 0L
         return buildList {
-            document.clips.forEach { clip ->
-                val source = document.sourceById(clip.sourceId)
-                if (!clip.enabled || source == null) return@forEach
-                val durationUs = clip.timelineDurationUs
-                // Totality guard. `Clip` puts no ceiling on `sourceOutUs`, so a long
-                // trim combined with a tiny speed saturates `timelineDurationUs` at
-                // Long.MAX_VALUE. Once the cursor is that far out there is no room
-                // for another layer, and adding anyway would wrap the end negative
-                // and make TimeRange throw. Stopping keeps the emitted layers a
-                // contiguous prefix — the only shape RenderGraph accepts — and every
-                // later clip fails the same test, so nothing is skipped over.
-                if (cursor > Long.MAX_VALUE - durationUs) return@forEach
-                val end = cursor + durationUs
-                add(CompiledSlot(clip, source, TimeRange(cursor, end)))
-                cursor = end
+            document.tracks.filter { it.kind == TrackKind.VIDEO }.forEach { lane ->
+                // Labelled because the outer walk is a `forEach` too, and an unlabelled
+                // `return@forEach` here would be a coin toss a reader has to resolve.
+                lane.clips.forEach clip@{ clip ->
+                    val source = document.sourceById(clip.sourceId)
+                    if (!clip.enabled || source == null) return@clip
+                    val durationUs = clip.timelineDurationUs
+                    // Totality guard. `Clip` puts no ceiling on `sourceOutUs`, so a long
+                    // trim combined with a tiny speed saturates `timelineDurationUs` at
+                    // Long.MAX_VALUE. Once the cursor is that far out there is no room
+                    // for another layer, and adding anyway would wrap the end negative
+                    // and make TimeRange throw. Stopping keeps the emitted layers a
+                    // contiguous prefix — the only shape RenderGraph accepts — and every
+                    // later clip fails the same test, so nothing is skipped over.
+                    if (cursor > Long.MAX_VALUE - durationUs) return@clip
+                    val end = cursor + durationUs
+                    add(CompiledSlot(clip, source, TimeRange(cursor, end)))
+                    cursor = end
+                }
             }
         }
+    }
+
+    /**
+     * The music bed (FR-1.6), or null when the document has no sound of its own to play under it.
+     *
+     * ### Where a bed lives
+     *
+     * The AUDIO lane IS the bed. `EditDocument` carries no `audioBed` field — spec §5 sketches one, the
+     * committed document does not, and the audio workstream answered the question the other way: the
+     * music bed is a lane holding one clip, which is the same thing the user sees and edits, and which
+     * needs no schema migration to introduce. `planImport` is what creates the lane and puts the source
+     * on it; this is the reading that turns it back into the mix the graph carries.
+     *
+     * ### One bed, deliberately, and what that costs
+     *
+     * The MVP is "single video track + one audio bed", so the bed is the FIRST enabled clip of the
+     * FIRST audio lane. A document with more than one — which no command can build today and no import
+     * plan produces — compiles its second lane to nothing, and that is the named cost of not inventing
+     * a mix the mixer does not have a shape for: [AudioGraph.music] is one bed, and filling it with
+     * whichever clip happened to be second would be a second music track the user never added.
+     *
+     * ### Why a dropped bed is not a dropped clip
+     *
+     * The three nulls below are all "there is no bed", not "the bed was thrown away": an audio lane
+     * with nothing in it, a lane whose first clip is disabled, and a clip pointing at a source that is
+     * gone. Each is the same absence a missing music file is, and none of them is an error the graph
+     * could carry any better — the clip is still in the document, and reappears the moment the thing
+     * that made it unresolvable is undone.
+     *
+     * [AudioBed.timelineStartUs] is the clip's start on ITS LANE, not on the flattened timeline: lanes
+     * run in parallel (see [EditDocument.lanes]), so a bed that follows a gap in its own lane starts
+     * where that lane says, not where the video does.
+     */
+    private fun musicBed(document: EditDocument): AudioBed? {
+        val lane = document.tracks.firstOrNull { it.kind == TrackKind.AUDIO } ?: return null
+        val placed = lane.positionedClips().firstOrNull { it.clip.enabled } ?: return null
+        val source = document.sourceById(placed.clip.sourceId) ?: return null
+        return AudioBed(
+            source = source,
+            sourceRange = TimeRange(placed.clip.sourceInUs, placed.clip.sourceOutUs),
+            timelineStartUs = placed.startUs,
+            gain = safeGain(placed.clip.volume),
+            muted = placed.clip.muted,
+            fades = fadesFor(placed.clip),
+        )
     }
 
     /**

@@ -73,7 +73,6 @@ The one-way pipeline (`cut → edit → effect`, where each stage rewrites the t
 Explicitly out of scope. Every one of these is a real feature that would be a mistake to start now:
 
 - Multi-track video (MVP is single video track + one audio bed + overlay effects)
-- Keyframe animation (effects have static params in MVP; the model reserves room)
 - Chroma key, masking, blending modes
 - Object/face tracking, auto-reframe
 - HDR, 10-bit, log/RAW, color management beyond sRGB
@@ -84,7 +83,14 @@ Explicitly out of scope. Every one of these is a real feature that would be a mi
 - Resolutions beyond 720p/1080p
 - Vulkan renderer (see §6.6)
 - Subtitle import/export (SRT)
+- Auto-caption from audio (speech-to-text)
 - Voice recording
+
+> **Caption path (decided 2026-09-15):** TEXT OVERLAY (FR-4.3, Must) is the in-MVP caption feature.
+> Subtitle/SRT import and auto-caption from audio stay out of scope per this section.
+
+> **Keyframe animation moved INTO scope (decided 2026-09-15):** previously a non-goal, now an MVP
+> workstream (see §13.1 execution order). The model reserves per-property keys; one key = constant.
 
 ---
 
@@ -130,7 +136,8 @@ The assembly stage. Everything here manipulates **clip boundaries and ordering**
 
 #### FR-3 — EDIT stage
 
-Clip-level, temporal/structural properties. **One value per clip per property** — no keyframes in MVP.
+Clip-level, temporal/structural properties. **One value per clip per property by default** — a
+property may instead hold (time, value) keys when the keyframe workstream (§13.1) is in; one key = constant.
 
 | ID | Tool | Range / options | Priority |
 |---|---|---|---|
@@ -1049,6 +1056,12 @@ Estimates are **engineer-days** for one senior Android engineer. `∥` marks wor
 **Exit criterion: MVP COMPLETE.** A user can import, cut, edit, effect, and export a 1080p MP4 that matches the preview.
 
 > **Execution order note.** Phases are numbered by topic, not by date. The actual order is **0 → 1 → 2 → 3 → 4 → 6 → 5**: Phase 6 (hardening) completes the MVP at M3, and only then does Phase 5 (native core) begin at M4. See §13.2.
+
+> **Re-ordered by the user (2026-09-15).** After Phase 1, the delivery order is: **(1)** crop / rotate /
+> flip / canvas fit (task 2.4) with the crop rect **keyframable**, **(2)** the keyframe system
+> (per-property keys, interpolation, preview/export parity), **(3)** export to 1080p MP4, **(4)** caption
+> (manual text overlay, FR-4.3). Phases 2–3 content follows afterwards; task 2.4 moves ahead of its
+> phase. The remaining phase work is scheduled around these four.
 
 ### Phase 5 — Native core (committed, starts after M3)
 

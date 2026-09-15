@@ -170,6 +170,10 @@ private fun ClipAdjustment.label(): String = when (this) {
     ClipAdjustment.ROTATION -> "Rotate"
     ClipAdjustment.FLIP_HORIZONTAL -> "Flip horizontally"
     ClipAdjustment.FLIP_VERTICAL -> "Flip vertically"
+    // The canvas fit is drawn by [FitModeRow], a segmented control rather than a slider, so the
+    // generic row never renders it — but this `when` is an EXPRESSION, so it has to name every
+    // constant the enum has, and the answer here is the same word the segmented row uses.
+    ClipAdjustment.FIT_MODE -> "Canvas fit"
 }
 
 /**
@@ -186,10 +190,14 @@ private fun ClipAdjustment.readout(value: Float): String = when (this) {
     ClipAdjustment.VOLUME -> "${(value * HUNDRED).roundToInt()} %"
     ClipAdjustment.FADE_IN, ClipAdjustment.FADE_OUT -> "${value.roundToInt()} ms"
     ClipAdjustment.MUTE, ClipAdjustment.REVERSE, ClipAdjustment.FLIP_HORIZONTAL,
-    ClipAdjustment.FLIP_VERTICAL -> {
+    ClipAdjustment.FLIP_VERTICAL,
+    -> {
         if (value >= ClipAdjustment.SWITCH_THRESHOLD) "on" else "off"
     }
     ClipAdjustment.ROTATION -> "${value.roundToInt()}°"
+    // The value is the FitMode ORDINAL, exactly as `adjust` reads it back, so the reading and the
+    // write are one mapping in two directions rather than two guesses at the same ordinal.
+    ClipAdjustment.FIT_MODE -> FitMode.entries.getOrElse(value.toInt()) { FitMode.FIT }.label()
 }
 
 private const val HUNDRED = 100f
@@ -205,11 +213,7 @@ private const val HUNDRED = 100f
  * carrying the ordinal (0 = Fit, 1 = Fill, 2 = Stretch) through the existing slider/switch pipeline.
  */
 @Composable
-private fun FitModeRow(
-    current: FitMode,
-    clipId: String,
-    onIntent: (EditorIntent) -> Unit,
-) {
+private fun FitModeRow(current: FitMode, clipId: String, onIntent: (EditorIntent) -> Unit) {
     Column(modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
         Text(
             text = "Canvas fit",
@@ -226,8 +230,11 @@ private fun FitModeRow(
                         .weight(1f)
                         .clip(SEGMENTED_SHAPE)
                         .background(
-                            if (selected) MaterialTheme.colorScheme.primaryContainer
-                            else MaterialTheme.colorScheme.surfaceVariant,
+                            if (selected) {
+                                MaterialTheme.colorScheme.primaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.surfaceVariant
+                            },
                         )
                         .border(
                             width = if (selected) SEGMENTED_BORDER_WIDTH else 0.dp,

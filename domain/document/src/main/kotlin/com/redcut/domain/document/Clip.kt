@@ -166,7 +166,29 @@ data class Clip(
     }
 }
 
-/** Crop / scale / rotate / fit. Static in MVP — no keyframes (spec §1.3). */
+/**
+ * Crop / scale / rotate / fit (FR-3.5–3.8).
+ *
+ * ### This is the STATIC half, and it is still the whole answer for most clips
+ *
+ * Crop and rotation are keyframable as well ([KeyframableProperty], schema v4). A property that
+ * appears in [Clip.keyframes] is overridden there by its curve; a property that does not IS the field
+ * below — the coexistence rule [Clip.keyframes] states in full. So this type is not "the old way" and
+ * the keys are not "the new way": a clip that animates only its crop still crops where the user
+ * dragged it at every time its keys do not name, and one key is a constant, which is why the two
+ * shapes need no special case to live together.
+ *
+ * A reader that wants the transform at a MOMENT rather than the clip's resting value folds the two
+ * halves through the render tier's one resolver and never field by field — that fold is the only
+ * place the two can be combined, and having one is what keeps the preview and the export from
+ * disagreeing about a clip that is keyed (spec §12.3).
+ *
+ * ### Flip and fit are static only, and that is a shape fact
+ *
+ * A boolean and an enum cannot be interpolated, so neither is a [KeyframableProperty] and both travel
+ * through any animation untouched. Keyframing them would need a different key shape, which this build
+ * does not carry.
+ */
 @Serializable
 data class TransformSpec(
     val cropLeft: Float = 0f,

@@ -5,7 +5,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.redcut.core.common.IdSource
 import com.redcut.core.common.di.IoDispatcher
-import com.redcut.core.common.keyframe.KeyframeInterpolation
 import com.redcut.core.common.logging.RedcutLogger
 import com.redcut.core.media.MediaSourceReader
 import com.redcut.core.media.PreviewRenderer
@@ -33,6 +32,9 @@ import com.redcut.domain.document.timelineDurationUs
 import com.redcut.domain.project.ProjectStore
 import com.redcut.domain.project.SavedProject
 import com.redcut.domain.project.nextUntitledName
+import com.redcut.domain.render.staticValueIn
+import com.redcut.domain.render.transformAt
+import com.redcut.domain.render.valueAt
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -728,6 +730,31 @@ internal fun keyframeTransport(
 }
 
 /**
+ * The clip's transform at the playhead: the PREVIEW's read of the render tier's one resolver (WS G1).
+ *
+ * The subtraction is the whole of the preview's half of the parity contract. The playhead is a
+ * TIMELINE position and a clip's keys are on the CLIP's own clock, so the one thing the preview has to
+ * get right is which microsecond of the clip it is asking about; everything after that belongs to
+ * `:domain:render`, shared with the export path frame for frame. A preview that got the clock wrong
+ * would animate, and would animate at the wrong moment — the failure that looks like a bug in the
+ * interpolation rather than in this line.
+ *
+ * Null when the document has no such clip, or (impossibly for a clip [EditDocument.clips] reports) no
+ * lane places it. A playhead outside the clip's own span is NOT special-cased, deliberately: the
+ * resolver already clamps to the first and last key, and the alternative — falling back to the static
+ * transform — would snap the picture back to a crop the user animated away from, on the frame the
+ * playhead crossed the clip's edge.
+ *
+ * A function of the document rather than of the ViewModel, like [keyframeTransport] beside it, so the
+ * composable that draws the preview reaches the same answer the tests do without a ViewModel.
+ */
+internal fun EditDocument.transformAtPlayhead(clipId: String, playheadUs: Long): TransformSpec? {
+    val clip = clipById(clipId) ?: return null
+    val clipStartUs = timeline.firstOrNull { it.clip.id == clipId }?.startUs ?: return null
+    return clip.transformAt(playheadUs - clipStartUs)
+}
+
+/**
  * The value a new key should hold: [property]'s on-screen value on [clip] at [localUs].
  *
  * When the property is already keyframed, that is the interpolated value at the playhead — so a key
@@ -735,21 +762,17 @@ internal fun keyframeTransport(
  * has no keys yet, it is the clip's static transform value, which is what "one key = constant" means:
  * the first key captures the value the property already has.
  *
+ * Both branches are the DOMAIN's, not this module's. The question "what is this property worth at t"
+ * has exactly one answer in the app — `:domain:render`'s resolver, which the preview and the export
+ * read too — and a UI that interpolated for itself would be a third opinion, agreeing with the other
+ * two only until someone keyed a clip. So this delegates rather than computes.
+ *
  * A pure function beside [keyframeTransport] rather than a method of the ViewModel, for the same reason
  * that one is: it is the transport's reading of the document, both paths that act on a keyframe need it
  * to agree, and a plain JVM test reaches it without a ViewModel.
  */
-internal fun keyframeValueAt(clip: Clip, property: KeyframableProperty, localUs: Long): Float {
-    val existing = clip.keyframes[property].orEmpty()
-    if (existing.isEmpty()) return property.valueIn(clip.transform)
-    return KeyframeInterpolation.linear(existing.map { it.toSample() }, localUs)
-}
+internal fun keyframeValueAt(clip: Clip, property: KeyframableProperty, localUs: Long): Float =
+    property.valueAt(clip.transform, clip.keyframes, localUs)
 
 /** The static value of [property] on [transform] — the fallback when the property has no keys. */
-internal fun KeyframableProperty.valueIn(transform: TransformSpec): Float = when (this) {
-    KeyframableProperty.CROP_LEFT -> transform.cropLeft
-    KeyframableProperty.CROP_TOP -> transform.cropTop
-    KeyframableProperty.CROP_RIGHT -> transform.cropRight
-    KeyframableProperty.CROP_BOTTOM -> transform.cropBottom
-    KeyframableProperty.ROTATION_DEGREES -> transform.rotationDegrees
-}
+internal fun KeyframableProperty.valueIn(transform: TransformSpec): Float = staticValueIn(transform)

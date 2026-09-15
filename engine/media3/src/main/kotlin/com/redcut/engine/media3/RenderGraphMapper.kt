@@ -28,11 +28,20 @@ import com.redcut.domain.render.RenderLayer
  * audio removed for a layer the graph reports as silent.
  *
  * Not mapped yet, and named here rather than discovered later: `RenderLayer.Video.transform`,
- * `.effects`, `.reverse`, `.fades`, the `Transition`s, and the `Text`/`Image` overlay layers. Each
- * belongs to the phase that gives it meaning (FR-4 for effects and overlays, FR-4.5 for dissolves) and
- * each is a *declarative value already on the graph* — which is rule D2's whole point: the chain can be
- * compiled later, by this mapper or by the C++ core, because it was never a constructed shader object.
- * Until then the preview shows the base video track, which is what the Cut stage edits.
+ * `.keyframes`, `.effects`, `.reverse`, `.fades`, the `Transition`s, and the `Text`/`Image` overlay
+ * layers. Each belongs to the phase that gives it meaning (FR-4 for effects and overlays, FR-4.5 for
+ * dissolves) and each is a *declarative value already on the graph* — which is rule D2's whole point:
+ * the chain can be compiled later, by this mapper or by the C++ core, because it was never a
+ * constructed shader object. Until then the preview shows the base video track, which is what the Cut
+ * stage edits.
+ *
+ * The transform is the one entry on that list that is a *function of time* rather than a value, and it
+ * is labelled here because the difference is a trap: a mapping that read `layer.transform` per frame
+ * would render every keyframed clip at its static crop — animated in the preview, frozen in the
+ * export, which is the exact defect WS K exists to close (§12.3). A frame's transform is
+ * `layer.transformAt(frameUs - layer.timeRange.startUs)`, the only place the static half and the keyed
+ * half are folded together; `layer.keyframes` is carried on the layer for that function and nothing
+ * else.
  *
  * That the graph carries them and the mapping is one file is also what keeps §12.3 honest: when the
  * export path is built it starts from this same graph, and anything this mapper gets wrong is wrong in

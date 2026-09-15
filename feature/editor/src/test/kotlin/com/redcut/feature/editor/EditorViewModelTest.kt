@@ -10,6 +10,8 @@ import com.redcut.domain.document.ClipEdge
 import com.redcut.domain.document.CutTool
 import com.redcut.domain.document.EditDocument
 import com.redcut.domain.document.FrameStep
+import com.redcut.domain.document.KeyframableProperty
+import com.redcut.domain.document.Keyframe
 import com.redcut.domain.document.SourceRef
 import com.redcut.domain.document.videoTrack
 import com.redcut.domain.project.SavedProject
@@ -1123,4 +1125,79 @@ class EditorViewModelTest {
     }
 
     private fun HistoryState.topLabelOrNull(): String? = (this as? HistoryState.Ready)?.topLabel
+
+    // --- The keyframe transport (WS K) -------------------------------------------------------
+
+    @Test
+    fun `the transport diamond adds a key at the playhead and undo removes it`() = runTest(
+        dispatcher,
+    ) {
+        val (model, clipId) = importedClip()
+        model.onIntent(EditorIntent.SelectClip(clipId))
+        model.onIntent(EditorIntent.SetPlayhead(1_000_000L))
+
+        model.onIntent(EditorIntent.ToggleKeyframe)
+
+        // One undoable entry, labelled Keyframe; the key sits at the playhead's LOCAL time (the clip
+        // starts at 0 on the timeline) and captures the property's static value (cropLeft is 0 by
+        // default — one key = constant, spec §13.1).
+        val clip = model.state.value.document.clipById(clipId)!!
+        assertThat(clip.keyframes[KeyframableProperty.CROP_LEFT])
+            .containsExactly(Keyframe(1_000_000L, 0f))
+        assertThat(model.state.value.history)
+            .isEqualTo(
+                HistoryState.Ready(canUndo = true, canRedo = false, topLabel = "Keyframe"),
+            )
+
+        model.onIntent(EditorIntent.Undo)
+        assertThat(model.state.value.document.clipById(clipId)!!.keyframes).isEmpty()
+    }
+
+    @Test
+    fun `toggling the diamond again removes the key at the playhead`() = runTest(dispatcher) {
+        val (model, clipId) = importedClip()
+        model.onIntent(EditorIntent.SelectClip(clipId))
+        model.onIntent(EditorIntent.ToggleKeyframe)
+        assertThat(model.state.value.document.clipById(clipId)!!.keyframes).isNotEmpty()
+
+        model.onIntent(EditorIntent.ToggleKeyframe)
+
+        // Removing the LAST key empties the property's list, which removes the property from the map
+        // entirely — the clip returns to its pre-keyframe state, and the diamond shows the empty glyph.
+        assertThat(model.state.value.document.clipById(clipId)!!.keyframes).isEmpty()
+    }
+
+    @Test
+    fun `the keyframe arrows move the playhead between the clip's keys`() = runTest(dispatcher) {
+        val (model, clipId) = importedClip()
+        model.onIntent(EditorIntent.SelectClip(clipId))
+        model.onIntent(EditorIntent.ToggleKeyframe)
+        model.onIntent(EditorIntent.SetPlayhead(2_000_000L))
+        model.onIntent(EditorIntent.ToggleKeyframe)
+
+        // From past the last key, previous lands on the last key; from before the first, next lands on
+        // the first. Both are playhead moves — view state, so they must not touch the undo stack.
+        model.onIntent(EditorIntent.SetPlayhead(3_000_000L))
+        model.onIntent(EditorIntent.PrevKeyframe)
+        assertThat(model.state.value.playheadUs).isEqualTo(2_000_000L)
+
+        model.onIntent(EditorIntent.SetPlayhead(1_000_000L))
+        model.onIntent(EditorIntent.NextKeyframe)
+        assertThat(model.state.value.playheadUs).isEqualTo(2_000_000L)
+        assertThat(model.state.value.history)
+            .isEqualTo(HistoryState.Ready(canUndo = true, canRedo = false, topLabel = "Keyframe"))
+    }
+
+    @Test
+    fun `the transport is inert with nothing selected`() = runTest(dispatcher) {
+        val (model, _) = importedClips(video())
+        model.onIntent(EditorIntent.ClearSelection)
+        val before = model.state.value.document
+
+        model.onIntent(EditorIntent.ToggleKeyframe)
+        model.onIntent(EditorIntent.PrevKeyframe)
+        model.onIntent(EditorIntent.NextKeyframe)
+
+        assertThat(model.state.value.document).isEqualTo(before)
+    }
 }

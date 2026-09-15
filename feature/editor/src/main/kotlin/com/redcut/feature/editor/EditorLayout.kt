@@ -167,8 +167,8 @@ private fun TopBar(
  * asks the renderer to change it. Routing it through the ViewModel would mean a second copy of "is it
  * playing" in `EditorUiState` and a synchronisation between the two — §7.2's sketch does give playback
  * a field in the UI state, and the field is still owed; what is here is the player's answer, which
- * cannot disagree with the player. The keyframe button is in its place and does nothing yet, tracked as
- * its own task.
+ * cannot disagree with the player. The keyframe button is real (WS K): the diamond toggles a key at the
+ * playhead for the selected clip's active keyframable property, and the arrows move between its keys.
  */
 @Composable
 internal fun ColumnScope.TimelineControls(
@@ -199,7 +199,43 @@ internal fun ColumnScope.TimelineControls(
                 PlayPauseButton(renderer = renderer)
             }
         }
-        TextButton(onClick = {}, enabled = false) { Text(KEYFRAME_GLYPH) }
+        KeyframeControls(state = state, onIntent = onIntent)
+    }
+}
+
+/**
+ * The keyframe transport, flush right: previous key, the diamond toggle, next key (WS K).
+ *
+ * All three derive their enabled state and the diamond's keyed state from the SAME reading the
+ * ViewModel acts on ([keyframeTransport]), so the button can never disagree with the action it
+ * dispatches. The diamond shows the keyed state by filling in: `◇` means "no key here, tapping adds
+ * one", `◆` means "a key is here, tapping removes it". The arrows move the playhead to the previous or
+ * next key of the active property, and are enabled only when such a key exists. With no clip selected,
+ * or the playhead off the selected clip, the whole group is inert.
+ */
+@Composable
+private fun KeyframeControls(state: EditorUiState, onIntent: (EditorIntent) -> Unit) {
+    val transport = keyframeTransport(state.document, state.selection, state.playheadUs)
+    val keys = transport
+        ?.let { state.document.clipById(it.clipId)?.keyframes?.get(it.property) }
+        .orEmpty()
+    val keyedAtPlayhead = transport != null && keys.any { it.timeUs == transport.localUs }
+    val canMoveBack = transport != null && keys.any { it.timeUs < transport.localUs }
+    val canMoveForward = transport != null && keys.any { it.timeUs > transport.localUs }
+
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        TextButton(
+            onClick = { onIntent(EditorIntent.PrevKeyframe) },
+            enabled = canMoveBack,
+        ) { Text(KEY_PREV_GLYPH) }
+        TextButton(
+            onClick = { onIntent(EditorIntent.ToggleKeyframe) },
+            enabled = transport != null,
+        ) { Text(if (keyedAtPlayhead) KEYFRAME_SET_GLYPH else KEYFRAME_GLYPH) }
+        TextButton(
+            onClick = { onIntent(EditorIntent.NextKeyframe) },
+            enabled = canMoveForward,
+        ) { Text(KEY_NEXT_GLYPH) }
     }
 }
 
@@ -356,4 +392,7 @@ private const val REDO_ARROW = "↷"
 private const val PLAY_GLYPH = "▶"
 private const val PAUSE_GLYPH = "❚❚"
 private const val KEYFRAME_GLYPH = "◇"
+private const val KEYFRAME_SET_GLYPH = "◆"
+private const val KEY_PREV_GLYPH = "◂"
+private const val KEY_NEXT_GLYPH = "▸"
 private const val MICROS_PER_MILLI = 1_000L

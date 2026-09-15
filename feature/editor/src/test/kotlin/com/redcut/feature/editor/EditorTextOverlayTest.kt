@@ -222,12 +222,25 @@ class EditorTextOverlayTest {
         val history = model.state.value.history
 
         model.onIntent(EditorIntent.BeginTextDrag(captionId))
-        model.onIntent(EditorIntent.UpdateTextDrag(TextOverlayBox.DEFAULT.centerX, 0.2f))
-        model.onIntent(EditorIntent.UpdateTextDrag(TextOverlayBox.DEFAULT.centerX, 0.2f))
+        // A no-move drag: the finger presses the caption's own centre and lets go. The gesture's
+        // absolute-answer arithmetic (anchor + travel) yields the anchor for zero travel, and
+        // TextOverlayBox.movedToCentre returns the identical box for its own centre — so the final
+        // previewed frame is a no-op and UndoStack.commit rolls the gesture back instead of recording a
+        // "Move text" entry that changed no pixels.
+        model.onIntent(
+            EditorIntent.UpdateTextDrag(
+                TextOverlayBox.DEFAULT.centerX,
+                TextOverlayBox.DEFAULT.centerY,
+            ),
+        )
+        model.onIntent(
+            EditorIntent.UpdateTextDrag(
+                TextOverlayBox.DEFAULT.centerX,
+                TextOverlayBox.DEFAULT.centerY,
+            ),
+        )
         model.onIntent(EditorIntent.EndTextDrag)
 
-        // The clamp can hold a box still while the finger keeps moving; a drag that changed nothing must
-        // not cost the user an undo tap to get past.
         assertThat(model.state.value.history).isEqualTo(history)
         assertThat(model.captionBox()).isEqualTo(TextOverlayBox.DEFAULT)
     }

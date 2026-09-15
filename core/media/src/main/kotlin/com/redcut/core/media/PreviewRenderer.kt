@@ -2,6 +2,7 @@ package com.redcut.core.media
 
 import android.view.SurfaceView
 import com.redcut.domain.render.RenderGraph
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -77,14 +78,62 @@ interface PreviewRenderer {
 
     /** What the preview is doing, for the UI to render. */
     val state: StateFlow<PreviewState>
+
+    /**
+     * Where the composition is, in microseconds — the SAME axis as [seekTo], and the playhead's own.
+     *
+     * ### Why this is here, and why the earlier reasoning against it was wrong
+     *
+     * This interface used to carry no position, and the argument was written down: *"during playback the
+     * position advances on its own, and a state object that had to be republished per frame would be a
+     * per-frame allocation for a number nothing reads."* The premise was true and the conclusion was the
+     * bug. A device pass, in the user's words: *"saat gua play clip, preview jalan namun clip tidak
+     * bergerak sesuai posisi frame di preview. harusnya ada link antara clip dan player"* — the frame
+     * moved and the timeline did not, because nothing read the number. It is not nothing: it is the value
+     * the playhead takes while the preview plays, and the playhead is what the tracks are drawn against
+     * (FR-2.10). The mechanism that reasoning protected — a `PreviewState` that is not rebuilt per frame —
+     * survives untouched; what changes is that the advancing number now travels, on a flow of its own.
+     *
+     * ### When it publishes
+     *
+     * While the player is playing, and once more at each of the moments no tick is running: an [attach]
+     * that has opened, a [pause], a [seekTo], and a failure. So a paused renderer still answers "where are
+     * you?" — which is what lets one flow serve both "the playhead follows playback" and "the playhead is
+     * where the seek put it".
+     *
+     * A renderer with nothing attached publishes nothing, and holds `NO_POSITION`: the start of the
+     * timeline, which is the honest answer for a preview showing nothing.
+     *
+     * ### The default, and why it is one
+     *
+     * An implementation that does not track a position inherits this getter and compiles unchanged — the
+     * additive rule this interface already follows. It answers with ONE shared constant rather than a fresh
+     * `MutableStateFlow` per read, because a getter that allocates would allocate for every reader of a
+     * value that cannot change.
+     */
+    val positionUs: StateFlow<Long>
+        get() = NO_POSITION
 }
+
+/**
+ * The position of a renderer that does not report one: the start of the timeline.
+ *
+ * One instance, shared by every implementation that inherits [PreviewRenderer.positionUs]. A
+ * `MutableStateFlow` built inside the getter would hand out a new object per read for a value that never
+ * changes, which is the per-frame allocation the old comment was right to refuse — the mistake was the
+ * conclusion it drew from that, not the frugality.
+ */
+private val NO_POSITION: StateFlow<Long> = MutableStateFlow(0L)
 
 /**
  * What the preview is doing, as one value.
  *
- * The UI needs exactly two facts — may I draw a frame, and is it playing — so this carries those and
- * not a position: during playback the position advances on its own, and a state object that had to be
- * republished per frame would be a per-frame allocation for a number nothing reads.
+ * The UI needs exactly two facts — may I draw a frame, and is it playing — so this carries those and not a
+ * position. The reason once given for that here ("a number nothing reads") did not survive the device pass:
+ * the number IS read, by the playhead. What did survive is the SHAPE, and it is worth keeping — the
+ * position changes about thirty times a second while this value changes when playback starts and stops, so
+ * the position travels as its own flow ([PreviewRenderer.positionUs]) and this object is not rebuilt per
+ * frame.
  *
  * [Unavailable] is a state rather than an exception because there is a real, expected way to reach it:
  * a file whose codec the device does not have. The stage shows the sentence; the user can still trim

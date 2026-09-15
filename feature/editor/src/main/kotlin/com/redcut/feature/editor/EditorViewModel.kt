@@ -8,6 +8,7 @@ import com.redcut.core.common.di.IoDispatcher
 import com.redcut.core.common.logging.RedcutLogger
 import com.redcut.core.media.MediaSourceReader
 import com.redcut.core.media.PreviewRenderer
+import com.redcut.core.media.PreviewState
 import com.redcut.core.media.SourceReadResult
 import com.redcut.domain.document.Clip
 import com.redcut.domain.document.CompoundCommand
@@ -32,6 +33,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -143,6 +145,21 @@ class EditorViewModel @Inject constructor(
 
     /** The single source of truth the UI renders. */
     val state: StateFlow<EditorUiState> = _state.asStateFlow()
+
+    // The preview -> playhead direction (FR-2.10). `state` answers "is it playing" and `positionUs`
+    // answers "where", and both are the RENDERER's own answers, so what lands in the UI state is a
+    // snapshot of the player rather than a second opinion about it (§7.2). On `viewModelScope`, so a
+    // screen that goes away stops moving a playhead nobody is looking at.
+    init {
+        viewModelScope.launch {
+            combine(previewRenderer.state, previewRenderer.positionUs) { preview, positionUs ->
+                PlaybackState(
+                    isPlaying = preview is PreviewState.Ready && preview.isPlaying,
+                    positionUs = positionUs,
+                )
+            }.collect { playback -> followPlayback(playback) }
+        }
+    }
 
     /**
      * Gives the preview's decoder back (spec §9.1).
@@ -348,6 +365,41 @@ class EditorViewModel @Inject constructor(
     }
 
     /**
+     * The other direction: the preview moving the playhead (FR-2.10), which is the half that was missing.
+     *
+     * The device pass asked for exactly this — *"saat gua play clip, preview jalan namun clip tidak
+     * bergerak sesuai posisi frame di preview. harusnya ada link antara clip dan player"* — and the link
+     * had one end already: [movePlayhead] seeks the preview when the user moves the playhead. Nothing went
+     * the other way, so the picture played while the timeline stood still.
+     *
+     * ### There is no `seekTo` here, and that is the whole point
+     *
+     * This runs about thirty times a second while the preview plays, and every call would be a seek back
+     * into the player that produced the position it carries. That is the difference between playback that
+     * runs and playback that stutters: the player is already where it says it is, and the playhead is the
+     * one that has to catch up.
+     *
+     * ### The clamp
+     *
+     * The same bound [movePlayhead] applies, for the same reason (invariant 5 of §7.2): the last position a
+     * player reports can sit a frame past the end of the document — the composition knows its own length,
+     * not the timeline the ruler draws — and a playhead past the end is a playhead drawn off the timeline.
+     * It is applied to the snapshot as well as to the playhead, so the two numbers in the state cannot
+     * disagree about where "here" is.
+     *
+     * `playback` travels in the same `copy` as the playhead rather than in a write of its own: §7.2's one
+     * state object exists so that a frame of the UI cannot show the position from one instant and the play
+     * button from another.
+     */
+    private fun followPlayback(playback: PlaybackState) {
+        val here = playback.positionUs.coerceIn(0L, history.current.timelineDurationUs)
+        _state.value = _state.value.copy(
+            playback = playback.copy(positionUs = here),
+            playheadUs = here,
+        )
+    }
+
+    /**
      * Runs a Cut tool at the playhead (FR-2.2–2.6).
      *
      * The document decides everything: `commandFor` returns null exactly when the tool is not
@@ -522,11 +574,11 @@ class EditorViewModel @Inject constructor(
     }
 
     /**
-     * Re-reads the state from the stack, keeping the view fields (stage, playhead, selection,
+     * Re-reads the state from the stack, keeping the view fields (stage, playhead, playback, selection,
      * import report, export sheet).
-     * None of the five is history: undoing a trim must not also undo "the user is looking at the
-     * Effect stage", rewind the playhead, drop the selection, erase the explanation of why one of
-     * four files was refused, or close the sheet the user is reading.
+     * None of the six is history: undoing a trim must not also undo "the user is looking at the
+     * Effect stage", rewind the playhead, claim the preview has stopped, drop the selection, erase the
+     * explanation of why one of four files was refused, or close the sheet the user is reading.
      *
      * The playhead and selection are RE-DERIVED against the new document rather than copied
      * blindly, which is where two bugs would otherwise live: after a delete or an undo that
@@ -538,6 +590,7 @@ class EditorViewModel @Inject constructor(
         _state.value = history.toUiState(
             stage = _state.value.stage,
             playheadUs = _state.value.playheadUs.coerceIn(0L, document.timelineDurationUs),
+            playback = _state.value.playback,
             selection = _state.value.selection.reconciledWith(document.clips.map { it.id }),
             tool = _state.value.tool.reconciledWith(document.clips.map { it.id }),
             import = import,

@@ -119,6 +119,7 @@ The assembly stage. Everything here manipulates **clip boundaries and ordering**
 | FR-2.7 | **Reorder** | Drag clips along the timeline to change order. | Must |
 | FR-2.8 | **Duplicate** | Duplicate the active clip immediately after itself. | Should |
 | FR-2.9 | Frame-step | Step ±1 frame from the playhead (needed for frame-accurate cuts). | Must |
+| FR-2.10 | **Playback** | Playing the preview moves the playhead with it, the tracks scroll under the fixed line (UI revision 1), and the playhead stops at the end of the document. | Must |
 
 **Semantics that need to be nailed down (these are the usual sources of subtle bugs):**
 
@@ -725,6 +726,8 @@ sealed interface EditorIntent {
 }
 ```
 
+**`playback` holds two facts and no third: `isPlaying`, and `positionUs` — where the composition is on the timeline.** Its source of truth is the **renderer**, not this state object: the player is what knows whether it is playing and where it is, and the ViewModel copies the renderer's two flows into this field so that one frame of the UI cannot show a playhead from one instant and a play button from another. The playhead follows `positionUs` as it advances (FR-2.10) — the direction that was missing, since the preview followed the playhead from the start and nothing followed the preview.
+
 **Invariants, asserted in debug builds** (so violations crash in CI, not in front of a user):
 
 1. `document.clips.all { it.sourceOutUs - it.sourceInUs >= Clip.MIN_CLIP_US }`
@@ -821,6 +824,7 @@ interface PreviewRenderer {
     fun play(); fun pause(); fun seekTo(us: Long)
     fun release()
     val state: StateFlow<PreviewState>
+    val positionUs: StateFlow<Long>   // the playhead follows this while playing (FR-2.10)
 }
 
 class CompositionPlayerRenderer : PreviewRenderer   // preferred

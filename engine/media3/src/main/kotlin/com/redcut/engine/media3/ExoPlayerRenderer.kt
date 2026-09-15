@@ -89,6 +89,23 @@ internal class ExoPlayerRenderer(
     }
 
     /**
+     * The same arithmetic as [seekPlayer], backwards — because here the axis really does change.
+     *
+     * The preferred `CompositionPlayer` plays the composition itself, so reading its position is a unit
+     * change and nothing more (that is the base class's version). `ExoPlayer` plays a playlist of clipped
+     * items and answers in **media** time inside the current window: published straight into `positionUs`
+     * it would put the playhead at a position that means nothing on the timeline — wrong on every item
+     * after the first, and wronger the faster the clip runs — and the playhead is exactly the number the
+     * user watches during playback (FR-2.10). The window's start and its speed are what [seekPlayer]
+     * applied on the way in, so they are what this applies back on the way out.
+     */
+    override fun positionOf(player: Player): Long {
+        val window = windows.getOrNull(player.currentMediaItemIndex) ?: return 0L
+        val intoWindowUs = player.currentPosition * MICROS_PER_MILLI
+        return window.timelineStartUs + (intoWindowUs / window.speed.toDouble()).toLong()
+    }
+
+    /**
      * Which playlist item contains [timelineUs].
      *
      * A scan rather than a search: the graph guarantees the video layers are contiguous and ordered

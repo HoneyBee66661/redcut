@@ -1,18 +1,8 @@
 package com.redcut.feature.editor
 
-import android.graphics.Bitmap
-import android.view.SurfaceView
 import androidx.lifecycle.ViewModelStore
 import com.google.common.truth.Truth.assertThat
-import com.redcut.core.common.IdSource
-import com.redcut.core.common.logging.NoOpRedcutLogger
-import com.redcut.core.media.MediaSourceReader
-import com.redcut.core.media.PreviewFrames
-import com.redcut.core.media.PreviewRenderer
-import com.redcut.core.media.PreviewState
 import com.redcut.core.media.SourceReadResult
-import com.redcut.core.media.ThumbnailSource
-import com.redcut.core.media.ThumbnailStore
 import com.redcut.domain.document.CanvasSpec
 import com.redcut.domain.document.Clip
 import com.redcut.domain.document.ClipAdjustment
@@ -20,22 +10,11 @@ import com.redcut.domain.document.ClipEdge
 import com.redcut.domain.document.CutTool
 import com.redcut.domain.document.EditDocument
 import com.redcut.domain.document.FrameStep
-import com.redcut.domain.document.ImportRejection
-import com.redcut.domain.document.ProbedSource
-import com.redcut.domain.document.SourceProbe
 import com.redcut.domain.document.SourceRef
 import com.redcut.domain.document.videoTrack
-import com.redcut.domain.project.ProjectStore
-import com.redcut.domain.project.ProjectSummary
 import com.redcut.domain.project.SavedProject
-import com.redcut.domain.project.summary
-import com.redcut.domain.render.RenderGraph
-import com.redcut.feature.editor.timeline.TimelineThumbnails
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
@@ -62,9 +41,6 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class EditorViewModelTest {
 
-    private val dispatcher = StandardTestDispatcher()
-    private var idCounter = 0
-
     // The import runs on TWO dispatchers that must be the same scheduler: `viewModelScope`
     // is Main, and the import body is the injected IO dispatcher. `runTest(dispatcher)`
     // below is what puts the test's scheduler in charge of both — without it the coroutine
@@ -79,141 +55,6 @@ class EditorViewModelTest {
     @After
     fun tearDown() {
         Dispatchers.resetMain()
-    }
-
-    /** Deterministic ids, so a test can name the exact commands an import produced. */
-    private fun ids(): IdSource = IdSource { "id-${idCounter++}" }
-
-    private fun viewModel(
-        reader: MediaSourceReader = RecordingReader(),
-        projects: ProjectStore = RecordingProjects(),
-        renderer: PreviewRenderer = RecordingRenderer(),
-    ) = EditorViewModel(
-        logger = NoOpRedcutLogger,
-        sourceReader = reader,
-        projects = projects,
-        // The timeline's pictures and the preview are not this test's subject: loaders whose source never
-        // returns an image keep every case here about state rather than about decoding.
-        images = EditorImages(
-            thumbnails = TimelineThumbnails(
-                ThumbnailStore(source = NoThumbnails, logger = NoOpRedcutLogger),
-            ),
-            previewFrames = PreviewFrames(source = NoThumbnails, logger = NoOpRedcutLogger),
-        ),
-        // The renderer is a PORT like the reader and the store: what these cases assert is the WIRING —
-        // that the playhead reaches it, and where — never that Media3 drew a frame, which no JVM test
-        // can say (that is CI's `testDebugUnitTest` for the compile and a device pass for the pixels).
-        previewRenderer = renderer,
-        ids = ids(),
-        io = dispatcher,
-    )
-
-    /**
-     * The preview renderer, recording what it was asked to do.
-     *
-     * `attach` is deliberately not recorded: which surface and which graph reach the renderer is the
-     * stage's business, and the stage is a composable that this tier cannot exercise.
-     */
-    private class RecordingRenderer : PreviewRenderer {
-
-        /** Every timeline position the renderer was seeked to, in order. */
-        val seeks = mutableListOf<Long>()
-
-        /** How many times the renderer was told to give its decoder back (spec §9.1). */
-        var releases = 0
-
-        override val state: StateFlow<PreviewState> = MutableStateFlow(PreviewState.Idle)
-
-        override fun attach(surface: SurfaceView, graph: RenderGraph) = Unit
-
-        override fun play() = Unit
-
-        override fun pause() = Unit
-
-        override fun seekTo(us: Long) {
-            seeks += us
-        }
-
-        override fun release() {
-            releases++
-        }
-    }
-
-    /**
-     * The project store, in memory.
-     *
-     * Records what was saved as well as holding what to reopen, because the two questions this suite asks
-     * about autosave are "was it written?" and "what was it called?" — and a fake that only stored the
-     * last project could not answer the second.
-     *
-     * [reopen] is the seam for "a project already existed when this session started". With
-     * nothing seeded, `latest()` answers the last SAVE, because that is the port's own
-     * promise — "the most recently saved project, or null when there is none" — and what the
-     * device does: `JsonProjectStore` writes a pointer to the last saved id and reads it back.
-     * A fake that recorded saves but reported nothing to reopen would let a test claim a reload
-     * that never happened: the session would load an empty document instead of the project it
-     * was just editing.
-     */
-    private class RecordingProjects(
-        private val reopen: SavedProject? = null,
-        private val existingNames: MutableList<String> = mutableListOf(),
-    ) : ProjectStore {
-
-        val saved = mutableListOf<SavedProject>()
-
-        override suspend fun save(project: SavedProject) {
-            saved += project
-            if (project.name !in existingNames) existingNames += project.name
-        }
-
-        override suspend fun latest(): SavedProject? = reopen ?: saved.lastOrNull()
-
-        override suspend fun summaries(): List<ProjectSummary> = saved.map { it.summary() }
-
-        override suspend fun savedNames(): List<String> = existingNames.toList()
-    }
-
-    /** A thumbnail source that produces nothing, for tests that do not draw a timeline. */
-    private object NoThumbnails : ThumbnailSource {
-        override suspend fun thumbnail(sourceId: String, uri: String, positionUs: Long): Bitmap? =
-            null
-    }
-
-    private fun video(
-        name: String = "clip.mp4",
-        uri: String = "content://media/1",
-        durationUs: Long = 4_000_000L,
-        videoCodec: String = "video/avc",
-    ) = SourceReadResult.Read(
-        ProbedSource(
-            uri = uri,
-            displayName = name,
-            probe = SourceProbe(
-                durationUs = durationUs,
-                width = 1920,
-                height = 1080,
-                frameRate = 30f,
-                videoCodec = videoCodec,
-                audioCodec = "audio/mp4a-latm",
-                hasAudio = true,
-            ),
-        ),
-    )
-
-    private fun unreadable(name: String = "gone.mp4") = SourceReadResult.Unreadable(
-        ImportRejection.Unreadable(displayName = name, reason = "Permission denied"),
-    )
-
-    /** Returns whatever it was given, in order, and records what it was asked for. */
-    private class RecordingReader(
-        private val results: List<SourceReadResult> = emptyList(),
-    ) : MediaSourceReader {
-        var requested: List<String> = emptyList()
-
-        override suspend fun read(uris: List<String>): List<SourceReadResult> {
-            requested = uris
-            return results
-        }
     }
 
     // --- Existing behaviour: stage and history -----------------------------

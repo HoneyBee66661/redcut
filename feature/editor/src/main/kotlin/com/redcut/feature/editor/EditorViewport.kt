@@ -29,8 +29,17 @@ import com.redcut.domain.document.snappedToCentre
  * frame when a clip is selected. When no clip is selected, gestures and overlay are completely
  * inert and invisible.
  *
- * Also applies the selected clip's transform (FR-3.5 rotate, FR-3.6 flip, FR-3.8 fit) on
- * the preview surface. Keyframing is a later workstream (lane K, task K1).
+ * Also applies the selected clip's transform (FR-3.5 rotate, FR-3.6 flip, FR-3.8 fit) on the preview
+ * surface — AT THE PLAYHEAD (WS G1). The transform is a function of time now: the crop rect and the
+ * rotation are keyframable, so this reads them through the render tier's one resolver, at the
+ * playhead's own microsecond of the clip, which is the same read the export makes for every output
+ * frame. A clip with no keys resolves to its static transform and draws exactly as it did before,
+ * because the resolver's no-keys path is the identity.
+ *
+ * The viewport RECT below stays static on purpose. It is the rect the user is dragging, and the one
+ * thing it must not do is slide out from under the finger because an animation moved the crop; it is
+ * also what a drag EDITS (the clip's static crop), so following the animation here would make the
+ * gesture chase its own output.
  */
 @Composable
 internal fun EditorViewport(
@@ -42,7 +51,7 @@ internal fun EditorViewport(
     val selection = state.selection as? Selection.Clip
     val clip = selection?.let { state.document.clipById(it.clipId) }
     val isClipSelected = clip != null
-    val transform = clip?.transform
+    val transform = clip?.let { state.document.transformAtPlayhead(it.id, state.playheadUs) }
 
     val initialRect = remember(clip?.id, clip?.transform, state.document.canvas) {
         clip?.let {
@@ -73,7 +82,9 @@ internal fun EditorViewport(
                                 scaleX = if (transform.flipHorizontal) -1f else 1f,
                                 scaleY = if (transform.flipVertical) -1f else 1f,
                             )
-                    } else Modifier,
+                    } else {
+                        Modifier
+                    },
                 ),
         ) {
             content()

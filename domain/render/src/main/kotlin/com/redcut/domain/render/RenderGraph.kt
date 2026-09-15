@@ -2,6 +2,8 @@ package com.redcut.domain.render
 
 import com.redcut.domain.document.CanvasSpec
 import com.redcut.domain.document.ColorAdjustSpec
+import com.redcut.domain.document.KeyframableProperty
+import com.redcut.domain.document.Keyframe
 import com.redcut.domain.document.LutRef
 import com.redcut.domain.document.SourceRef
 import com.redcut.domain.document.TextSpec
@@ -157,6 +159,30 @@ sealed interface RenderLayer {
         /** Video fades, clamped by the compiler to the layer's duration. */
         val fades: FadeSpec = FadeSpec(),
         val audio: AudioSpec = AudioSpec(),
+        /**
+         * The clip's keyframed properties, carried onto the layer so the transform can be read PER
+         * FRAME (WS K / WS G1).
+         *
+         * [transform] stays what it always was — the value a property holds when it has no keys — and
+         * this map overrides the properties it names. That is the clip's own coexistence rule
+         * (`Clip.keyframes`) restated at graph level, and it is restated rather than flattened into a
+         * per-frame transform because a layer is a VALUE, not a frame: the graph has no frame rate and
+         * no clock, so baking one time into it would freeze the animation at whichever moment happened
+         * to be compiled — and would give the preview and the export two different frozen moments to
+         * disagree about, which is exactly the defect this workstream exists to close.
+         *
+         * The map travels WHOLE, unfiltered. Today every [KeyframableProperty] is a transform
+         * property, so there is nothing to filter; when effect parameters join the enum, whoever
+         * teaches the graph about them splits the map then, with the layer type that owns them in
+         * hand, rather than this line guessing at a boundary that does not exist yet.
+         *
+         * Read it through [transformAt], never field by field: that function is the one place the
+         * static and the keyed halves are folded together.
+         *
+         * Defaulted empty, so a layer built by hand — and every fixture and test written before this
+         * field existed — carries no keys and renders exactly as it did.
+         */
+        val keyframes: Map<KeyframableProperty, List<Keyframe>> = emptyMap(),
     ) : RenderLayer {
         init {
             require(speed > 0f) { "speed must be > 0, was $speed" }

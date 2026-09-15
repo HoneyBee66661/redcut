@@ -4,6 +4,8 @@ import com.redcut.domain.document.AppliedEffect
 import com.redcut.domain.document.CanvasSpec
 import com.redcut.domain.document.ColorAdjustSpec
 import com.redcut.domain.document.EffectScope
+import com.redcut.domain.document.KeyframableProperty
+import com.redcut.domain.document.Keyframe
 import com.redcut.domain.document.LutRef
 import com.redcut.domain.document.TextSpec
 import com.redcut.domain.document.TimeRange
@@ -51,6 +53,33 @@ class TimelineCompilerTest {
         assertEquals(TimeRange(0L, SEC), layer.sourceRange)
         assertEquals(doc.sources.single(), layer.source)
         assertEquals(1000 * MS, graph.durationUs)
+    }
+
+    @Test
+    fun `a keyed clip carries its keys onto its layer and an unkeyed one carries none`() {
+        // WS G1: the export path reads the transform PER FRAME, and the keys are what makes that
+        // possible — a layer is a value with no clock of its own, so a compiler that dropped this map
+        // would leave the graph nothing to evaluate and export every keyed clip as its static crop,
+        // while the preview animated. Carried whole and unmoved: nothing here touches these times.
+        val keys = listOf(Keyframe(0L, 0f), Keyframe(SEC, 0.5f))
+        val graph = TimelineCompiler.compile(
+            document(
+                clips = listOf(
+                    clip("c1", "s1", 0L, 2 * SEC).copy(
+                        keyframes = mapOf(KeyframableProperty.CROP_LEFT to keys),
+                    ),
+                    clip("c2", "s1", 2 * SEC, 4 * SEC),
+                ),
+            ),
+        )
+
+        assertEquals(keys, videoLayer(graph, "c1").keyframes[KeyframableProperty.CROP_LEFT])
+
+        // The un-keyed clip is the fast path: no keys at all, and reading its transform at any time is
+        // its own static spec — not an equal copy, the same value the graph has always carried.
+        val plain = videoLayer(graph, "c2")
+        assertTrue(plain.keyframes.isEmpty())
+        assertEquals(plain.transform, plain.transformAt(SEC))
     }
 
     @Test

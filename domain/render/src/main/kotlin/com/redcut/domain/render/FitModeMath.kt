@@ -41,9 +41,9 @@ object FitModeMath {
 
     private fun fit(sourceAspect: Float, canvasAspect: Float): FitResult {
         val scale = if (sourceAspect > canvasAspect) {
-            canvasAspect / sourceAspect  // height-limited
+            canvasAspect / sourceAspect // height-limited
         } else {
-            1f  // width-limited
+            1f // width-limited
         }
         val offsetX = if (sourceAspect > canvasAspect) {
             0f
@@ -60,9 +60,9 @@ object FitModeMath {
 
     private fun fill(sourceAspect: Float, canvasAspect: Float): FitResult {
         val scale = if (sourceAspect > canvasAspect) {
-            1f  // width-limited (crop top/bottom)
+            1f // width-limited (crop top/bottom)
         } else {
-            canvasAspect / sourceAspect  // height-limited (crop left/right)
+            canvasAspect / sourceAspect // height-limited (crop left/right)
         }
         val offsetX = if (sourceAspect > canvasAspect) {
             0f

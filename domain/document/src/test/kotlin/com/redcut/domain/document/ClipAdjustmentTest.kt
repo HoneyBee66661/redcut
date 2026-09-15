@@ -33,10 +33,7 @@ class ClipAdjustmentTest {
         fadeInMs: Long = 0L,
         fadeOutMs: Long = 0L,
         reverse: Boolean = false,
-        rotationDegrees: Float = 0f,
-        flipHorizontal: Boolean = false,
-        flipVertical: Boolean = false,
-        fitMode: FitMode = FitMode.FIT,
+        transform: TransformSpec = TransformSpec(),
     ) = Clip(
         id = id,
         sourceId = "src-1",
@@ -48,12 +45,7 @@ class ClipAdjustmentTest {
         fadeInMs = fadeInMs,
         fadeOutMs = fadeOutMs,
         reverse = reverse,
-        transform = TransformSpec(
-            rotationDegrees = rotationDegrees,
-            flipHorizontal = flipHorizontal,
-            flipVertical = flipVertical,
-            fit = fitMode,
-        ),
+        transform = transform,
     )
 
     private fun document(clip: Clip = clip()) = EditDocument(
@@ -91,10 +83,12 @@ class ClipAdjustmentTest {
                 fadeInMs = 400L,
                 fadeOutMs = 900L,
                 reverse = true,
-                rotationDegrees = 90f,
-                flipHorizontal = true,
-                flipVertical = true,
-                fitMode = FitMode.FILL,
+                transform = TransformSpec(
+                    rotationDegrees = 90f,
+                    flipHorizontal = true,
+                    flipVertical = true,
+                    fit = FitMode.FILL,
+                ),
             ),
         )
 
@@ -166,7 +160,7 @@ class ClipAdjustmentTest {
 
     @Test
     fun `fit mode adjustment maps ordinal to FitMode entry`() {
-        val doc = document(clip(fitMode = FitMode.FIT))
+        val doc = document(clip())
         val afterFill = doc.adjust("clip-a", ClipAdjustment.FIT_MODE, 1f)!!.apply(doc)
 
         assertThat(afterFill.clips.single().transform.fit).isEqualTo(FitMode.FILL)

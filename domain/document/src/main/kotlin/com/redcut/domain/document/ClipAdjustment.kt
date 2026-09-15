@@ -129,14 +129,23 @@ fun EditDocument.currentValueOf(clipId: String, adjustment: ClipAdjustment): Flo
         ClipAdjustment.VOLUME -> clip.volume
         ClipAdjustment.FADE_IN -> clip.fadeInMs.toFloat()
         ClipAdjustment.FADE_OUT -> clip.fadeOutMs.toFloat()
-        ClipAdjustment.MUTE -> if (clip.muted) 1f else 0f
-        ClipAdjustment.REVERSE -> if (clip.reverse) 1f else 0f
+        ClipAdjustment.MUTE -> switchReadout(clip.muted)
+        ClipAdjustment.REVERSE -> switchReadout(clip.reverse)
         ClipAdjustment.ROTATION -> clip.transform.rotationDegrees
-        ClipAdjustment.FLIP_HORIZONTAL -> if (clip.transform.flipHorizontal) 1f else 0f
-        ClipAdjustment.FLIP_VERTICAL -> if (clip.transform.flipVertical) 1f else 0f
+        ClipAdjustment.FLIP_HORIZONTAL -> switchReadout(clip.transform.flipHorizontal)
+        ClipAdjustment.FLIP_VERTICAL -> switchReadout(clip.transform.flipVertical)
         ClipAdjustment.FIT_MODE -> clip.transform.fit.ordinal.toFloat()
     }
 }
+
+/**
+ * The switch readout on the shared Float channel: 1 when the switch is on, 0 when it is off.
+ *
+ * The five switch rows would otherwise each carry their own `if` in the `when` above; a named
+ * function keeps [currentValueOf]'s cyclomatic complexity at 12 and states the channel's contract in
+ * the one place it is read.
+ */
+private fun switchReadout(on: Boolean): Float = if (on) 1f else 0f
 
 /**
  * The command that moves [adjustment] to [value], or null when there is no such clip.
@@ -173,12 +182,14 @@ fun EditDocument.adjust(clipId: String, adjustment: ClipAdjustment, value: Float
             SetTransform(trackId, clipId, clip.transform.copy(rotationDegrees = value))
         ClipAdjustment.FLIP_HORIZONTAL ->
             SetTransform(
-                trackId, clipId,
+                trackId,
+                clipId,
                 clip.transform.copy(flipHorizontal = value >= ClipAdjustment.SWITCH_THRESHOLD),
             )
         ClipAdjustment.FLIP_VERTICAL ->
             SetTransform(
-                trackId, clipId,
+                trackId,
+                clipId,
                 clip.transform.copy(flipVertical = value >= ClipAdjustment.SWITCH_THRESHOLD),
             )
         ClipAdjustment.FIT_MODE -> {

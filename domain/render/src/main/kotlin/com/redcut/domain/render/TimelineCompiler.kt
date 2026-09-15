@@ -80,6 +80,14 @@ object TimelineCompiler {
                 speed = clip.speed,
                 reverse = clip.reverse,
                 transform = clip.transform,
+                // The clip's keys, carried onto the layer UNMOVED (WS G1). The clamp is the one thing
+                // that could have shifted the clock between the two: an effect's Clip-scoped range is
+                // clamped to the layer's duration, but the layer's duration IS the clip's timeline
+                // duration, so a key at local time t names the same moment in the render as it does in
+                // the editor. Nothing in this function reads the map — the render paths do, through
+                // `RenderLayer.Video.transformAt`, which is what keeps the preview's answer and the
+                // export's answer the same function.
+                keyframes = clip.keyframes,
                 effects = colorChain(document.effects, slots, index),
                 fades = fades,
                 audio = AudioSpec(

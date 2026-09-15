@@ -305,12 +305,16 @@ class ProjectFileTest {
         newPresets.forEach { preset ->
             val project = project().copy(
                 document = project().document.copy(
-                    tracks = listOf(videoTrack(Clip(
-                        id = "clip-${preset.name}",
-                        sourceId = "src-1",
-                        sourceInUs = 0,
-                        sourceOutUs = 4 * oneSecond,
-                    ))),
+                    tracks = listOf(
+                        videoTrack(
+                            Clip(
+                                id = "clip-${preset.name}",
+                                sourceId = "src-1",
+                                sourceInUs = 0,
+                                sourceOutUs = 4 * oneSecond,
+                            ),
+                        ),
+                    ),
                 ),
             )
             val encoded = ProjectCodec.encode(project)

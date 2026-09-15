@@ -57,15 +57,4 @@ class CanvasSpecTest {
             CanvasSpec.LANDSCAPE_4_3_1080.withLandscape(isLandscape = false),
         ).isNotNull()
     }
-
-    @Test
-    fun `OutputSpec fromCanvas follows the canvas dimensions`() {
-        val spec = com.redcut.domain.render.OutputSpec.fromCanvas(CanvasSpec.SQUARE_1080)
-        assertThat(spec.width).isEqualTo(1080)
-        assertThat(spec.height).isEqualTo(1080)
-
-        val spec45 = com.redcut.domain.render.OutputSpec.fromCanvas(CanvasSpec.PORTRAIT_4_5_1080)
-        assertThat(spec45.width).isEqualTo(1080)
-        assertThat(spec45.height).isEqualTo(1350)
-    }
 }

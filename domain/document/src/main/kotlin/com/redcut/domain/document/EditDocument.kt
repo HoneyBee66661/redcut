@@ -282,10 +282,22 @@ data class SequenceSpec(
 /** Output frame geometry. MVP ships only 720p and 1080p (FR-5.1). */
 @Serializable
 enum class CanvasSpec(val width: Int, val height: Int) {
+    /** 9:16, 720p-class. */
     PORTRAIT_720(720, 1280),
+    /** 9:16, 1080p-class. */
     PORTRAIT_1080(1080, 1920),
+    /** 16:9, 720p-class. */
     LANDSCAPE_720(1280, 720),
+    /** 16:9, 1080p-class. */
     LANDSCAPE_1080(1920, 1080),
+    /** 1:1 square, 1080-class – Instagram feed / TikTok. */
+    SQUARE_1080(1080, 1080),
+    /** 4:5 portrait, 1080-class – Instagram portrait. */
+    PORTRAIT_4_5_1080(1080, 1350),
+    /** 3:4 portrait, 1080-class – classic photo ratio. */
+    PORTRAIT_3_4_1080(1080, 1440),
+    /** 4:3 landscape, 1080-class – classic photo ratio. */
+    LANDSCAPE_4_3_1080(1440, 1080),
     ;
 
     val isPortrait: Boolean get() = height > width

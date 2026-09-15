@@ -18,5 +18,8 @@ dependencies {
     // TimeRange, TransformSpec, ...) in its public surface, so a consumer of the
     // graph needs them on its compile classpath without re-declaring this module.
     api(project(":domain:document"))
+    // The keyframe resolver (WS K) delegates its interpolation to :core:common's
+    // pure math, so this module needs it on its compile classpath.
+    implementation(project(":core:common"))
     implementation(libs.kotlinx.serialization.json)
 }

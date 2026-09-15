@@ -4,14 +4,19 @@ import com.redcut.core.common.logging.RedcutLogger
 import com.redcut.domain.document.Clip
 import com.redcut.domain.document.ClipAdjustment
 import com.redcut.domain.document.ClipEdge
+import com.redcut.domain.document.SetTextTransform
 import com.redcut.domain.document.TrimClip
 import com.redcut.domain.document.UndoStack
 import com.redcut.domain.document.adjust
+import com.redcut.domain.document.textOverlayById
+import com.redcut.domain.document.toOverlayBox
+import com.redcut.domain.document.toTransform
 import com.redcut.domain.document.trimmedTo
 
 /**
  * The editor's live gestures: a drag PREVIEWS while the finger is down and becomes ONE history entry
- * when it lifts (FR-2.1, FR-3.1–3.4, 3.9) — a trim edge and a slider, which share that lifecycle.
+ * when it lifts (FR-2.1, FR-3.1–3.4, 3.9, FR-4.3) — a trim edge, a slider and a caption's box, which
+ * share that lifecycle.
  *
  * Its own file because `detekt` measured [EditorViewModel] at 23 functions against a threshold of 20,
  * and because a gesture is a responsibility, not a branch: begin, move, lift, abandon, plus the
@@ -50,6 +55,20 @@ internal class GestureSession(
             is EditorIntent.UpdateAdjust -> updateAdjust(intent.value)
             EditorIntent.EndAdjust -> end()
             EditorIntent.CancelAdjust -> cancel()
+        }
+    }
+
+    /**
+     * The caption drag's four moments (FR-4.3). See [applyTrim] — the lifecycle is the same one, and it is
+     * deliberately the same code: [end] and [cancel] are shared, so a caption drag commits as ONE entry
+     * because that is what [UndoStack.commit] does, not because this family remembered to ask it to.
+     */
+    fun applyTextDrag(intent: EditorIntent.TextGesture) {
+        when (intent) {
+            is EditorIntent.BeginTextDrag -> beginTextDrag(intent.effectId)
+            is EditorIntent.UpdateTextDrag -> updateTextDrag(intent.centerX, intent.centerY)
+            EditorIntent.EndTextDrag -> end()
+            EditorIntent.CancelTextDrag -> cancel()
         }
     }
 
@@ -135,6 +154,42 @@ internal class GestureSession(
         val command = history().current
             .adjust(adjusting.clipId, adjusting.adjustment, value) ?: return
         history().preview(command)
+        publishState(state())
+    }
+
+    /**
+     * Marks the caption as being dragged, and previews nothing yet — the shape [beginAdjust] has, and for
+     * the same reason: a drag that has not moved has changed nothing, and previewing the box the caption
+     * already has would put a no-op on the history the moment the finger went down.
+     *
+     * The caption is looked up fresh rather than trusted from the intent: the id came from a hit test
+     * against a frame the user saw, and a caption removed since (an undo, a reopened project) must not open
+     * a gesture against nothing.
+     */
+    private fun beginTextDrag(effectId: String) {
+        if (history().current.textOverlayById(effectId) == null) return
+        logger.d(TAG, "drag text $effectId")
+        publishState(state().copy(tool = ToolState.MovingText(effectId)))
+    }
+
+    /**
+     * One frame of a caption drag: preview, so the caption follows the finger on the preview itself.
+     *
+     * The command is rebuilt from the caption the document holds NOW rather than from the one the gesture
+     * started on, which is the same rule [updateTrim] follows: what the drag decides is where the box's
+     * CENTRE goes, and everything else about the transform — rotation, flip, fit — is carried through from
+     * whatever the caption currently holds.
+     */
+    private fun updateTextDrag(centerX: Float, centerY: Float) {
+        val moving = (state().tool as? ToolState.MovingText) ?: return
+        val caption = history().current.textOverlayById(moving.effectId) ?: return
+        val moved = caption.transform.toOverlayBox().movedToCentre(centerX, centerY)
+        history().preview(
+            SetTextTransform(
+                effectId = moving.effectId,
+                transform = moved.toTransform(base = caption.transform),
+            ),
+        )
         publishState(state())
     }
 

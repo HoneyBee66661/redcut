@@ -207,12 +207,13 @@ class EditorViewModel @Inject constructor(
      * and a reader has to hold; a family is a sub-interface of [EditorIntent.Edit], so its branch is one
      * line and the family's own `when` is exhaustive over the members that belong to it.
      *
-     * Five families pass through: the two drag gestures, the Cut stage's tools at the playhead, the drag
+     * Six families pass through: the three drag gestures, the Cut stage's tools at the playhead, the drag
      * that rearranges one lane, and the viewport. The gestures are handed on whole — the four moments of
      * each, and the preview/commit pairing that makes them one edit, belong to the gesture lifecycle
      * rather than to this class, so they live in [GestureSession] and this class keeps one line each.
      * An import is not a family — one intent, one branch, one handler that was already named for it —
-     * and neither is the keyframe transport's toggle (WS K): one intent, one branch, one handler.
+     * and neither are the keyframe transport's toggle (WS K) or the caption's add (FR-4.3): one intent,
+     * one branch, one handler.
      *
      * There is still no `else` anywhere: a new intent joins a family (and the compiler makes that
      * family's `when` handle it) or takes a branch of its own, and either way it cannot fall outside
@@ -221,10 +222,11 @@ class EditorViewModel @Inject constructor(
      */
     private fun applyEdit(intent: EditorIntent.Edit) {
         when (intent) {
-            // The two drag gestures, handed whole to the session that owns their lifecycle. Each
-            // family's `when` — four moments, exhaustive — is there rather than here.
+            // The drag gestures, handed whole to the session that owns their lifecycle. Each family's
+            // `when` — four moments, exhaustive — is there rather than here.
             is EditorIntent.TrimGesture -> gestures.applyTrim(intent)
             is EditorIntent.AdjustGesture -> gestures.applyAdjust(intent)
+            is EditorIntent.TextGesture -> gestures.applyTextDrag(intent)
 
             // The Cut stage's tools at the playhead, and the drag that rearranges one lane.
             is EditorIntent.ApplyCut -> applyCut(intent.tool)
@@ -234,6 +236,15 @@ class EditorViewModel @Inject constructor(
             is EditorIntent.SetViewport -> applyViewport(intent)
 
             is EditorIntent.ToggleKeyframe -> toggleKeyframe()
+
+            is EditorIntent.AddText -> applyAddTextOverlay(
+                history = { history },
+                state = { _state.value },
+                ids = ids,
+                logger = logger,
+                autosave = { autosave() },
+                publish = { publish() },
+            )
 
             is EditorIntent.ImportMedia -> importMedia(intent.uris)
         }

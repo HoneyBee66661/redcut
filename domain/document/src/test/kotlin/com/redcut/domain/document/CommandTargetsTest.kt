@@ -73,7 +73,22 @@ class CommandTargetsTest {
         // one. A lane that does not exist yet cannot be locked, and a lane that does makes the command
         // a no-op — so there is no lane whose CONTENTS it could disturb, and contents are the only
         // thing the lock protects. It is the same answer AddSource gives, for the same shape of reason.
-        assertEquals(listOf("AddSource", "AddTrack", "RenameDocument"), laneFree) {
+        //
+        // The three caption commands are the same claim about a different thing: the effect stack is not
+        // a lane either (FR-4.3). A caption lives on the document, so there is no lane whose contents a
+        // move or a retime could disturb — and reporting one would claim an address these commands never
+        // write to.
+        assertEquals(
+            listOf(
+                "AddSource",
+                "AddTextOverlay",
+                "AddTrack",
+                "RenameDocument",
+                "SetTextRange",
+                "SetTextTransform",
+            ),
+            laneFree,
+        ) {
             "reporting no lane is a claim about the model rather than a default: a new command " +
                 "has to be listed here on purpose"
         }
@@ -159,8 +174,22 @@ class CommandTargetsTest {
         /** A second lane, for the compound case: a union needs two lanes before it is a union. */
         const val SECOND_LANE = "track-video-second"
 
-        /** The fixture's document: one lane, holding c1 (0s-2s) and c2 (2s-5s) over source s1. */
-        val SAMPLE: EditDocument = sampleDocument()
+        /**
+         * The fixture's document: one lane, holding c1 (0s-2s) and c2 (2s-5s) over source s1, and one
+         * caption on the effect stack.
+         *
+         * The caption is added with the command that adds one rather than written into `sampleDocument()`,
+         * because that fixture is shared with every other suite in this module and a caption in it would
+         * be a caption in all of them. It is here because two rows below CHANGE a caption — move it,
+         * retime it — and `a lock on a lane a command does not touch does not stop it` requires every
+         * lane-free command to actually change the sample. A command that no-ops on it would pass that
+         * check by not being a command at all.
+         */
+        val SAMPLE: EditDocument = AddTextOverlay(
+            effectId = TEXT_ID,
+            spec = TextSpec("caption"),
+            timeRange = TimeRange(0L, SEC),
+        ).apply(sampleDocument())
 
         /** A point strictly inside c2, for the commands that address a point, not a range. */
         val MID_C2: Long = requireNotNull(SAMPLE.clipById("c2"))
@@ -175,6 +204,19 @@ class CommandTargetsTest {
          */
         val FIXTURE_TRANSFORM = requireNotNull(SAMPLE.clipById("c1")).transform
         val FIXTURE_KEY = listOf(Keyframe(0L, 0.1f))
+
+        /** The id the fixture's caption answers to, and the caption the two caption rows address. */
+        const val TEXT_ID = "t1"
+
+        /**
+         * A caption box that is NOT the one the fixture's caption holds.
+         *
+         * Derived from the model's own default rather than spelled out as four floats, for the reason
+         * [FIXTURE_TRANSFORM] is read off the clip: the numbers themselves are not what this table is
+         * about. What it must be is DIFFERENT — a move to where the caption already is would be refused
+         * by the command, and the row would then be checking nothing.
+         */
+        val MOVED_CAPTION_BOX = TextOverlayBox.DEFAULT.movedToCentre(0.5f, 0.2f).toTransform()
 
         /** A command that addresses no lane: the three of them are named in the empty-set test. */
         val NO_LANES: Set<String> = emptySet()
@@ -200,6 +242,10 @@ class CommandTargetsTest {
          */
         val TARGETS: Map<String, Expectation> = mapOf(
             "AddSource" to Expectation(AddSource(source("s2")), NO_LANES),
+            "AddTextOverlay" to Expectation(
+                AddTextOverlay("t9", TextSpec("caption"), TimeRange(0L, SEC)),
+                NO_LANES,
+            ),
             "AddTrack" to Expectation(AddTrack(AUDIO_LANE), NO_LANES),
             "AppendClip" to Expectation(AppendClip(VIDEO, "c9", "s1", 0L, SEC), ON_VIDEO),
             "CompoundCommand" to Expectation(
@@ -227,6 +273,11 @@ class CommandTargetsTest {
             "SetMuted" to Expectation(SetMuted(VIDEO, "c1", true), ON_VIDEO),
             "SetReverse" to Expectation(SetReverse(VIDEO, "c1", true), ON_VIDEO),
             "SetSpeed" to Expectation(SetSpeed(VIDEO, "c1", ClipRanges.SPEED_MAX), ON_VIDEO),
+            "SetTextRange" to Expectation(SetTextRange(TEXT_ID, 0L, 2 * SEC), NO_LANES),
+            "SetTextTransform" to Expectation(
+                SetTextTransform(TEXT_ID, MOVED_CAPTION_BOX),
+                NO_LANES,
+            ),
             "SetTransform" to Expectation(SetTransform(VIDEO, "c1", FIXTURE_TRANSFORM), ON_VIDEO),
             "SetVolume" to Expectation(SetVolume(VIDEO, "c1", ClipRanges.VOLUME_MAX), ON_VIDEO),
             "SplitClip" to Expectation(SplitClip(VIDEO, "c2", MID_C2, "c3"), ON_VIDEO),

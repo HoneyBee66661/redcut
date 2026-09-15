@@ -47,6 +47,21 @@ sealed interface ToolState {
         val clipId: String,
         val adjustment: ClipAdjustment,
     ) : ToolState
+
+    /**
+     * A caption is being dragged on the preview (FR-4.3).
+     *
+     * Named by EFFECT rather than by clip, and it is the first tool state that is: a caption belongs to the
+     * document's effect stack rather than to a lane, so there is no clip id to hold. The reconciler that
+     * clears a [Trimming] whose clip is gone has nothing to say about it — and does not need to, because
+     * every command a caption drag produces is total: a caption that vanished mid-gesture (an undo, a
+     * reopening) turns the preview's frames into no-ops, and the commit that follows records nothing.
+     *
+     * It is here for the reason [Adjusting] is: the document has ALREADY been changed by a preview, so a
+     * screen that did not know a gesture was open could not explain why the caption has moved while the
+     * finger is still down.
+     */
+    data class MovingText(val effectId: String) : ToolState
 }
 
 /**

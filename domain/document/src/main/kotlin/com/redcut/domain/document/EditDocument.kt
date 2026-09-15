@@ -243,6 +243,25 @@ internal fun EditDocument.withTrackClips(trackId: String, clips: List<Clip>): Ed
     copy(tracks = tracks.map { if (it.id == trackId) it.copy(items = clips) else it })
 
 /**
+ * Replaces the effect with the same id as [effect], in place, or leaves the document alone.
+ *
+ * The effect stack's half of what [withTrackClips] is to a lane, and it exists for the same reason: the
+ * list is ordered (render order IS list order) and an effect is addressed by id, so "swap this one for
+ * that one" is the only write a caption command needs — and a writer that rebuilt the list instead could
+ * reorder the stack by accident, which the user would see as a caption that jumped in front of another.
+ *
+ * A whole [AppliedEffect] rather than a lambda, so the caller cannot change the id on the way through: the
+ * match is by the value handed in, and an effect whose id no longer exists leaves the document untouched,
+ * the same way every other unmet precondition in a command does.
+ */
+internal fun EditDocument.withEffect(effect: AppliedEffect): EditDocument =
+    if (effects.none { it.id == effect.id }) {
+        this
+    } else {
+        copy(effects = effects.map { if (it.id == effect.id) effect else it })
+    }
+
+/**
  * A clip as placed on the timeline: the clip plus where it lands.
  * [startUs]/[endUs] are derived, never stored — see [EditDocument.timeline].
  */

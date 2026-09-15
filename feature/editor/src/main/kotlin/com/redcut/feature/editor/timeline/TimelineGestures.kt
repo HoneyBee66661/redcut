@@ -349,7 +349,13 @@ internal fun Modifier.timelineGestures(
         }
 }
 
-/** The next event for the pointer that started the gesture, or null when it is gone. */
-private suspend fun AwaitPointerEventScope.nextPointer(
+/**
+ * The next event for the pointer that started the gesture, or null when it is gone.
+ *
+ * Shared with the caption drag on the preview ([com.redcut.feature.editor.TextOverlayLayer]): "follow the
+ * finger that went down" is one behaviour, and a second copy of it is a second place for the multi-touch
+ * rule (a second finger is not this gesture) to be got wrong.
+ */
+internal suspend fun AwaitPointerEventScope.nextPointer(
     down: PointerInputChange,
 ): PointerInputChange? = awaitPointerEvent().changes.firstOrNull { it.id == down.id }

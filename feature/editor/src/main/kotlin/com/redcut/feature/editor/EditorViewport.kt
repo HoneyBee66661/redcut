@@ -95,6 +95,15 @@ internal fun EditorViewport(
                 modifier = Modifier.fillMaxSize(),
             )
         }
+        // The captions (FR-4.3), OUTSIDE the transform box above and that is the model rather than a
+        // layout accident: a caption is scoped to the document, so the selected clip's rotate and flip
+        // must not turn it. As a child it also sees a press before this box's own gesture does, which is
+        // what lets a drag on a caption win over the crop gesture and a press anywhere else lose to it.
+        TextOverlayLayer(
+            state = state,
+            onIntent = onIntent,
+            modifier = Modifier.fillMaxSize(),
+        )
     }
 }
 

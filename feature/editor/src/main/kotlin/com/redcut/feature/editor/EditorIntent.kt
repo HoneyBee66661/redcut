@@ -34,9 +34,10 @@ import com.redcut.domain.document.FrameStep
  *
  * [Edit] grew the same way for the same reason: three workstreams' intents arrived (the timeline's
  * cuts and gestures, the preview viewport, the export sheet) and its handler's `when` went back to
- * being a switch that `detekt` measures. So the two DRAG GESTURES are sub-interfaces of their own —
- * [TrimGesture] and [AdjustGesture] — and each has four moments that only read as a set when they sit
- * together. A single-intent family needs no type: [Edit]'s handler covers those directly.
+ * being a switch that `detekt` measures. So the DRAG GESTURES are sub-interfaces of their own —
+ * [TrimGesture], [AdjustGesture], and (FR-4.3) [TextGesture] — and each has four moments that only read
+ * as a set when they sit together. A single-intent family needs no type: [Edit]'s handler covers those
+ * directly.
  *
  * The rule this keeps: a new intent either joins a family (and the family's own `when` must handle it,
  * which the compiler checks) or takes a branch of its own. There is still no `else` to fall into.
@@ -64,6 +65,15 @@ sealed interface EditorIntent {
 
     /** The adjust gesture's four moments (FR-3.1–3.4, 3.9). See [TrimGesture] — the same lifecycle. */
     sealed interface AdjustGesture : Edit
+
+    /**
+     * The caption drag's four moments (FR-4.3). See [TrimGesture] — the same lifecycle, for the same
+     * reason, and it is the third family of that shape rather than a fourth mechanism.
+     *
+     * What it moves is a text overlay's BOX on the canvas, not a clip and not an edge: the caption follows
+     * the finger as a preview, the lift records one entry, and the undo entry reads "Move text".
+     */
+    sealed interface TextGesture : Edit
 
     /** Show a different stage. Does not touch the document (spec §7.1). */
     data class SelectStage(val stage: Stage) : View
@@ -161,6 +171,45 @@ sealed interface EditorIntent {
 
     /** The drag was abandoned (a second finger, a system interruption): the preview is rolled back. */
     data object CancelAdjust : AdjustGesture
+
+    /**
+     * Add a text overlay at the playhead (FR-4.3, spec task 3.6).
+     *
+     * An [Edit]: a caption is document structure, so adding one changes the document and is worth one undo
+     * entry — the same as any other edit. It carries nothing, because everything the added caption needs is
+     * derived where the command is built: the range starts at the playhead, the position is the model's own
+     * caption band, and the id comes from the editor's [com.redcut.core.common.IdSource] rather than from a
+     * control that could invent one.
+     *
+     * The content a new caption holds, and the fact that editing it is the inspector's card rather than
+     * this one, are stated in the ViewModel where the placeholder lives.
+     */
+    data object AddText : Edit
+
+    /**
+     * Start dragging the caption [effectId] (FR-4.3).
+     *
+     * The caption is named rather than assumed from a selection, because the editor has no effect
+     * selection yet: the press itself is what picks the caption up, so the id comes from the hit test that
+     * found it under the finger.
+     */
+    data class BeginTextDrag(val effectId: String) : TextGesture
+
+    /**
+     * The drag moved: the caption's box is now centred on ([centerX], [centerY]), in canvas fractions.
+     *
+     * An ABSOLUTE position rather than a delta, which is the shape the trim gesture sends too: the gesture
+     * layer remembers the grab point, and the document is told where the caption should be rather than how
+     * far it has moved. A delta would accumulate every dropped or coalesced frame into a drift the user
+     * would see as the caption lagging their finger.
+     */
+    data class UpdateTextDrag(val centerX: Float, val centerY: Float) : TextGesture
+
+    /** The finger lifted: the preview becomes one history entry. */
+    data object EndTextDrag : TextGesture
+
+    /** The gesture was abandoned (a press that never moved, a system interruption): the preview rolls back. */
+    data object CancelTextDrag : TextGesture
 
     /**
      * Set the preview viewport rect centre and zoom (spec UI revision 2, §WS F / Task F3).

@@ -161,6 +161,16 @@ class TextOverlayCommandsTest {
     }
 
     @Test
+    fun `a box asked to move to its own centre returns the identical box`() {
+        // The round trip a no-move drag goes through: re-deriving the box from its own centre must not
+        // perturb the float geometry by one ulp, or UndoStack.commit would see a changed document and
+        // record a "Move text" entry for a drag that did not move (the gesture previews through this
+        // function and commits the last previewed frame).
+        val box = TextOverlayBox.DEFAULT
+        assertThat(box.movedToCentre(box.centerX, box.centerY)).isSameInstanceAs(box)
+    }
+
+    @Test
     fun `a box dragged past the canvas stops at the edge instead of leaving it`() {
         // Clamped rather than refused, the way every drag in this repo behaves: the gesture sends the raw
         // finger position every frame and expects the box to stop where the picture does.

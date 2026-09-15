@@ -482,11 +482,91 @@ class TimelineCompilerTest {
     }
 
     @Test
-    fun `the audio graph reports no music bed yet`() {
+    fun `a document with no audio lane reports no music bed`() {
         val graph = TimelineCompiler.compile(sampleDocument())
 
         assertEquals(1f, graph.audio.masterGain)
-        assertNull(graph.audio.music, "EditDocument has no audioBed field yet (FR-1.6)")
+        // The bed is the document's AUDIO lane and nothing else, so a project that has never imported a
+        // song has no music at all. An invented one would be a music track the user never added.
+        assertNull(graph.audio.music, "only an AUDIO lane is a music bed (FR-1.6)")
+    }
+
+    // --- A document with no picture is legal (WS D, D4) -------------------
+
+    @Test
+    fun `an audio-only document compiles to no video layers and keeps its music bed`() {
+        val graph = TimelineCompiler.compile(audioOnlyDocument())
+
+        // Nothing may require a video track to exist. An AUDIO lane's clip is SOUND, and emitting it as
+        // a video layer would ask the mapper to decode a song as footage — so the render is empty video.
+        assertTrue(graph.videoLayers.isEmpty(), "an audio lane contributes no picture")
+        assertTrue(graph.overlayLayers.isEmpty())
+        assertTrue(graph.transitions.isEmpty())
+        assertEquals(0L, graph.durationUs)
+        // ...and the sound is not thrown away for it. This is the half that makes the empty video a
+        // music bed rather than a silent one: an empty render with the audio intact.
+        val bed = requireNotNull(graph.audio.music) { "the audio lane is the music bed (FR-1.6)" }
+        assertEquals("a1", bed.source.id)
+        assertEquals(TimeRange(0L, 3 * SEC), bed.sourceRange)
+        assertEquals(1f, graph.audio.masterGain)
+    }
+
+    @Test
+    fun `a music bed is carried with the clip's gain, mute and fades`() {
+        val doc = audioOnlyDocument(
+            clips = listOf(
+                clip("a1", "a1", 0L, 2 * SEC, volume = 0.5f, muted = true, fadeInMs = 200L),
+            ),
+        )
+
+        val bed = requireNotNull(TimelineCompiler.compile(doc).audio.music)
+
+        // The bed is a clip like any other where the mix is concerned, read by the same helpers the
+        // video layer's AudioSpec is — one rule for both rather than a second one for the music path.
+        assertEquals(0.5f, bed.gain)
+        assertEquals(true, bed.muted)
+        assertEquals(FadeSpec(200L, 0L), bed.fades)
+    }
+
+    @Test
+    fun `an audio lane beside a video lane adds no layer and does not move the video`() {
+        val doc = twoLaneDocument(
+            clips = listOf(clip("c1", "s1", 0L, 2 * SEC), clip("c2", "s1", 2 * SEC, 4 * SEC)),
+            audioClips = listOf(clip("a1", "a1", 0L, 3 * SEC)),
+        )
+
+        val graph = TimelineCompiler.compile(doc)
+
+        // The video render is EXACTLY what the video lane alone produced: a bed plays BESIDE the picture,
+        // not in it, and a layer list that grew by the bed's clip would stretch the export by its length.
+        assertEquals(listOf("c1", "c2"), graph.videoLayers.map { it.clipId })
+        assertEquals(4 * SEC, graph.durationUs)
+        assertEquals("a1", graph.audio.music?.source?.id)
+    }
+
+    @Test
+    fun `the first audio lane is the bed and a second one does not become a second one`() {
+        val second = audioTrack(clips = listOf(clip("a2", "a1", 0L, 2 * SEC)), id = "track-audio-2")
+        val doc = audioOnlyDocument().let { base -> base.copy(tracks = base.tracks + second) }
+
+        val bed = requireNotNull(TimelineCompiler.compile(doc).audio.music)
+
+        // The MVP is ONE bed, so `AudioGraph.music` is one value and the named cost is that a second lane
+        // compiles to nothing: filling it with whichever clip happened to be second would be a music
+        // track the user never added. The bed is the FIRST lane's clip, which runs the longer of the two.
+        assertEquals(TimeRange(0L, 3 * SEC), bed.sourceRange)
+    }
+
+    @Test
+    fun `a bed whose source is gone leaves no music rather than failing the compile`() {
+        val doc = audioOnlyDocument().let { it.copy(sources = emptyList()) }
+
+        val graph = TimelineCompiler.compile(doc)
+
+        // Totality: a dangling source is a MISSING bed, not a crash. The clip is still in the document,
+        // so undoing whatever removed the source brings the music back with it.
+        assertNull(graph.audio.music)
+        assertTrue(graph.videoLayers.isEmpty())
     }
 
     // --- Dissolves (rule 7) -----------------------------------------------

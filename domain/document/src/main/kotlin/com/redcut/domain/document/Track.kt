@@ -101,6 +101,22 @@ data class Track(
          */
         const val MAIN_ID = "track-video-main"
 
+        /**
+         * The id of the audio lane a project's music bed lands on (FR-1.6).
+         *
+         * A fixed string for the same reason [MAIN_ID] is one: the lane the first audio import seeds has
+         * to be the SAME lane after a save and a load, or "does this project already have an audio
+         * lane?" — the question that seeding is idempotent against — would get a different answer on
+         * every read, and a project would grow a second music bed.
+         *
+         * It is [MAIN_ID]'s counterpart rather than a second video lane: a document has one of each,
+         * which is the MVP's "single video track + one audio bed". Unlike [MAIN] there is no companion
+         * instance of it, because the lane a plan seeds is built from the id the CALLER routes audio to
+         * — a seed named [AUDIO_ID] while the plan appended to another lane would put the music bed on a
+         * track that does not exist.
+         */
+        const val AUDIO_ID = "track-audio-main"
+
         /** The empty VIDEO track a new document begins with. */
         val MAIN = Track(id = MAIN_ID, kind = TrackKind.VIDEO)
     }

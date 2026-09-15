@@ -51,6 +51,33 @@ data class SourceRef(
         } else {
             Timebase.fromFrameRate(frameRate)
         }
+
+    /**
+     * True when this source carries picture.
+     *
+     * ### Why this is derived, and not a field
+     *
+     * A stored `isAudioOnly` flag would be a SECOND answer to a question the probe's own facts already
+     * answer, and the two could disagree: a source saying "audio only" while carrying 1920x1080 and an
+     * `avc` codec is a shape that lies, and the lie would be read by the render path rather than by the
+     * import that wrote it. Reading it off [width], [height] and [videoCodec] cannot drift from them.
+     *
+     * It reads the same shape [SourceImportPolicy.accept] writes, which is what makes it agree with the
+     * import in both directions: a source accepted as audio-only is stored with no dimensions and a
+     * blank codec (FR-1.6), so `isAudioOnly` on the stored value reproduces the accept decision exactly.
+     * A hand-built ref — a fixture, a migrated project — is read by the same rule, so there is one rule
+     * rather than two that can disagree.
+     */
+    val hasVideo: Boolean get() = width > 0 && height > 0 && videoCodec.isNotBlank()
+
+    /**
+     * True when this source is a music bed: sound, and nothing to draw (FR-1.6).
+     *
+     * The question [planImport] asks when it decides which lane an imported clip lands on. Sound WITH
+     * picture is a video clip — its audio rides on the video layer, which carries an `AudioSpec` — so
+     * only a source with no picture at all is a bed.
+     */
+    val isAudioOnly: Boolean get() = !hasVideo && hasAudio
 }
 
 /**

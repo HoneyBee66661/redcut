@@ -69,7 +69,11 @@ class CommandTargetsTest {
     @Test
     fun `only the commands that touch no lane report an empty set`() {
         val laneFree = TARGETS.filterValues { it.lanes.isEmpty() }.keys.sorted()
-        assertEquals(listOf("AddSource", "RenameDocument"), laneFree) {
+        // AddTrack is in this list as a CLAIM, not as a convenience: creating a lane is not touching
+        // one. A lane that does not exist yet cannot be locked, and a lane that does makes the command
+        // a no-op — so there is no lane whose CONTENTS it could disturb, and contents are the only
+        // thing the lock protects. It is the same answer AddSource gives, for the same shape of reason.
+        assertEquals(listOf("AddSource", "AddTrack", "RenameDocument"), laneFree) {
             "reporting no lane is a claim about the model rather than a default: a new command " +
                 "has to be listed here on purpose"
         }
@@ -172,8 +176,18 @@ class CommandTargetsTest {
         val FIXTURE_TRANSFORM = requireNotNull(SAMPLE.clipById("c1")).transform
         val FIXTURE_KEY = listOf(Keyframe(0L, 0.1f))
 
-        /** A command that addresses no lane: the two of them are named in the empty-set test. */
+        /** A command that addresses no lane: the three of them are named in the empty-set test. */
         val NO_LANES: Set<String> = emptySet()
+
+        /**
+         * The lane the audio workstream's first import seeds (FR-1.6).
+         *
+         * Deliberately NOT a lane [SAMPLE] has, because the claim this row makes is that creating a lane
+         * addresses no lane — and the case that claim has to survive is the one where the lane is not
+         * there yet. It is also what makes `a lock on a lane a command does not touch does not stop it`
+         * a real check for this command rather than a no-op that would pass either way.
+         */
+        val AUDIO_LANE: Track = Track(Track.AUDIO_ID, TrackKind.AUDIO)
 
         /** The one lane the fixture has. */
         val ON_VIDEO: Set<String> = setOf(VIDEO)
@@ -186,6 +200,7 @@ class CommandTargetsTest {
          */
         val TARGETS: Map<String, Expectation> = mapOf(
             "AddSource" to Expectation(AddSource(source("s2")), NO_LANES),
+            "AddTrack" to Expectation(AddTrack(AUDIO_LANE), NO_LANES),
             "AppendClip" to Expectation(AppendClip(VIDEO, "c9", "s1", 0L, SEC), ON_VIDEO),
             "CompoundCommand" to Expectation(
                 CompoundCommand(

@@ -23,14 +23,14 @@ import com.redcut.domain.render.OutputSpec
 import com.redcut.engine.media3.ExportResult
 import com.redcut.engine.media3.Media3GraphExporter
 import dagger.hilt.android.AndroidEntryPoint
-import java.io.File
-import java.io.IOException
-import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import java.io.File
+import java.io.IOException
+import javax.inject.Inject
 
 /**
  * The export foreground service (FR-5.10, spec Phase 4.1): the one component whose job is to still
@@ -305,12 +305,11 @@ internal class ExportService : Service() {
         }
     }
 
-    private fun collection(): Uri =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-        } else {
-            MediaStore.Video.Media.EXTERNAL_CONTENT_URI
-        }
+    private fun collection(): Uri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+    } else {
+        MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+    }
 
     private fun copyInto(savedUri: Uri, outputFile: File): Boolean =
         contentResolver.openOutputStream(savedUri)?.use { sink ->

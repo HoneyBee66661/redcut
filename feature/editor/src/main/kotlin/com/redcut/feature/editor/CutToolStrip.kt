@@ -40,7 +40,6 @@ import com.redcut.domain.document.EditDocument
 import com.redcut.domain.document.availabilityFor
 import com.redcut.domain.document.clipAt
 import com.redcut.domain.document.mergeTrackAvailability
-import com.redcut.domain.document.trackIdOf
 
 /**
  * The Cut tools (FR-2.2–2.6), drawn as a tool strip rather than a row of text buttons.

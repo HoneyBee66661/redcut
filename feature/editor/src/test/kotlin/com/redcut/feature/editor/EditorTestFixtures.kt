@@ -247,8 +247,14 @@ internal fun EditorViewModel.cutIntent(tool: CutTool): EditorIntent.ApplyCut {
     val clipId = (state.selection as? Selection.Clip)?.clipId
         ?.takeIf { state.document.clipById(it) != null }
         ?: state.document.clipAt(state.playheadUs)?.id
+        // The fallback is for the tests that tap a tool where the playhead is on NO clip, on purpose: those
+        // are testing a REFUSAL, and the strip would have had no target at all there (nothing selected,
+        // nothing under the playhead). Handing over the document's first clip keeps such a test runnable
+        // while the refusal stays the tool's own answer — `commandFor` returns null for a playhead outside
+        // the clip on every position-dependent tool, which is exactly what those tests assert.
+        ?: state.document.clips.firstOrNull()?.id
     return EditorIntent.ApplyCut(
         tool = tool,
-        clipId = requireNotNull(clipId) { "no clip to cut: neither selected nor at the playhead" },
+        clipId = requireNotNull(clipId) { "no clip to cut: the document has none at all" },
     )
 }

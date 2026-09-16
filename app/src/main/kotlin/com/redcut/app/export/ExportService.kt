@@ -327,7 +327,9 @@ internal class ExportService : Service() {
     private fun displayName(spec: OutputSpec): String =
         "redcut-${System.currentTimeMillis()}-${spec.width}x${spec.height}.mp4"
 
-    private companion object {
+    // The two ACTION_* constants are the controller↔service contract: ServiceExportController
+    // builds the Intent that names them, so they cannot live in a private companion object.
+    companion object {
         const val TAG = "ExportService"
 
         const val ACTION_EXPORT = "com.redcut.app.export.EXPORT"

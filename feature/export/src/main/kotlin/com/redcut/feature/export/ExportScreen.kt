@@ -40,10 +40,7 @@ import com.redcut.core.media.ExportState
  * user is looking at something else (FR-5.9's cancel is Phase 4.4's ETA-and-in-sheet pass).
  */
 @Composable
-fun ExportScreen(
-    onBack: () -> Unit,
-    viewModel: ExportViewModel = hiltViewModel(),
-) {
+fun ExportScreen(onBack: () -> Unit, viewModel: ExportViewModel = hiltViewModel()) {
     val uiState by viewModel.uiState.collectAsState()
     Column(modifier = Modifier.fillMaxSize()) {
         Row(

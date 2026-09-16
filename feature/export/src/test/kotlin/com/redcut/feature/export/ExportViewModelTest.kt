@@ -118,10 +118,7 @@ class ExportViewModelTest {
         assertThat(model.uiState.value.exportState).isEqualTo(ExportState.Running(RUNNING_PERCENT))
     }
 
-    private fun viewModel(
-        document: EditDocument,
-        controller: ExportController,
-    ) = ExportViewModel(
+    private fun viewModel(document: EditDocument, controller: ExportController) = ExportViewModel(
         projects = FakeProjectStore(
             SavedProject(
                 id = document.id,

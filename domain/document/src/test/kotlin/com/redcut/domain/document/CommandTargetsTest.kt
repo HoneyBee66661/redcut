@@ -275,7 +275,10 @@ class CommandTargetsTest {
             "SetReverse" to Expectation(SetReverse(VIDEO, "c1", true), ON_VIDEO),
             "SetSpeed" to Expectation(SetSpeed(VIDEO, "c1", ClipRanges.SPEED_MAX), ON_VIDEO),
             "SetTextRange" to Expectation(SetTextRange(TEXT_ID, 0L, 2 * SEC), NO_LANES),
-            "SetTextStyle" to Expectation(SetTextStyle(TEXT_ID, TextSpec("caption", 64f)), NO_LANES),
+            "SetTextStyle" to Expectation(
+                SetTextStyle(TEXT_ID, TextSpec("caption", 64f)),
+                NO_LANES,
+            ),
             "SetTextTransform" to Expectation(
                 SetTextTransform(TEXT_ID, MOVED_CAPTION_BOX),
                 NO_LANES,

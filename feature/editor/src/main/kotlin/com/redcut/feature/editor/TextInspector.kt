@@ -178,7 +178,11 @@ private fun StrokeWidthRow(
 ) {
     val open = state.tool as? ToolState.StylingText
     Column(modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
-        val readout = if (spec.strokeWidthSp > 0f) "${spec.strokeWidthSp.roundToInt()} sp" else "off"
+        val readout = if (spec.strokeWidthSp > 0f) {
+            "${spec.strokeWidthSp.roundToInt()} sp"
+        } else {
+            "off"
+        }
         Text(text = "Stroke · $readout", style = MaterialTheme.typography.labelLarge)
         Slider(
             value = spec.strokeWidthSp,

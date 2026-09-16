@@ -39,8 +39,8 @@ import com.redcut.feature.editor.TimelineMarks
  *
  * An EDGE press opens a trim ([textTrimGesture], the timeline's own trim lifecycle): the edge follows the
  * finger as a preview and the lift records ONE "Text timing" entry. A press on a BODY is not consumed
- * here — it falls through to the tap detector, which selects the caption ([EditorIntent
- * .SelectTextOverlay]), and to the pan gesture, which scrolls. Two gestures, split by zone, the same
+ * here — it falls through to the tap detector, which selects the caption (`SelectTextOverlay`), and to
+ * the pan gesture, which scrolls. Two gestures, split by zone, the same
  * arbitration the clips' edges and bodies use.
  */
 

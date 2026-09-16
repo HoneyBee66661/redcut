@@ -30,6 +30,7 @@ import com.redcut.feature.editor.Selection
 import com.redcut.feature.editor.ToolState
 import com.redcut.feature.editor.clipIdOrNull
 import com.redcut.feature.editor.laneSpans
+import com.redcut.feature.editor.textLaneItems
 
 /**
  * The timeline surface (spec §7.1): a custom Compose `Canvas`, not a row of composables.
@@ -103,6 +104,16 @@ internal fun TimelineCanvas(
     val paint = rememberTimelinePaint()
     val rulerHeightPx = RULER_HEIGHT_DP * density
 
+    // The caption's lane (FR-4.3's card 4): the band sits under the LAST media lane, and its items are
+    // the document's captions. The band's top is the tracks' own layout (one track height each, from the
+    // ruler down), read off the geometry's lane rects rather than counted here — the lane stack is the
+    // geometry's answer, and a second count is how a band drifts out of the stack it belongs to.
+    val textItems = remember(document) { document.textLaneItems() }
+    val textLane = TextLane(
+        topPx = rulerHeightPx + (layer.geometry.laneRects().lastOrNull()?.bottomPx ?: 0f),
+        heightPx = layer.geometry.trackHeightPx,
+        items = textItems,
+    )
     // The reorder drag's state lives HERE rather than in `EditorUiState`: until the finger lifts the
     // document has not changed at all, and the marker is a drawing of where it would land. That is the
     // same reasoning as the viewport below, from the other direction — a drag in flight is not an edit
@@ -123,9 +134,12 @@ internal fun TimelineCanvas(
         playheadUs = playheadUs,
         setZoomPxPerSecond = { zoomPxPerSecond = it },
         reorder = reorderGestures,
+        textLane = textLane,
         // The tap rule is stateful: the first tap on a clip selects it, and a tap on the already
-        // selected clip seeks (device pass, second round).
+        // selected clip seeks (device pass, second round). The text lane's body has its own toggle,
+        // routed by the same tap callback.
         selectedClipId = (selection as? Selection.Clip)?.clipId,
+        selectedTextId = (selection as? Selection.Text)?.effectId,
     )
 
     Canvas(
@@ -133,9 +147,20 @@ internal fun TimelineCanvas(
             geometry = layer.geometry,
             rulerHeightPx = rulerHeightPx,
             actions = actions,
+            textLane = textLane,
             onViewportWidthPx = { viewportWidthPx = it },
         ),
     ) {
+        // The text lane FIRST, so the playhead — drawn by drawTimeline — stays the topmost line on the
+        // screen: its 3× height crosses this band the same way it crosses the tracks, and a lane drawn
+        // after it would cut the line in two (FR-4.3's card 4: one caption per item, edges draggable,
+        // body tappable).
+        drawTextLane(
+            lane = textLane,
+            geometry = layer.geometry,
+            paint = paint,
+            marks = timelineMarks(document, playheadUs, selection, tool, reorderDrag),
+        )
         drawTimeline(
             layer = layer,
             paint = paint,
@@ -173,6 +198,9 @@ private fun timelineMarks(
             document.reorderMarkerUs(trackId, drag.clipId, drag.targetIndex)
         }
     },
+    selectedTextId = (selection as? Selection.Text)?.effectId,
+    textTrimmedId = (tool as? ToolState.TrimmingText)?.effectId,
+    draggedTextEdge = (tool as? ToolState.TrimmingText)?.edge,
 )
 
 /** The reorder drag as the Canvas sees it: which clip, which slot, and where the finger last was. */
@@ -262,11 +290,17 @@ private fun Modifier.timelineSurface(
     geometry: TimelineGeometry,
     rulerHeightPx: Float,
     actions: TimelineGestures,
+    textLane: TextLane?,
     onViewportWidthPx: (Float) -> Unit,
 ): Modifier = this
     .fillMaxSize()
     .onSizeChanged { size -> onViewportWidthPx(size.width.toFloat()) }
-    .timelineGestures(geometry = geometry, rulerHeightPx = rulerHeightPx, actions = actions)
+    .timelineGestures(
+        geometry = geometry,
+        rulerHeightPx = rulerHeightPx,
+        actions = actions,
+        textLane = textLane,
+    )
 
 /**
  * Turns finger positions into a slot, using the document's own arithmetic.
@@ -327,7 +361,7 @@ private fun buildReorderGestures(
     )
 }
 
-/** The eight timeline colours, read from the theme where reading it is legal. */
+/** The nine timeline colours, read from the theme where reading it is legal. */
 @Composable
 private fun rememberTimelinePaint(): TimelinePaint = TimelinePaint(
     clip = MaterialTheme.colorScheme.surfaceVariant,
@@ -338,6 +372,9 @@ private fun rememberTimelinePaint(): TimelinePaint = TimelinePaint(
     trimEdge = MaterialTheme.colorScheme.tertiary,
     reorderMarker = MaterialTheme.colorScheme.secondary,
     audioWaveform = MaterialTheme.colorScheme.onSurfaceVariant,
+    textItem = MaterialTheme.colorScheme.secondaryContainer,
+    textItemSelected = MaterialTheme.colorScheme.primaryContainer,
+    onRuler = MaterialTheme.colorScheme.onSurfaceVariant,
 )
 
 /**

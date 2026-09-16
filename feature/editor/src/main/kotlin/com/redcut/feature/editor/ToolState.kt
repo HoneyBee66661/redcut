@@ -73,6 +73,21 @@ sealed interface ToolState {
      * finger sliding between rows does not fire a begin per frame.
      */
     data class StylingText(val effectId: String) : ToolState
+
+    /**
+     * One END of a caption is being dragged on the timeline (FR-4.3's card 4).
+     *
+     * The [Trimming] shape for an effect: the document has already been previewed shorter or longer, so
+     * a screen that did not know a drag was open could not explain why the caption's lane item shrank
+     * under the finger. [us] is where the edge currently is, in TIMELINE time — a caption has no source,
+     * so unlike [Trimming] there is no source-time crossing to remember, and the value is the one the
+     * command clamps.
+     */
+    data class TrimmingText(
+        val effectId: String,
+        val edge: ClipEdge,
+        val us: Long,
+    ) : ToolState
 }
 
 /**

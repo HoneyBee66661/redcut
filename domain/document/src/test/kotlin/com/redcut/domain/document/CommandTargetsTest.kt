@@ -264,6 +264,10 @@ class CommandTargetsTest {
             "DeleteClip" to Expectation(DeleteClip(VIDEO, "c1"), ON_VIDEO),
             "DuplicateClip" to Expectation(DuplicateClip(VIDEO, "c1", "c9"), ON_VIDEO),
             "MergeClips" to Expectation(MergeClips(VIDEO, listOf("c1", "c2")), ON_VIDEO),
+            // The lane-level merge (WS E2). It changes the fixture, which the lock tests require: the
+            // fixture's c1 and c2 are source-contiguous, so this command has something to fuse and is not
+            // passing `a command that would touch a locked lane changes nothing` by being a no-op.
+            "MergeTrackClips" to Expectation(MergeTrackClips(VIDEO), ON_VIDEO),
             "RenameDocument" to Expectation(RenameDocument("Renamed"), NO_LANES),
             "ReorderClip" to Expectation(ReorderClip(VIDEO, "c1", 1), ON_VIDEO),
             "SetFades" to Expectation(SetFades(VIDEO, "c1", SEC, 0L), ON_VIDEO),

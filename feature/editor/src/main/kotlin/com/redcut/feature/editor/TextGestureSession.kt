@@ -9,6 +9,8 @@ import com.redcut.domain.document.SetTextTransform
 import com.redcut.domain.document.TextSpec
 import com.redcut.domain.document.UndoStack
 import com.redcut.domain.document.textOverlayById
+import com.redcut.domain.document.toOverlayBox
+import com.redcut.domain.document.toTransform
 import com.redcut.feature.editor.EditorIntent.BeginTextDrag
 import com.redcut.feature.editor.EditorIntent.BeginTextStyle
 import com.redcut.feature.editor.EditorIntent.BeginTextTrim

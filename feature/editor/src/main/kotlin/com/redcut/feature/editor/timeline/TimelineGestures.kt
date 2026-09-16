@@ -86,6 +86,8 @@ internal class TimelineGestures(
     val tap: (screenX: Float, screenY: Float) -> Unit,
     val trim: TrimGestures,
     val reorder: ReorderGestures,
+    /** The caption lane's edge drag (FR-4.3's card 4). The band's body tap rides [tap]. */
+    val textTrim: TextTrimGestures,
 )
 
 /**
@@ -116,7 +118,23 @@ internal fun onTimelineTap(
     geometry: TimelineGeometry,
     onIntent: (EditorIntent) -> Unit,
     selectedClipId: String? = null,
+    textLane: TextLane? = null,
+    selectedTextId: String? = null,
 ) {
+    // The caption lane is BELOW the media lanes, so a y in its band is not in any clip lane's — and the
+    // band answers for itself: a tap on a caption selects it, a tap on the band's empty stretch clears,
+    // the same toggle the clips keep. Routed here rather than by a second detector so the band has ONE
+    // place in the priority order, under the trim.
+    if (textLane != null && screenY >= textLane.topPx && screenY <= textLane.bottomPx) {
+        onTextLaneTap(
+            screenX = screenX,
+            lane = textLane,
+            geometry = geometry,
+            onIntent = onIntent,
+            selectedEffectId = selectedTextId,
+        )
+        return
+    }
     val hit = geometry.hitTest(screenX, screenY)
     val tapped = when (hit) {
         is TimelineHit.Body -> hit.clipId
@@ -215,7 +233,9 @@ internal fun timelineGestureHandlers(
     playheadUs: Long,
     setZoomPxPerSecond: (Float) -> Unit,
     reorder: ReorderGestures,
+    textLane: TextLane? = null,
     selectedClipId: String? = null,
+    selectedTextId: String? = null,
 ): TimelineGestures {
     fun sourceTimeAt(clipId: String, screenX: Float): Long {
         val clip = clipsById[clipId] ?: return 0L
@@ -223,6 +243,10 @@ internal fun timelineGestureHandlers(
         val withinClipUs = geometry.usFor(geometry.contentPxFor(screenX)) - span.startUs
         return clip.sourceTimeFor(withinClipUs)
     }
+
+    // The caption edge's value, in TIMELINE time: a caption has no source, so unlike a clip trim there
+    // is no source-time crossing here — the finger's position IS the value the command clamps.
+    fun captionUsAt(screenX: Float): Long = geometry.usFor(geometry.contentPxFor(screenX))
 
     return TimelineGestures(
         scrub = { screenX ->
@@ -248,7 +272,15 @@ internal fun timelineGestureHandlers(
             )
         },
         tap = { screenX, screenY ->
-            onTimelineTap(screenX, screenY, geometry, onIntent, selectedClipId)
+            onTimelineTap(
+                screenX = screenX,
+                screenY = screenY,
+                geometry = geometry,
+                onIntent = onIntent,
+                selectedClipId = selectedClipId,
+                textLane = textLane,
+                selectedTextId = selectedTextId,
+            )
         },
         trim = TrimGestures(
             begin = { clipId, edge, screenX ->
@@ -261,6 +293,14 @@ internal fun timelineGestureHandlers(
             cancel = { onIntent(EditorIntent.CancelTrim) },
         ),
         reorder = reorder,
+        textTrim = TextTrimGestures(
+            begin = { effectId, edge, us ->
+                onIntent(EditorIntent.BeginTextTrim(effectId, edge, us))
+            },
+            update = { us -> onIntent(EditorIntent.UpdateTextTrim(us)) },
+            end = { onIntent(EditorIntent.EndTextTrim) },
+            cancel = { onIntent(EditorIntent.CancelTextTrim) },
+        ),
     )
 }
 
@@ -284,9 +324,11 @@ internal fun Modifier.timelineGestures(
     geometry: TimelineGeometry,
     rulerHeightPx: Float,
     actions: TimelineGestures,
+    textLane: TextLane? = null,
 ): Modifier {
     val currentGeometry by rememberUpdatedState(geometry)
     val currentActions by rememberUpdatedState(actions)
+    val currentTextLane by rememberUpdatedState(textLane)
 
     return this
         .pointerInput(rulerHeightPx) {
@@ -310,6 +352,21 @@ internal fun Modifier.timelineGestures(
         .pointerInput(rulerHeightPx) {
             awaitEachGesture {
                 trimGesture(currentGeometry, rulerHeightPx, currentActions, currentActions.tap)
+            }
+        }
+        .pointerInput(rulerHeightPx, textLane?.topPx) {
+            awaitEachGesture {
+                // The caption lane's edges (FR-4.3's card 4), after the clips': a y can only be in one
+                // band, so the two trims never contend for the same press, and the order keeps the
+                // clips' behaviour bit-identical to what it was before the lane existed.
+                currentTextLane?.let { lane ->
+                    textTrimGesture(
+                        geometry = currentGeometry,
+                        rulerHeightPx = rulerHeightPx,
+                        lane = lane,
+                        actions = currentActions.textTrim,
+                    )
+                }
             }
         }
         .pointerInput(rulerHeightPx) {

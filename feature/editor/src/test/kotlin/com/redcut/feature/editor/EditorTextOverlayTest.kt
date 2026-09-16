@@ -2,11 +2,15 @@ package com.redcut.feature.editor
 
 import com.google.common.truth.Truth.assertThat
 import com.redcut.domain.document.AppliedEffect
+import com.redcut.domain.document.ClipEdge
 import com.redcut.domain.document.CutTool
+import com.redcut.domain.document.MIN_TEXT_DURATION_US
 import com.redcut.domain.document.TextOverlayBox
 import com.redcut.domain.document.TextSpec
+import com.redcut.domain.document.TimeRange
 import com.redcut.domain.document.textOverlaysAt
 import com.redcut.domain.document.toOverlayBox
+import com.redcut.feature.editor.timeline.TextLaneItem
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.TestScope
@@ -332,6 +336,94 @@ class EditorTextOverlayTest {
 
         assertThat(model.state.value.selection).isEqualTo(Selection.Text(captionId))
         assertThat(model.caption().spec.content).isEqualTo("Text")
+    }
+
+    // --- The timeline's text lane (FR-4.3's card 4) -------------------------
+
+    @Test
+    fun `the document's captions are the text lane's items with their stored ranges`() =
+        runTest(dispatcher) {
+            val (model, captionId) = importedCaption()
+            val document = model.state.value.document
+
+            // The lane is a READING of the effect stack: the caption's own absolute range, not a prefix
+            // sum, because a caption's start and end are stored where a clip's are derived.
+            assertThat(document.textLaneItems()).containsExactly(
+                TextLaneItem(
+                    effectId = captionId,
+                    content = "Text",
+                    startUs = 0L,
+                    endUs = 3_000_000L,
+                ),
+            )
+        }
+
+    @Test
+    fun `a whole text edge drag is one undo entry labelled Text timing`() = runTest(dispatcher) {
+        val (model, captionId) = importedCaption()
+
+        model.onIntent(EditorIntent.BeginTextTrim(captionId, ClipEdge.OUT, 4_000_000L))
+        model.onIntent(EditorIntent.UpdateTextTrim(3_500_000L))
+        model.onIntent(EditorIntent.UpdateTextTrim(2_000_000L))
+        model.onIntent(EditorIntent.EndTextTrim)
+
+        assertThat(model.caption().timeRange).isEqualTo(TimeRange(0L, 2_000_000L))
+        assertThat(model.state.value.history)
+            .isEqualTo(HistoryState.Ready(canUndo = true, canRedo = false, topLabel = "Text timing"))
+        assertThat(model.state.value.tool).isEqualTo(ToolState.Idle)
+    }
+
+    @Test
+    fun `a text edge drag on the start holds the end and clamps at zero`() = runTest(dispatcher) {
+        val (model, captionId) = importedCaption()
+
+        model.onIntent(EditorIntent.BeginTextTrim(captionId, ClipEdge.IN, 1_000_000L))
+        model.onIntent(EditorIntent.UpdateTextTrim(500_000L))
+        model.onIntent(EditorIntent.UpdateTextTrim(-500_000L))
+        model.onIntent(EditorIntent.EndTextTrim)
+
+        // The finger overshoots past zero; the command clamps the start and the END holds where it was.
+        assertThat(model.caption().timeRange).isEqualTo(TimeRange(0L, 3_000_000L))
+    }
+
+    @Test
+    fun `a text edge dragged past the other end collapses to the caption floor`() = runTest(dispatcher) {
+        val (model, captionId) = importedCaption()
+
+        model.onIntent(EditorIntent.BeginTextTrim(captionId, ClipEdge.OUT, 1_000_000L))
+        model.onIntent(EditorIntent.UpdateTextTrim(100_000L))
+        model.onIntent(EditorIntent.EndTextTrim)
+
+        assertThat(model.caption().timeRange.durationUs).isEqualTo(MIN_TEXT_DURATION_US)
+    }
+
+    @Test
+    fun `a cancelled text edge drag leaves the document and the history untouched`() =
+        runTest(dispatcher) {
+            val (model, captionId) = importedCaption()
+            val before = model.state.value
+
+            model.onIntent(EditorIntent.BeginTextTrim(captionId, ClipEdge.IN, 1_000_000L))
+            model.onIntent(EditorIntent.UpdateTextTrim(500_000L))
+            model.onIntent(EditorIntent.CancelTextTrim)
+
+            assertThat(model.state.value.document).isEqualTo(before.document)
+            assertThat(model.state.value.history).isEqualTo(before.history)
+            assertThat(model.state.value.tool).isEqualTo(ToolState.Idle)
+        }
+
+    @Test
+    fun `a text edge drag for a caption the document does not have is ignored`() = runTest(dispatcher) {
+        val (model, _) = importedCaption()
+        val before = model.state.value
+
+        model.onIntent(EditorIntent.BeginTextTrim("text-999", ClipEdge.IN, 1_000_000L))
+        model.onIntent(EditorIntent.UpdateTextTrim(500_000L))
+        model.onIntent(EditorIntent.EndTextTrim)
+
+        assertThat(model.state.value.document).isEqualTo(before.document)
+        assertThat(model.state.value.history).isEqualTo(before.history)
+        assertThat(model.state.value.tool).isEqualTo(ToolState.Idle)
     }
 
     private companion object {

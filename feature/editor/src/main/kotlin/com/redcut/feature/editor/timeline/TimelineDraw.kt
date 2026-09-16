@@ -67,6 +67,18 @@ internal data class TimelinePaint(
      * the gesture drew.
      */
     val audioWaveform: Color,
+    /**
+     * The text lane's body and its selected state (FR-4.3's card 4).
+     *
+     * A container/content pairing like the audio body's, in a hue of its own: a caption body that
+     * borrowed the clip colour would read as footage, and one that borrowed the audio colour would read
+     * as sound — the lane's whole point is that captions are NEITHER, so it carries its own fill the way
+     * every other kind of lane does.
+     */
+    val textItem: Color,
+    val textItemSelected: Color,
+    /** The lane label's and item label's colour, over both the band and the bodies. */
+    val onRuler: Color,
 )
 
 /**
@@ -146,6 +158,14 @@ internal data class TimelineMarks(
     val draggedEdge: ClipEdge? = null,
     val draggedClipId: String? = null,
     val markerUs: Long? = null,
+    /**
+     * The text lane's marks (FR-4.3's card 4): the selected caption, the caption whose edge is being
+     * dragged, and which edge. Defaulted null, which is "no text marks" — the flat reading a caller
+     * without a text lane draws, and every document without captions answers per lane with no change.
+     */
+    val selectedTextId: String? = null,
+    val textTrimmedId: String? = null,
+    val draggedTextEdge: ClipEdge? = null,
 )
 
 /** The whole timeline: one pass per lane, then the ruler, the marker and the playhead. */

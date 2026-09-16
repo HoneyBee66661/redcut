@@ -228,6 +228,7 @@ class EditorViewModel @Inject constructor(
             is EditorIntent.AdjustGesture -> gestures.applyAdjust(intent)
             is EditorIntent.TextGesture -> gestures.applyTextDrag(intent)
             is EditorIntent.TextStyleGesture -> gestures.applyTextStyle(intent)
+            is EditorIntent.TextTrimGesture -> gestures.applyTextTrim(intent)
 
             // The Cut stage's tools at the playhead, and the drag that rearranges one lane.
             is EditorIntent.ApplyCut -> applyCut(intent.tool)

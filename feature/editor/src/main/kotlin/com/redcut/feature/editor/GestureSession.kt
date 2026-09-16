@@ -1,10 +1,12 @@
 package com.redcut.feature.editor
 
 import com.redcut.core.common.logging.RedcutLogger
+import com.redcut.domain.document.AppliedEffect
 import com.redcut.domain.document.Clip
 import com.redcut.domain.document.ClipAdjustment
 import com.redcut.domain.document.ClipEdge
 import com.redcut.domain.document.SetTextStyle
+import com.redcut.domain.document.SetTextRange
 import com.redcut.domain.document.SetTextTransform
 import com.redcut.domain.document.TextSpec
 import com.redcut.domain.document.TrimClip
@@ -85,6 +87,20 @@ internal class GestureSession(
             is EditorIntent.UpdateTextStyle -> updateTextStyle(intent.spec)
             EditorIntent.EndTextStyle -> end()
             EditorIntent.CancelTextStyle -> cancel()
+        }
+    }
+
+    /**
+     * The caption's timeline-edge drag (FR-4.3's card 4). See [applyTrim]: the same lifecycle, previewing
+     * [SetTextRange] per frame and committing once, so an edge drag reads as one "Undo Text timing"
+     * entry — the same label the inspector's timing fields produce, because they are the same edit.
+     */
+    fun applyTextTrim(intent: EditorIntent.TextTrimGesture) {
+        when (intent) {
+            is EditorIntent.BeginTextTrim -> beginTextTrim(intent.effectId, intent.edge, intent.us)
+            is EditorIntent.UpdateTextTrim -> updateTextTrim(intent.us)
+            EditorIntent.EndTextTrim -> end()
+            EditorIntent.CancelTextTrim -> cancel()
         }
     }
 
@@ -240,6 +256,42 @@ internal class GestureSession(
         history().preview(SetTextStyle(effectId = styling.effectId, spec = spec))
         publishState(state())
     }
+
+    /**
+     * Starts a caption edge drag: preview it, so the lane item follows the finger live.
+     *
+     * The caption is looked up fresh rather than trusted from the intent, the rule [beginTrim] keeps; and
+     * the OTHER end is read at this moment and then held: a drag on one edge must not move the other
+     * edge as the preview shifts the range — the held-edge invariant [updateTrim] keeps for a clip, with
+     * timeline time in place of source time because a caption has no source.
+     */
+    private fun beginTextTrim(effectId: String, edge: ClipEdge, us: Long) {
+        val caption = history().current.textOverlayById(effectId) ?: return
+        logger.d(TAG, "text trim ${edge.name.lowercase()} of $effectId to $us")
+        history().preview(textRangeCommand(caption, edge, us))
+        publishState(state().copy(tool = ToolState.TrimmingText(effectId, edge, us)))
+    }
+
+    /**
+     * The drag moved, so rebuild the command from the CURRENT caption on every frame — which is what
+     * keeps the held-edge invariant: the fixed end comes from the caption's previewed range (where only
+     * the dragged edge has moved), and the dragged edge is the finger's raw position, clamped by the
+     * command.
+     */
+    private fun updateTextTrim(us: Long) {
+        val trimming = state().tool as? ToolState.TrimmingText ?: return
+        val caption = history().current.textOverlayById(trimming.effectId) ?: return
+        history().preview(textRangeCommand(caption, trimming.edge, us))
+        publishState(state().copy(tool = trimming.copy(us = us)))
+    }
+
+    /** The command a caption edge drag means: the dragged edge moves, the other end holds. */
+    private fun textRangeCommand(caption: AppliedEffect.Text, edge: ClipEdge, us: Long): SetTextRange =
+        if (edge == ClipEdge.IN) {
+            SetTextRange(effectId = caption.id, startUs = us, endUs = caption.timeRange.endUs)
+        } else {
+            SetTextRange(effectId = caption.id, startUs = caption.timeRange.startUs, endUs = us)
+        }
 
     /**
      * Ends whichever gesture is open, committing it as ONE entry. One function for both because the

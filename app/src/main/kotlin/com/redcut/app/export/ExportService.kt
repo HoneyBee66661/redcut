@@ -139,7 +139,10 @@ internal class ExportService : Service() {
                 }
             } finally {
                 tempOutput.delete()
-                ServiceCompat.stopForeground(this@ExportService, ServiceCompat.STOP_FOREGROUND_REMOVE)
+                ServiceCompat.stopForeground(
+                    this@ExportService,
+                    ServiceCompat.STOP_FOREGROUND_REMOVE,
+                )
                 stopSelf()
             }
         }

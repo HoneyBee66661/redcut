@@ -52,7 +52,14 @@ fun ExportScreen(
                 .padding(horizontal = 8.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TextButton(onClick = onBack) { Text("Back") }
+            // Leaving folds a terminal state to Idle (a no-op mid-export, the port decides), so
+            // the next visit opens on the choice the user left rather than a stale result.
+            TextButton(
+                onClick = {
+                    viewModel.dismiss()
+                    onBack()
+                },
+            ) { Text("Back") }
             Text(
                 text = "Export",
                 style = MaterialTheme.typography.titleMedium,

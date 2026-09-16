@@ -59,7 +59,7 @@ class ExportViewModelTest {
     }
 
     @Test
-    fun `startExport compiles at the chosen preset and hands the graph to the port`() = runTest(dispatcher) {
+    fun `startExport compiles at the chosen preset and hands it over`() = runTest(dispatcher) {
         val document = oneClipDocument()
         val controller = RecordingExportController()
         val model = viewModel(document, controller)
@@ -75,7 +75,7 @@ class ExportViewModelTest {
     }
 
     @Test
-    fun `the resolution choice is the only thing that changes between two exports`() = runTest(dispatcher) {
+    fun `the resolution choice is the only change between two exports`() = runTest(dispatcher) {
         val document = oneClipDocument()
         val controller = RecordingExportController()
         val model = viewModel(document, controller)
@@ -92,7 +92,7 @@ class ExportViewModelTest {
     }
 
     @Test
-    fun `an empty timeline still hands its graph over so the port owns the refusal`() = runTest(dispatcher) {
+    fun `an empty timeline still hands over so the port owns the refusal`() = runTest(dispatcher) {
         val controller = RecordingExportController()
         val model = viewModel(oneClipDocument(enabled = false), controller)
 
@@ -123,7 +123,12 @@ class ExportViewModelTest {
         controller: ExportController,
     ) = ExportViewModel(
         projects = FakeProjectStore(
-            SavedProject(id = document.id, name = document.name, document = document, updatedAtMs = 0L),
+            SavedProject(
+                id = document.id,
+                name = document.name,
+                document = document,
+                updatedAtMs = 0L,
+            ),
         ),
         controller = controller,
         defaultDispatcher = dispatcher,

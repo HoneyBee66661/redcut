@@ -60,14 +60,16 @@ class ServiceExportController @Inject constructor(
         }
         pendingGraph = graph
         mutableState.value = ExportState.Preparing
-        val intent = Intent(context, ExportService::class.java).setAction(ExportService.ACTION_EXPORT)
+        val intent = Intent(context, ExportService::class.java)
+            .setAction(ExportService.ACTION_EXPORT)
         ContextCompat.startForegroundService(context, intent)
     }
 
     override fun cancel() {
         val current = mutableState.value
         if (current !is ExportState.Preparing && current !is ExportState.Running) return
-        val intent = Intent(context, ExportService::class.java).setAction(ExportService.ACTION_CANCEL)
+        val intent = Intent(context, ExportService::class.java)
+            .setAction(ExportService.ACTION_CANCEL)
         try {
             // startService, not the foreground variant: the service is already up (the state above
             // says so), and the cancel is a message to it, not a reason to start it.

@@ -401,10 +401,14 @@ class EditorViewModel @Inject constructor(
 
             is EditorIntent.StepPlayhead -> stepPlayhead(intent.step)
 
-            is EditorIntent.SelectClip -> selectClip(intent.clipId)
+            // EVERY selection intent through one arm, and deliberately: the three differ only in which id
+            // they carry, they share one stale-id rule, and detekt counts each arm of this `when` as a
+            // branch. `applySelection` is where the three readings and that rule live.
+            is EditorIntent.SelectClip, is EditorIntent.SelectTrack, EditorIntent.ClearSelection ->
+                applySelection(intent)
 
             // Selects [effectId] if the document actually holds that caption (FR-4.3, J-2). The same
-            // stale-id rule [selectClip] keeps, and for the same reason: the id comes from a hit test
+            // stale-id rule [applySelection] keeps, and for the same reason: the id comes from a hit test
             // against a frame the user SAW, and a caption removed between that frame and the tap (an
             // undo, a reopened project) must not leave the inspector editing an effect that is not there.
             // The whole branch is one call to a file-level function so updateView's `when` stays a flat
@@ -418,9 +422,6 @@ class EditorViewModel @Inject constructor(
                     setState = { _state.value = it },
                     onIgnored = { logger.d(TAG, it) },
                 )
-
-            EditorIntent.ClearSelection ->
-                _state.value = _state.value.copy(selection = Selection.None)
 
             EditorIntent.DismissImport -> _state.value = _state.value.copy(import = null)
 
@@ -539,19 +540,46 @@ class EditorViewModel @Inject constructor(
         history.current.clips.firstOrNull { it.id == clipId }
 
     /**
-     * Selects [clipId] if the document actually has it.
+     * Every intent that changes WHAT IS SELECTED (§7.2, §WS E / Task E1).
      *
-     * The guard is not decoration: the id arrives from a tap, and a tap is resolved against the
-     * geometry of the frame the user SAW. A clip deleted between that frame and the tap (an undo,
-     * a ripple) would otherwise put a stale id in the state, and the inspector would edit a clip
-     * that is not there.
+     * One behaviour read three ways — select this clip, select this lane, select nothing — and the two ids
+     * keep the SAME stale-id rule, which is why they are gathered here rather than spread across arms that
+     * would each have to remember it: an id arrives from a tap resolved against the geometry of the frame
+     * the user SAW, so an id the document no longer holds must not become the selection (the inspector would
+     * edit a clip that is not there; the toolbar would offer a lane's tools for a lane that is not on
+     * screen). Clip and track selection replace each other rather than stacking — that is the `Selection`
+     * type's own rule, not something this function enforces: assigning the whole field unselects the other.
+     *
+     * It is also the shape detekt asks for, twice over: the three intents share ONE arm of the dispatch's
+     * `when` (whose complexity is measured per arm), and they go through one function here rather than one
+     * per intent, which keeps the class's own function count inside its limit.
+     *
+     * A caption is deliberately NOT one of the three: [applyTextSelection] takes the document apart (the
+     * caption lives in the effect stack, not in a track) and its id is a different kind of thing.
      */
-    private fun selectClip(clipId: String) {
-        val exists = history.current.clips.any { it.id == clipId }
-        if (exists) {
-            _state.value = _state.value.copy(selection = Selection.Clip(clipId))
-        } else {
-            logger.d(TAG, "ignored a selection for $clipId: no such clip")
+    private fun applySelection(intent: EditorIntent) {
+        when (intent) {
+            EditorIntent.ClearSelection ->
+                _state.value = _state.value.copy(selection = Selection.None)
+
+            is EditorIntent.SelectClip ->
+                if (history.current.clips.any { it.id == intent.clipId }) {
+                    _state.value = _state.value.copy(selection = Selection.Clip(intent.clipId))
+                } else {
+                    logger.d(TAG, "ignored a selection for ${intent.clipId}: no such clip")
+                }
+
+            is EditorIntent.SelectTrack ->
+                if (history.current.tracks.any { it.id == intent.trackId }) {
+                    _state.value = _state.value.copy(selection = Selection.Track(intent.trackId))
+                } else {
+                    logger.d(TAG, "ignored a selection for ${intent.trackId}: no such track")
+                }
+
+            // Unreachable through the dispatch, which routes only the three above here. A log line rather
+            // than a throw because a selection intent that is not one of the three is a caller mistake that
+            // costs nothing to survive.
+            else -> logger.d(TAG, "ignored a selection intent: $intent")
         }
     }
 
@@ -701,7 +729,10 @@ class EditorViewModel @Inject constructor(
             stage = _state.value.stage,
             playheadUs = _state.value.playheadUs.coerceIn(0L, document.timelineDurationUs),
             playback = _state.value.playback,
-            selection = _state.value.selection.reconciledWith(document.clips.map { it.id }),
+            selection = _state.value.selection.reconciledWith(
+                clipIds = document.clips.map { it.id },
+                trackIds = document.tracks.map { it.id },
+            ),
             tool = _state.value.tool.reconciledWith(document.clips.map { it.id }),
             import = import,
             exportSheet = _state.value.exportSheet,
@@ -748,9 +779,9 @@ internal data class KeyframeTransport(
  *
  * File-level (rather than a ViewModel member) so [updateView]'s `when` stays a flat dispatch: the
  * stale-id guard is this function's one branch, and counting it in the `when`'s own cyclomatic total
- * pushed the dispatcher over detekt's limit. The same stale-id rule [selectClip] keeps, for the same
- * reason: the id comes from a hit test against a frame the user SAW, and a caption removed between
- * that frame and the tap (an undo, a reopened project) must not leave the inspector editing an effect
+ * pushed the dispatcher over detekt's limit. The same stale-id rule [applySelection] keeps for a clip and a
+ * lane, for the same reason: the id comes from a hit test against a frame the user SAW, and a caption removed
+ * between that frame and the tap (an undo, a reopened project) must not leave the inspector editing an effect
  * that is not there.
  */
 private fun applyTextSelection(

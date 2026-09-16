@@ -2,6 +2,7 @@ package com.redcut.feature.editor.timeline
 
 import com.google.common.truth.Truth.assertThat
 import com.redcut.core.common.timeline.ClipTiming
+import com.redcut.core.common.timeline.LaneSpans
 import com.redcut.core.common.timeline.TimelineGeometry
 import com.redcut.core.common.timeline.TimelineZoom
 import com.redcut.core.common.timeline.spansOf
@@ -40,13 +41,30 @@ class TimelineTapTest {
         density = 1f,
     )
 
+    /**
+     * The LANE reading (§WS E / Task E1): one VIDEO lane named `video`, holding one one-second clip.
+     *
+     * The flat geometry above has no track id to answer with, so `hitTest(x, y)` on its empty space can
+     * only say `None` — which is why the lane-selection cases below need a document-shaped geometry with a
+     * lane to name.
+     */
+    private fun lanesGeometry(): TimelineGeometry = TimelineGeometry(
+        viewportWidthPx = 400f,
+        lanes = listOf(LaneSpans("video", spansOf(listOf(ClipTiming("clip-0", oneSecond))))),
+        zoom = TimelineZoom(60f),
+        scrollPx = 0f,
+        density = 1f,
+    )
+
     private fun intentsFor(
         screenX: Float,
-        selectedClipId: String?,
+        selectedClipId: String? = null,
+        selectedTrackId: String? = null,
         screenY: Float = LANE_MIDDLE_Y,
+        geometry: TimelineGeometry = geometry(),
     ): List<EditorIntent> {
         val sent = mutableListOf<EditorIntent>()
-        onTimelineTap(screenX, screenY, geometry(), sent::add, selectedClipId)
+        onTimelineTap(screenX, screenY, geometry, sent::add, selectedClipId, selectedTrackId)
         return sent
     }
 
@@ -97,6 +115,34 @@ class TimelineTapTest {
         // switching to a clip the finger is not on.
         assertThat(intentsFor(30f, selectedClipId = "clip-0", screenY = LANE_BELOW_Y))
             .containsExactly(EditorIntent.ClearSelection)
+    }
+
+    // --- The lane background selects the TRACK (§WS E / Task E1) -------------
+
+    @Test
+    fun `tapping a lane's background selects the track it names`() {
+        // x 200 is past the lane's only clip, so the hit test lands on the LANE and answers with its track
+        // id. The user's decision was that this selects the track — the selection the track tools will read
+        // — rather than clearing, which is what it did while there was nothing for a lane to mean.
+        assertThat(intentsFor(200f, geometry = lanesGeometry()))
+            .containsExactly(EditorIntent.SelectTrack("video"))
+    }
+
+    @Test
+    fun `tapping the lane already selected deselects it`() {
+        // The same toggle a clip keeps, read in the lane's terms. Without it a lane, once selected, could
+        // never be released by tapping it again — and the clip case below is what stops the two rules from
+        // collapsing into one: the lane is resolved from y, but a clip standing on it still wins the x.
+        assertThat(intentsFor(200f, selectedTrackId = "video", geometry = lanesGeometry()))
+            .containsExactly(EditorIntent.ClearSelection)
+    }
+
+    @Test
+    fun `a clip still wins the tap over the lane it stands on`() {
+        // The priority: 30 px is inside clip-0 of the same lane, so the answer is the CLIP. A lane
+        // selection here would leave the inspector unable to open a clip's rows by tapping it.
+        assertThat(intentsFor(30f, selectedTrackId = "video", geometry = lanesGeometry()))
+            .containsExactly(EditorIntent.SelectClip("clip-0"))
     }
 }
 

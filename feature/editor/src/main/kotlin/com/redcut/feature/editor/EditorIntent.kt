@@ -142,6 +142,19 @@ sealed interface EditorIntent {
     data object ClearSelection : View
 
     /**
+     * Select a LANE — the track itself, not a clip in it (UI revision 2, §WS E / Task E1).
+     *
+     * A [View], like [SelectClip]: which lane the user is working with is where they are LOOKING, not a
+     * change to the document, so an undo must not step through it. The id arrives from a hit test — a tap
+     * on a lane's background, which is what `TimelineHit.Track` answers for — and a lane the document does
+     * not hold is refused rather than shown, the same stale-id rule [SelectClip]'s handler keeps.
+     *
+     * The TOGGLE is not here: the gesture layer already knows which lane is selected and turns a second
+     * tap into a [ClearSelection], exactly as it does for a clip.
+     */
+    data class SelectTrack(val trackId: String) : View
+
+    /**
      * Start a trim gesture on [edge] of [clipId] (FR-2.1).
      *
      * The command is applied as a PREVIEW, not pushed: the whole drag is one undo entry, and §7.3's

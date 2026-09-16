@@ -154,6 +154,14 @@ internal data class TimelineLayer(
 internal data class TimelineMarks(
     val playheadUs: Long,
     val selectedClipId: String? = null,
+    /**
+     * The selected LANE, when the selection is a track rather than a clip (§WS E / Task E1).
+     *
+     * Defaulted null, which is "no lane marks" — the flat reading everything drew before a lane could be
+     * selected. The two selections cannot both be set: `Selection` is what the user is working with, not a
+     * list of things, so the marks carry both ids without either having to check the other.
+     */
+    val selectedTrackId: String? = null,
     val trimmedClipId: String? = null,
     val draggedEdge: ClipEdge? = null,
     val draggedClipId: String? = null,
@@ -208,7 +216,19 @@ internal fun DrawScope.drawTimeline(
         // The lane first, so the clips land ON a track instead of floating on the window's
         // background, and so the culling is invisible: what is not drawn as a clip is still
         // drawn as lane (task A5).
-        drawLane(lane.lane, layer.geometry, band, paint.ruler)
+        drawLane(
+            lane = lane.lane,
+            geometry = layer.geometry,
+            track = band,
+            color = paint.ruler,
+            // The selected LANE's outline (§WS E / Task E1): without it, tapping a lane's background would
+            // change a state that nothing on screen shows. `selectionBorder` is the colour a selected clip's
+            // outline already uses, because it means the same thing: this is what the user is working with.
+            // Read off the band's own id, so a flat reading with no track id asks for no outline.
+            selectedBorder = paint.selectionBorder.takeIf {
+                lane.lane.trackId != null && lane.lane.trackId == marks.selectedTrackId
+            },
+        )
         lane.rects.forEach { rect ->
             // Two ids, because the outline means "the clip the user is working with": selected, or under
             // the finger during a drag, which has not selected it yet.
@@ -426,12 +446,30 @@ private fun DrawScope.drawLane(
     geometry: TimelineGeometry,
     track: Track,
     color: Color,
+    /**
+     * The outline colour when this lane is SELECTED (§WS E / Task E1), null when it is not.
+     *
+     * A stroke rather than a fill, because a fill would repaint the lane's own grey and hide the clips
+     * standing on it — and the mark's whole job is to say which lane is selected WITHOUT changing what that
+     * lane contains. Drawn here rather than by a second function at the call site because it is the same
+     * rectangle, read from the same three numbers: an outline computed anywhere else could only ever be an
+     * approximation of the band it is supposed to be the edge of.
+     */
+    selectedBorder: Color? = null,
 ) {
     drawRect(
         color = color,
         topLeft = Offset(lane.startPx - geometry.visibleStartPx, track.top),
         size = Size(lane.widthPx, track.height),
     )
+    if (selectedBorder != null) {
+        drawRect(
+            color = selectedBorder,
+            topLeft = Offset(lane.startPx - geometry.visibleStartPx, track.top),
+            size = Size(lane.widthPx, track.height),
+            style = Stroke(width = SELECTION_BORDER_PX),
+        )
+    }
 }
 
 /**

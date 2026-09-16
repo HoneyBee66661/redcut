@@ -104,6 +104,11 @@ internal class TimelineGestures(
  *
  * An edge taps the same way as the body. Empty space past the clips clears the selection.
  *
+ * A lane's BACKGROUND selects that LANE (§WS E / Task E1), which is the one reading that is not about a
+ * clip: the tap still toggles, so a second tap on the lane already selected clears. Which lane was touched
+ * is the hit test's answer ([TimelineHit.Track] carries the track id), and what the selection then MEANS
+ * is the ViewModel's.
+ *
  * ### The y picks the LANE (schema v3)
  *
  * [screenY] resolves which track's band was touched BEFORE the x is read, so an x that crosses a clip in
@@ -117,6 +122,7 @@ internal fun onTimelineTap(
     geometry: TimelineGeometry,
     onIntent: (EditorIntent) -> Unit,
     selectedClipId: String? = null,
+    selectedTrackId: String? = null,
     textLane: TextLane? = null,
     selectedTextId: String? = null,
 ) {
@@ -135,15 +141,27 @@ internal fun onTimelineTap(
         return
     }
     val hit = geometry.hitTest(screenX, screenY)
+    // A lane's BACKGROUND is the track itself: `hitTest` answers TimelineHit.Track where no clip of the
+    // lane was touched, and the user's decision was that such a tap SELECTS that track — which is what
+    // the lane selection exists for (UI revision 2, §WS E). Handled before the clip reading rather than
+    // folded into it because a track hit carries a track id, not a clip id, and the two ids are not
+    // interchangeable in either direction.
+    if (hit is TimelineHit.Track) {
+        val intent = if (hit.trackId == selectedTrackId) {
+            // The toggle rule UI revision 1 kept for a clip, read in the lane's terms: the lane already
+            // selected deselects, so a second tap on the lane body is a way back to nothing selected.
+            EditorIntent.ClearSelection
+        } else {
+            EditorIntent.SelectTrack(hit.trackId)
+        }
+        onIntent(intent)
+        return
+    }
     val tapped = when (hit) {
         is TimelineHit.Body -> hit.clipId
         is TimelineHit.Edge -> hit.clipId
-        // A lane's BACKGROUND is not a clip, so there is nothing to select yet -- the same answer the
-        // area past the clips gives, and for the same reason. The hit type exists so a caller can tell
-        // "empty track under the finger" from "nowhere at all"; what that will MEAN (selecting the
-        // track, adding a clip to it) arrives with the intents that carry a track id.
-        is TimelineHit.Track -> null
-        TimelineHit.None -> null
+        // The track case returned above; nothing else on the timeline names an item to select.
+        else -> null
     }
 
     when (tapped) {
@@ -234,6 +252,7 @@ internal fun timelineGestureHandlers(
     reorder: ReorderGestures,
     textLane: TextLane? = null,
     selectedClipId: String? = null,
+    selectedTrackId: String? = null,
     selectedTextId: String? = null,
 ): TimelineGestures {
     fun sourceTimeAt(clipId: String, screenX: Float): Long {
@@ -277,6 +296,7 @@ internal fun timelineGestureHandlers(
                 geometry = geometry,
                 onIntent = onIntent,
                 selectedClipId = selectedClipId,
+                selectedTrackId = selectedTrackId,
                 textLane = textLane,
                 selectedTextId = selectedTextId,
             )

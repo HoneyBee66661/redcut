@@ -13,6 +13,10 @@
 // geometry mapping in RenderGraphMapper.
 plugins {
     id("redcut.android.library")
+    // Media3GraphExporter is @Inject-constructed and consumed from :app's Hilt graph
+    // (ExportService `@Inject lateinit var exporter`). Without this the module has no Hilt
+    // classpath, so @ApplicationContext never resolves and KSP never emits the factory.
+    id("redcut.android.hilt")
 }
 
 android {

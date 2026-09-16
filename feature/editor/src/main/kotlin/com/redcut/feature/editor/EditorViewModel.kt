@@ -131,6 +131,18 @@ class EditorViewModel @Inject constructor(
         persist = ::autosave,
     )
 
+    /** The caption gestures (FR-4.3): drag, restyle, range-trim. Same five lambdas as [gestures]. */
+    private val textGestures = TextGestureSession(
+        logger = logger,
+        history = { history },
+        state = { _state.value },
+        publishState = { next ->
+            _state.value = next
+            publish()
+        },
+        persist = ::autosave,
+    )
+
     /**
      * Reopens the project the user was last in (the device pass's "my clip disappeared").
      *
@@ -226,9 +238,9 @@ class EditorViewModel @Inject constructor(
             // `when` — four moments, exhaustive — is there rather than here.
             is EditorIntent.TrimGesture -> gestures.applyTrim(intent)
             is EditorIntent.AdjustGesture -> gestures.applyAdjust(intent)
-            is EditorIntent.TextGesture -> gestures.applyTextDrag(intent)
-            is EditorIntent.TextStyleGesture -> gestures.applyTextStyle(intent)
-            is EditorIntent.TextTrimGesture -> gestures.applyTextTrim(intent)
+            is EditorIntent.TextGesture -> textGestures.applyTextDrag(intent)
+            is EditorIntent.TextStyleGesture -> textGestures.applyTextStyle(intent)
+            is EditorIntent.TextTrimGesture -> textGestures.applyTextTrim(intent)
 
             // The Cut stage's tools at the playhead, and the drag that rearranges one lane.
             is EditorIntent.ApplyCut -> applyCut(intent.tool)
@@ -390,7 +402,18 @@ class EditorViewModel @Inject constructor(
 
             is EditorIntent.SelectClip -> selectClip(intent.clipId)
 
-            is EditorIntent.SelectTextOverlay -> selectTextOverlay(intent.effectId)
+            // Selects [effectId] if the document actually holds that caption (FR-4.3, J-2). The same
+            // stale-id rule [selectClip] keeps, and for the same reason: the id comes from a hit test
+            // against a frame the user SAW, and a caption removed between that frame and the tap (an
+            // undo, a reopened project) must not leave the inspector editing an effect that is not there.
+            is EditorIntent.SelectTextOverlay -> {
+                val exists = history.current.textOverlayById(intent.effectId) != null
+                if (exists) {
+                    _state.value = _state.value.copy(selection = Selection.Text(intent.effectId))
+                } else {
+                    logger.d(TAG, "ignored a selection for ${intent.effectId}: no such caption")
+                }
+            }
 
             EditorIntent.ClearSelection ->
                 _state.value = _state.value.copy(selection = Selection.None)
@@ -412,9 +435,8 @@ class EditorViewModel @Inject constructor(
             // The keyframe transport's two VIEW moves: jump the playhead to the previous or next key of
             // the selected clip's active keyframable property. Moving the playhead is not an edit, so
             // undo must not step through it — the same rule every other playhead move follows.
-            EditorIntent.PrevKeyframe -> moveToAdjacentKey(forward = false)
-
-            EditorIntent.NextKeyframe -> moveToAdjacentKey(forward = true)
+            is EditorIntent.PrevKeyframe, is EditorIntent.NextKeyframe ->
+                moveToAdjacentKey(forward = intent is EditorIntent.NextKeyframe)
         }
     }
 
@@ -526,22 +548,6 @@ class EditorViewModel @Inject constructor(
             _state.value = _state.value.copy(selection = Selection.Clip(clipId))
         } else {
             logger.d(TAG, "ignored a selection for $clipId: no such clip")
-        }
-    }
-
-    /**
-     * Selects [effectId] if the document actually holds that caption (FR-4.3, J-2).
-     *
-     * The same stale-id rule [selectClip] keeps, and for the same reason: the id comes from a hit test
-     * against a frame the user SAW, and a caption removed between that frame and the tap (an undo, a
-     * reopened project) must not leave the inspector editing an effect that is not there.
-     */
-    private fun selectTextOverlay(effectId: String) {
-        val exists = history.current.textOverlayById(effectId) != null
-        if (exists) {
-            _state.value = _state.value.copy(selection = Selection.Text(effectId))
-        } else {
-            logger.d(TAG, "ignored a selection for $effectId: no such caption")
         }
     }
 

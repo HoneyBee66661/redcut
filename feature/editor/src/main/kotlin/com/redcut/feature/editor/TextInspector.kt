@@ -358,9 +358,14 @@ private fun TextAlignment.label(): String = when (this) {
 }
 
 /** The size slider's span: from a caption nobody can read to one that fills a lower third. */
+// Scoped suppression of MagicNumber for the same reason detekt.yml gives CanvasSpec's enums: a bound
+// in the definition of a NAMED slider range is the name doing its job, and the literals are the spec.
+@Suppress("MagicNumber")
 private val SIZE_RANGE = 12f..96f
 
 /** The stroke slider's span. 0 is "off", which the readout above renders as the word. */
+// Same reasoning as SIZE_RANGE: the named span's bounds are its definition, not stray literals.
+@Suppress("MagicNumber")
 private val STROKE_RANGE = 0f..16f
 
 /**

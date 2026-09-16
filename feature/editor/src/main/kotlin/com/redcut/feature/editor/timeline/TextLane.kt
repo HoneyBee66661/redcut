@@ -47,6 +47,13 @@ import com.redcut.feature.editor.TimelineMarks
 /** How wide a caption's draggable edge zone is, in dp — the clips' own touch floor, restated. */
 private const val TEXT_EDGE_ZONE_DP = 24f
 
+/**
+ * The edge zone is the SMALLER of the fixed dp target and a THIRD of the item's on-screen width —
+ * the same cap the clips' edges use (an edge target cannot exceed the thing it trims), restated for
+ * a caption whose width is the geometry's, not the source's.
+ */
+private const val TEXT_EDGE_ZONE_WIDTH_FRACTION = 3f
+
 /** The band label's line, like the audio lane's: size in sp, baseline in dp inside the band. */
 private const val TEXT_LABEL_TEXT_SIZE_SP = 10f
 private const val TEXT_LABEL_INSET_DP = 8f
@@ -66,6 +73,24 @@ internal data class TextLane(
 ) {
     val bottomPx: Float get() = topPx + heightPx
 }
+
+/**
+ * Builds the timeline's text lane for [document] on [geometry]: the band under the LAST media lane,
+ * one track height tall, holding the document's captions.
+ *
+ * Its own function so TimelineCanvas can read the lane in one line — the composable crossed detekt's
+ * LongMethod limit with the construction inline, and the factory keeps the "where the band sits" rule
+ * (the lane stack is the geometry's answer, not a second count) next to the lane it describes.
+ */
+internal fun textLaneFor(
+    document: EditDocument,
+    geometry: TimelineGeometry,
+    rulerHeightPx: Float,
+): TextLane = TextLane(
+    topPx = rulerHeightPx + (geometry.laneRects().lastOrNull()?.bottomPx ?: 0f),
+    heightPx = geometry.trackHeightPx,
+    items = document.textLaneItems(),
+)
 
 /** One caption as the lane draws and hit-tests it: its range, and the words to label it with. */
 internal data class TextLaneItem(
@@ -243,7 +268,7 @@ internal fun Density.textLaneEdgeHit(
     return lane.items.firstNotNullOfOrNull { item ->
         val left = geometry.pxFor(item.startUs) - geometry.visibleStartPx
         val right = geometry.pxFor(item.endUs) - geometry.visibleStartPx
-        val zone = minOf((right - left) / 3f, zonePx)
+        val zone = minOf((right - left) / TEXT_EDGE_ZONE_WIDTH_FRACTION, zonePx)
         when {
             screenX >= left && screenX <= left + zone -> item to ClipEdge.IN
             screenX <= right && screenX >= right - zone -> item to ClipEdge.OUT

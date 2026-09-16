@@ -1,4 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">RedCut</string>
+
+    <!-- The export service's notifications (FR-5.9, FR-5.12). Two channels: progress is silent
+         because it rewrites itself every percent, results are allowed to speak because they
+         happen once. -->
+    <string name="export_progress_channel">Export progress</string>
+    <string name="export_result_channel">Export results</string>
+    <string name="export_progress_title">Exporting video</string>
+    <string name="export_progress_percent">%1$d%%</string>
+    <string name="export_complete_title">Export complete</string>
+    <string name="export_complete_text">Saved to Movies/RedCut</string>
+    <string name="export_failed_title">Export failed</string>
+    <string name="export_cancel">Cancel</string>
 </resources>

@@ -28,6 +28,7 @@ import com.redcut.domain.document.ViewportRect
 import com.redcut.domain.document.commandFor
 import com.redcut.domain.document.planImport
 import com.redcut.domain.document.steppedPlayheadUs
+import com.redcut.domain.document.textOverlayById
 import com.redcut.domain.document.timelineDurationUs
 import com.redcut.domain.project.ProjectStore
 import com.redcut.domain.project.SavedProject

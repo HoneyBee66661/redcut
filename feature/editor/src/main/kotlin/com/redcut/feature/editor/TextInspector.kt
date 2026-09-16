@@ -391,7 +391,7 @@ private val SWATCH_BORDER_SELECTED = 2.dp
  * whatever the frame holds without fully covering it. The value the preview draws and the export burns —
  * it is a spec value, not a theme colour, for the reason the swatch set is.
  */
-private const val DEFAULT_BACKGROUND_ARGB = 0x99000000
+private const val DEFAULT_BACKGROUND_ARGB = 0x99000000.toInt()
 
 private val SEGMENTED_SHAPE = RoundedCornerShape(8.dp)
 private val SEGMENTED_BORDER_WIDTH = 1.dp

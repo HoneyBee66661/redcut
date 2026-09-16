@@ -244,15 +244,22 @@ internal class RecordingReader(
  */
 internal fun EditorViewModel.cutIntent(tool: CutTool): EditorIntent.ApplyCut {
     val state = state.value
-    val clipId = (state.selection as? Selection.Clip)?.clipId
+    val selectedClipId = (state.selection as? Selection.Clip)?.clipId
         ?.takeIf { state.document.clipById(it) != null }
-        ?: state.document.clipAt(state.playheadUs)?.id
-        // The fallback is for the tests that tap a tool where the playhead is on NO clip, on purpose: those
-        // are testing a REFUSAL, and the strip would have had no target at all there (nothing selected,
-        // nothing under the playhead). Handing over the document's first clip keeps such a test runnable
-        // while the refusal stays the tool's own answer — `commandFor` returns null for a playhead outside
-        // the clip on every position-dependent tool, which is exactly what those tests assert.
-        ?: state.document.clips.firstOrNull()?.id
+    // The same resolution the strip does: the PLAYHEAD picks the clip, and a selected clip narrows which
+    // LANE that playhead is read on. Mirrored rather than simplified, so a test cannot pass on a target the
+    // strip would not have offered.
+    val lane = selectedClipId?.let { state.document.trackIdOf(it) }
+    val atPlayhead = if (lane != null) {
+        state.document.clipAt(lane, state.playheadUs)?.id
+    } else {
+        state.document.clipAt(state.playheadUs)?.id
+    }
+    // The fallback is for the tests that tap a tool where the playhead is on NO clip, on purpose: those are
+    // testing a REFUSAL, and the strip would have had no target at all there. Handing over the document's
+    // first clip keeps such a test runnable while the refusal stays the tool's own answer — `commandFor`
+    // returns null for a playhead outside the clip on every position-dependent tool.
+    val clipId = atPlayhead ?: state.document.clips.firstOrNull()?.id
     return EditorIntent.ApplyCut(
         tool = tool,
         clipId = requireNotNull(clipId) { "no clip to cut: the document has none at all" },

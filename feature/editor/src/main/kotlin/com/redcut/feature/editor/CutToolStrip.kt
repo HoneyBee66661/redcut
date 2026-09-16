@@ -122,24 +122,31 @@ private data class CutTarget(val trackId: String, val clipId: String)
 /**
  * Which (lane, clip) the Cut tools act on, or null when there is nothing on the timeline to act on.
  *
- * The SELECTED clip wins, and its lane comes from the document — that is the C6 reading, and it is what
- * makes the tools act on what the user is working with rather than on whatever the end-to-end walk finds at
- * the playhead. With nothing selected the playhead decides, which is the behaviour the strip has always
- * had: the strip has to answer *something* before the user has tapped a clip, and "a tool at the playhead"
- * is a question the flat reading can still answer while the timeline's lanes are what the tap clarifies.
+ * The PLAYHEAD still decides the clip — the strip has always meant "the tool at the playhead", and that
+ * contract is kept. What the SELECTION adds is the LANE: with a clip selected, the playhead is read on that
+ * clip's lane rather than on the end-to-end walk. That single narrowing is the whole C6 fix at the UI layer,
+ * and it is why a playhead past the video lane no longer means the music bed underneath it — the tools go
+ * quiet instead, which is the honest answer when the lane the user is working in has nothing there.
  *
- * Its own function rather than three lines inside the composable so the resolution can be read on its own:
- * it is the one place that decides which lane a tool means, and the two callers below are the reason it
- * must be decided once.
+ * With nothing selected the flat reading answers, exactly as before: the strip has to say something before
+ * a clip has been tapped, and "the clip at the playhead" is what it said then.
+ *
+ * The clip is resolved ONCE here and travels in the intent — the command must act on what the button was
+ * enabled for, and a second resolution at the other end could pick a different clip.
  */
 private fun cutTargetIn(
     document: EditDocument,
     selection: Selection,
     playheadUs: Long,
 ): CutTarget? {
-    val selected = (selection as? Selection.Clip)?.clipId
+    val selectedClipId = (selection as? Selection.Clip)?.clipId
         ?.takeIf { document.clipById(it) != null }
-    val clipId = selected ?: document.clipAt(playheadUs)?.id ?: return null
+    val lane = selectedClipId?.let { document.trackIdOf(it) }
+    val clipId = if (lane != null) {
+        document.clipAt(lane, playheadUs)?.id
+    } else {
+        document.clipAt(playheadUs)?.id
+    } ?: return null
     val trackId = document.trackIdOf(clipId) ?: return null
     return CutTarget(trackId, clipId)
 }

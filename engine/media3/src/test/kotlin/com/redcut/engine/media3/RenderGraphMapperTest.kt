@@ -15,6 +15,9 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
+/** Robolectric runs these tests against API 34; file-scoped so the class annotation can name it. */
+private const val ROBOLECTRIC_SDK = 34
+
 /**
  * The graph → Composition mapping, read back off the Media3 values themselves (§12.3's structural
  * half: the preview and the export start from the same graph, so what the export ENCODES is what
@@ -122,7 +125,6 @@ class RenderGraphMapperTest {
     )
 
     private companion object {
-        const val ROBOLECTRIC_SDK = 34
         const val SOURCE_DURATION_US = 10_000_000L
         const val FIRST_US = 2_000_000L
         const val SECOND_US = 3_000_000L

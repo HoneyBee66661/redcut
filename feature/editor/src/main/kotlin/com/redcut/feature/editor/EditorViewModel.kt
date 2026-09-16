@@ -18,6 +18,7 @@ import com.redcut.domain.document.FrameStep
 import com.redcut.domain.document.ImportRejection
 import com.redcut.domain.document.KeyframableProperty
 import com.redcut.domain.document.Keyframe
+import com.redcut.domain.document.MergeTrackClips
 import com.redcut.domain.document.RenameDocument
 import com.redcut.domain.document.ReorderClip
 import com.redcut.domain.document.SetKeyframes
@@ -245,6 +246,21 @@ class EditorViewModel @Inject constructor(
 
             // The Cut stage's tools at the playhead, and the drag that rearranges one lane.
             is EditorIntent.ApplyCut -> applyCut(intent.tool)
+            // The lane merge (§WS E / Task E2-E3), and the one arm here written as a block rather than a
+            // call: it is the fourth `execute`-then-`autosave`-then-`publish` tail in this class, and
+            // detekt counts members against a limit the class is already at — a private `applyMergeTrack`
+            // would have pushed it over for the sake of one line of indirection.
+            //
+            // No availability check before it, unlike `applyCut`: `MergeTrackClips` answers a lane with
+            // nothing to fuse by returning the SAME document, which `execute` records as no change, so a tap
+            // the toolbar should not have offered costs the user nothing. `mergeTrackAvailability` is what
+            // keeps the button from offering it, and both read one rule (`fuseRuns`).
+            is EditorIntent.MergeTrack -> {
+                logger.d(TAG, "merge lane ${intent.trackId}")
+                history.execute(MergeTrackClips(intent.trackId))
+                autosave()
+                publish()
+            }
             is EditorIntent.ApplyReorder -> applyReorder(intent.clipId, intent.toIndex)
 
             // The preview viewport (WS F): the crop and zoom of the SELECTED clip.

@@ -37,18 +37,38 @@ val Track.contentEndUs: Long get() = items.sumOf { it.timelineExtentUs }
  * The result holds CLIPS only, because a gap has no identity to hand back and nothing to draw. What it
  * changes is where the clips after it start, and that is the one line the loop below shares.
  */
-fun Track.positionedClips(): List<PositionedClip> {
+fun Track.positionedClips(): List<PositionedClip> = items.positionedClips()
+
+/**
+ * The same walk over ANY item list.
+ *
+ * Its own overload rather than "put the items on a Track and call the other one", because the caller that
+ * needs it has a list that is deliberately NOT a track's own: [EditDocument.reorderTargetIndex] lays the
+ * lane out with the dragged clip REMOVED — the marker under the finger is where that clip would land among
+ * the others — and a throwaway Track for that would have to invent an id, a kind and every default, and
+ * would answer a different `contentEndUs` than the list it was built from.
+ *
+ * One walk, two entry points: [Track.positionedClips] is this function with a track's own items, which is
+ * what keeps the gap rule in one place instead of two that could drift.
+ */
+fun List<TrackItem>.positionedClips(): List<PositionedClip> {
     val placed = mutableListOf<PositionedClip>()
     var cursor = 0L
-    items.forEach { item ->
+    forEach { item ->
         if (item is Clip) placed += PositionedClip(item, cursor)
         cursor += item.timelineExtentUs
     }
     return placed
 }
 
-/** How much timeline room an item spends: a clip's trimmed length, or a gap's own. */
-private val TrackItem.timelineExtentUs: Long
+/**
+ * How much timeline room an item spends: a clip's trimmed length, or a gap's own.
+ *
+ * `internal` rather than `private` because the layout sums live in two files — this one and
+ * [EditDocument.reorderMarkerUs] — and the alternative is that the second one re-states the rule for
+ * gaps and gets it wrong for the kind nobody has thought about yet.
+ */
+internal val TrackItem.timelineExtentUs: Long
     get() = when (this) {
         is Clip -> timelineDurationUs
         is Gap -> durationUs

@@ -126,4 +126,91 @@ class ReorderTargetTest {
             }
         }
     }
+
+    /**
+     * The same three clips with a 1 s [Gap] between a and b: a(1 s) gap(1 s) b(2 s) c(3 s).
+     *
+     * Built by hand because no command creates a gap yet — which is exactly why the arithmetic is worth
+     * fixing NOW rather than when the first such command lands: the moment it does, every drag on that lane
+     * would draw its marker in the wrong place, and this has to already be right.
+     */
+    private fun gappedDocument() = EditDocument(
+        id = "doc",
+        name = "Doc",
+        sources = listOf(source()),
+        tracks = listOf(
+            Track(
+                id = VIDEO,
+                kind = TrackKind.VIDEO,
+                items = listOf(
+                    clip("a", 1),
+                    Gap(durationUs = oneSecond),
+                    clip("b", 2),
+                    clip("c", 3),
+                ),
+            ),
+        ),
+    )
+
+    @Test
+    fun `a gap moves the drop point with it, so the marker lands where the clip really starts`() {
+        val doc = gappedDocument()
+
+        // c starts at 4 s on this lane (a 1 s + the gap's 1 s + b 2 s), and after a is taken out of the
+        // layout the gap leads, so c starts at 3 s. Both numbers are gap-carrying and neither is 2 s — the
+        // answer a sum over clip durations alone gives.
+        assertThat(doc.reorderMarkerUs(VIDEO, "c", 2)).isEqualTo(4 * oneSecond)
+        assertThat(doc.reorderMarkerUs(VIDEO, "a", 1)).isEqualTo(3 * oneSecond)
+        // Slot 0 is "before b", and on this lane b starts at 1 s because the gap comes FIRST — the marker is
+        // NOT 0 s. That is the model the card prescribes: the gaps keep their place in the layout and the
+        // clips are placed among them, so the front of this lane is the end of its leading gap. Asserted
+        // because 0 s is the answer a reader would assume, and the difference is the whole choice.
+        assertThat(doc.reorderMarkerUs(VIDEO, "a", 0)).isEqualTo(oneSecond)
+        assertThat(doc.reorderTargetIndex(VIDEO, "a", 0L)).isEqualTo(0)
+    }
+
+    @Test
+    fun `a drop inside a gap-length's worth of slack lands one slot earlier than the sum said`() {
+        val doc = gappedDocument()
+
+        // With a dragged out, the others are gap(1 s) b(2 s) c(3 s): b's midpoint is at 2 s and c's at
+        // 4.5 s. A drop at 3.6 s is before c's midpoint, so it belongs in the slot BEFORE c — while the
+        // clip-duration sum puts c's midpoint at 3.5 s and answers the slot after it.
+        assertThat(doc.reorderTargetIndex(VIDEO, "a", 3_600_000L)).isEqualTo(1)
+        assertThat(doc.reorderTargetIndex(VIDEO, "a", 4_600_000L)).isEqualTo(2)
+    }
+
+    @Test
+    fun `the end of the drag is the end of the OTHERS, not of the lane`() {
+        val doc = gappedDocument()
+
+        // The card's warning, as an assertion: the marker for "past everything" is the others' own end
+        // (gap 1 s + b 2 s + c 3 s = 6 s) — NOT the lane's end, which still holds the room the dragged
+        // clip occupies, and not a walk over the track's real items, which has nothing at that index and
+        // would fall back to exactly that longer number.
+        // `contentEndUs` is the LANE's end (Track's), not the document's — which is the point: the lane
+        // still spends the dragged clip's room, and the marker must not follow it there.
+        assertThat(requireNotNull(doc.trackById(VIDEO)).contentEndUs).isEqualTo(7 * oneSecond)
+        assertThat(doc.reorderMarkerUs(VIDEO, "a", 3)).isEqualTo(6 * oneSecond)
+        // The index past everything counts the OTHERS' CLIPS (b and c), not the items: a slot the command
+        // could insert at is a clip's, and a gap has no identity to name.
+        assertThat(doc.reorderTargetIndex(VIDEO, "a", 9 * oneSecond)).isEqualTo(2)
+    }
+
+    @Test
+    fun `a lane with no gaps answers exactly what it answered before gaps existed`() {
+        val doc = document()
+
+        // The walk that gained an overload must not have moved the answers for the documents that already
+        // shipped: with nothing but clips, the cursor lands on the same starts the clip sum produced.
+        assertThat(doc.reorderTargetIndex(VIDEO, "c", 1_400_000L)).isEqualTo(1)
+        assertThat(doc.reorderMarkerUs(VIDEO, "c", 2)).isEqualTo(3 * oneSecond)
+        assertThat(doc.positionedClipsOf(VIDEO).map { it.clip.id to it.startUs })
+            .containsExactly("a" to 0L, "b" to 1 * oneSecond, "c" to 3 * oneSecond)
+            .inOrder()
+    }
+
+    /** The lane's own walk, so the assertion above reads as the production call rather than a bare list. */
+    private fun EditDocument.positionedClipsOf(trackId: String): List<PositionedClip> =
+        requireNotNull(trackById(trackId)).positionedClips()
 }

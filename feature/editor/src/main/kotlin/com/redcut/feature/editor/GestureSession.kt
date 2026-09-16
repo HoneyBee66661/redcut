@@ -4,7 +4,9 @@ import com.redcut.core.common.logging.RedcutLogger
 import com.redcut.domain.document.Clip
 import com.redcut.domain.document.ClipAdjustment
 import com.redcut.domain.document.ClipEdge
+import com.redcut.domain.document.SetTextStyle
 import com.redcut.domain.document.SetTextTransform
+import com.redcut.domain.document.TextSpec
 import com.redcut.domain.document.TrimClip
 import com.redcut.domain.document.UndoStack
 import com.redcut.domain.document.adjust
@@ -69,6 +71,20 @@ internal class GestureSession(
             is EditorIntent.UpdateTextDrag -> updateTextDrag(intent.centerX, intent.centerY)
             EditorIntent.EndTextDrag -> end()
             EditorIntent.CancelTextDrag -> cancel()
+        }
+    }
+
+    /**
+     * The caption restyle's four moments (FR-4.3, J-2). See [applyTextDrag]: the same lifecycle, and the
+     * same two shared closers — a slider drag on a style row previews per frame and commits once, which
+     * is what keeps "Undo Text style" one entry per gesture.
+     */
+    fun applyTextStyle(intent: EditorIntent.TextStyleGesture) {
+        when (intent) {
+            is EditorIntent.BeginTextStyle -> beginTextStyle(intent.effectId, intent.spec)
+            is EditorIntent.UpdateTextStyle -> updateTextStyle(intent.spec)
+            EditorIntent.EndTextStyle -> end()
+            EditorIntent.CancelTextStyle -> cancel()
         }
     }
 
@@ -190,6 +206,38 @@ internal class GestureSession(
                 transform = moved.toTransform(base = caption.transform),
             ),
         )
+        publishState(state())
+    }
+
+    /**
+     * Marks a style row as being dragged, and selects its caption; no command is previewed yet, because a
+     * drag that has not moved a row has changed nothing — the shape [beginAdjust] has, and for the same
+     * reason: previewing the spec the caption already holds would put a no-op on the history the moment
+     * the finger went down.
+     *
+     * The caption is looked up fresh rather than trusted from the intent, the rule [beginTextDrag] keeps:
+     * a caption removed since the tap (an undo, a reopened project) must not open a gesture against
+     * nothing.
+     */
+    private fun beginTextStyle(effectId: String, spec: TextSpec) {
+        val caption = history().current.textOverlayById(effectId) ?: return
+        logger.d(TAG, "style text $effectId")
+        history().preview(SetTextStyle(effectId = caption.id, spec = spec))
+        publishState(
+            state().copy(
+                tool = ToolState.StylingText(effectId),
+                selection = Selection.Text(effectId),
+            ),
+        )
+    }
+
+    /**
+     * One frame of a style drag: preview the whole spec, so the caption follows the row live and the
+     * whole drag lands on the history as ONE entry when the finger lifts.
+     */
+    private fun updateTextStyle(spec: TextSpec) {
+        val styling = (state().tool as? ToolState.StylingText) ?: return
+        history().preview(SetTextStyle(effectId = styling.effectId, spec = spec))
         publishState(state())
     }
 

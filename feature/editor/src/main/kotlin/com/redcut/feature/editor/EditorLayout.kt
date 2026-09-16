@@ -324,7 +324,14 @@ internal fun ColumnScope.BottomToolbar(state: EditorUiState, onIntent: (EditorIn
             when (state.stage) {
                 Stage.Cut -> CutTools(state = state, onIntent = onIntent)
                 Stage.Edit -> Inspector(state = state, onIntent = onIntent)
-                Stage.Effect -> TextTools(state = state, onIntent = onIntent)
+                // The Effect stage's body is its tools and, once a caption is selected, its inspector:
+                // the tool row is how a caption gets INTO the project, the rows under it are how its
+                // words are styled (FR-4.3, J-2). The same Column the Cut stage wraps its strip and its
+                // reason line in.
+                Stage.Effect -> Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
+                    TextTools(state = state, onIntent = onIntent)
+                    TextInspector(state = state, onIntent = onIntent)
+                }
             }
         }
     }

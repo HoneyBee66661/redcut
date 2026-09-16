@@ -62,6 +62,17 @@ sealed interface ToolState {
      * finger is still down.
      */
     data class MovingText(val effectId: String) : ToolState
+
+    /**
+     * A caption's style row is being dragged (FR-4.3, J-2) — the slider's [Adjusting] shape, for an
+     * effect rather than a clip.
+     *
+     * It is here for the reason [Adjusting] is: the document has ALREADY been changed by a preview, so a
+     * screen that did not know a gesture was open could not explain why the caption grew while the finger
+     * was still down. It also carries the same begin-once check the sliders use: the row consults it so a
+     * finger sliding between rows does not fire a begin per frame.
+     */
+    data class StylingText(val effectId: String) : ToolState
 }
 
 /**

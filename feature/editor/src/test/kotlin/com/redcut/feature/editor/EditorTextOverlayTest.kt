@@ -2,7 +2,9 @@ package com.redcut.feature.editor
 
 import com.google.common.truth.Truth.assertThat
 import com.redcut.domain.document.AppliedEffect
+import com.redcut.domain.document.CutTool
 import com.redcut.domain.document.TextOverlayBox
+import com.redcut.domain.document.TextSpec
 import com.redcut.domain.document.textOverlaysAt
 import com.redcut.domain.document.toOverlayBox
 import kotlinx.coroutines.Dispatchers
@@ -243,6 +245,93 @@ class EditorTextOverlayTest {
 
         assertThat(model.state.value.history).isEqualTo(history)
         assertThat(model.captionBox()).isEqualTo(TextOverlayBox.DEFAULT)
+    }
+
+    // --- Styling (FR-4.3's inspector card, J-2) -----------------------------
+
+    @Test
+    fun `a whole style drag is one undo entry labelled Text style`() = runTest(dispatcher) {
+        val (model, captionId) = importedCaption()
+
+        model.onIntent(EditorIntent.BeginTextStyle(captionId, TextSpec(content = "Text", fontSizeSp = 60f)))
+        model.onIntent(EditorIntent.UpdateTextStyle(TextSpec(content = "Text", fontSizeSp = 72f)))
+        model.onIntent(EditorIntent.UpdateTextStyle(TextSpec(content = "Text", fontSizeSp = 64f)))
+        model.onIntent(EditorIntent.EndTextStyle)
+
+        assertThat(model.caption().spec.fontSizeSp).isWithin(TOLERANCE).of(64f)
+        assertThat(model.state.value.history)
+            .isEqualTo(HistoryState.Ready(canUndo = true, canRedo = false, topLabel = "Text style"))
+        assertThat(model.state.value.tool).isEqualTo(ToolState.Idle)
+
+        model.onIntent(EditorIntent.Undo)
+        assertThat(model.caption().spec.fontSizeSp).isWithin(TOLERANCE).of(48f)
+    }
+
+    @Test
+    fun `a style drag selects the caption it styles`() = runTest(dispatcher) {
+        val (model, captionId) = importedCaption()
+
+        // The row and its selection are one thought, the rule BeginAdjust keeps for a slider and its
+        // clip: the inspector draws from the selection, so a row that did not select would style a
+        // caption the inspector is not showing.
+        model.onIntent(EditorIntent.BeginTextStyle(captionId, TextSpec(content = "Text", fontSizeSp = 60f)))
+        model.onIntent(EditorIntent.EndTextStyle)
+
+        assertThat(model.state.value.selection).isEqualTo(Selection.Text(captionId))
+    }
+
+    @Test
+    fun `a style drag for a caption the document does not have is ignored`() = runTest(dispatcher) {
+        val (model, _) = importedCaption()
+        val before = model.state.value
+
+        model.onIntent(
+            EditorIntent.BeginTextStyle(
+                "text-999",
+                TextSpec(content = "Text", fontSizeSp = 60f),
+            ),
+        )
+        model.onIntent(EditorIntent.UpdateTextStyle(TextSpec(content = "Text", fontSizeSp = 64f)))
+        model.onIntent(EditorIntent.EndTextStyle)
+
+        assertThat(model.state.value.document).isEqualTo(before.document)
+        assertThat(model.state.value.history).isEqualTo(before.history)
+        assertThat(model.state.value.selection).isEqualTo(before.selection)
+    }
+
+    @Test
+    fun `selecting a caption by tap names it for the inspector`() = runTest(dispatcher) {
+        val (model, captionId) = importedCaption()
+
+        model.onIntent(EditorIntent.SelectTextOverlay(captionId))
+
+        assertThat(model.state.value.selection).isEqualTo(Selection.Text(captionId))
+    }
+
+    @Test
+    fun `selecting a caption the document does not hold changes nothing`() = runTest(dispatcher) {
+        val (model, _) = importedCaption()
+        val before = model.state.value
+
+        model.onIntent(EditorIntent.SelectTextOverlay("text-999"))
+
+        assertThat(model.state.value.selection).isEqualTo(before.selection)
+    }
+
+    @Test
+    fun `a caption selection survives an undo of an edit that is not the caption`() = runTest(dispatcher) {
+        val (model, captionId) = importedCaption()
+        // One more edit above the caption's, so the undo below rewinds THAT rather than the caption —
+        // the state the reconciler runs in with a caption selection held. The duplicate is a discrete
+        // command like the add is, so the stack now has an entry the caption does not care about.
+        model.onIntent(EditorIntent.SetPlayhead(1_000_000L))
+        model.onIntent(EditorIntent.ApplyCut(CutTool.DUPLICATE))
+        model.onIntent(EditorIntent.SelectTextOverlay(captionId))
+
+        model.onIntent(EditorIntent.Undo)
+
+        assertThat(model.state.value.selection).isEqualTo(Selection.Text(captionId))
+        assertThat(model.caption().spec.content).isEqualTo("Text")
     }
 
     private companion object {

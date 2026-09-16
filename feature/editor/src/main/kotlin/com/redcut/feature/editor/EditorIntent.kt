@@ -5,6 +5,7 @@ import com.redcut.domain.document.ClipAdjustment
 import com.redcut.domain.document.ClipEdge
 import com.redcut.domain.document.CutTool
 import com.redcut.domain.document.FrameStep
+import com.redcut.domain.document.TextSpec
 
 /**
  * Everything the UI can ask the editor to do (spec §7.2).
@@ -75,6 +76,21 @@ sealed interface EditorIntent {
      */
     sealed interface TextGesture : Edit
 
+    /**
+     * The caption restyle's four moments (FR-4.3, J-2). See [TrimGesture] — the same lifecycle, and the
+     * reason is the same one sentence: the inspector rows follow the finger as a preview and the lift
+     * records ONE entry, so dragging the size slider from 48 to 64 does not leave sixteen "Text style"
+     * entries behind it.
+     */
+    sealed interface TextStyleGesture : Edit
+
+    /**
+     * The caption's timeline-edge drag (FR-4.3, task 3.6's card 4). See [TrimGesture] — the same
+     * lifecycle again: an edge follows the finger as a preview and the lift records one entry, labelled
+     * "Text timing" by the command it previews.
+     */
+    sealed interface TextTrimGesture : Edit
+
     /** Show a different stage. Does not touch the document (spec §7.1). */
     data class SelectStage(val stage: Stage) : View
 
@@ -110,6 +126,17 @@ sealed interface EditorIntent {
 
     /** Select a clip (§7.2). */
     data class SelectClip(val clipId: String) : View
+
+    /**
+     * Select a caption (FR-4.3, J-2).
+     *
+     * The twin of [SelectClip] for the effect stack, and a [View] for the same reason: which row the
+     * inspector shows is where the user is LOOKING, not a change to the document, so an undo must not
+     * step through it. The id arrives from a hit test (a tap on the caption in the preview or on its
+     * timeline lane), and a caption the document does not hold is refused rather than shown — the same
+     * stale-id rule [SelectClip]'s handler keeps.
+     */
+    data class SelectTextOverlay(val effectId: String) : View
 
     /** Clear the selection (a tap on empty timeline space). */
     data object ClearSelection : View
@@ -210,6 +237,47 @@ sealed interface EditorIntent {
 
     /** The gesture was abandoned (a press that never moved, a system interruption): the preview rolls back. */
     data object CancelTextDrag : TextGesture
+
+    /**
+     * Start restyling the caption [effectId] (FR-4.3, J-2).
+     *
+     * The WHOLE [spec] arrives on every moment of this family rather than one field at a time: the row
+     * that started the gesture copies the caption's current spec, changes its own field, and sends the
+     * result — so the command the gesture previews is the same whole-value [com.redcut.domain.document
+     * .SetTextStyle] a single tap produces, and the two cannot disagree about what a style edit means.
+     *
+     * Like [BeginAdjust], this also selects the caption: a row and its selection are one thought, and
+     * the inspector draws from the selection.
+     */
+    data class BeginTextStyle(val effectId: String, val spec: TextSpec) : TextStyleGesture
+
+    /** A style row's new value, mid-drag, as the whole spec it results in. */
+    data class UpdateTextStyle(val spec: TextSpec) : TextStyleGesture
+
+    /** The drag ended: the preview becomes one history entry. */
+    data object EndTextStyle : TextStyleGesture
+
+    /** The gesture was abandoned (a system interruption): the preview rolls back. */
+    data object CancelTextStyle : TextStyleGesture
+
+    /**
+     * Start dragging one END of the caption [effectId] on the timeline (FR-4.3's card 4).
+     *
+     * [us] is a TIMELINE time, not a source time — a caption has no source, so the crossing the trim
+     * gesture makes ([EditorIntent.BeginTrim] takes the clip's own source time) does not exist here: the
+     * finger's position IS the value the command needs. The command clamps it, exactly as it clamps the
+     * inspector's fields.
+     */
+    data class BeginTextTrim(val effectId: String, val edge: ClipEdge, val us: Long) : TextTrimGesture
+
+    /** The drag moved: the edge is now at [us] on the timeline. */
+    data class UpdateTextTrim(val us: Long) : TextTrimGesture
+
+    /** The finger lifted: the preview becomes one history entry. */
+    data object EndTextTrim : TextTrimGesture
+
+    /** The gesture was abandoned (a press that never moved, a system interruption): the preview rolls back. */
+    data object CancelTextTrim : TextTrimGesture
 
     /**
      * Set the preview viewport rect centre and zoom (spec UI revision 2, §WS F / Task F3).

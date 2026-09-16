@@ -207,8 +207,8 @@ class EditorViewModel @Inject constructor(
      * and a reader has to hold; a family is a sub-interface of [EditorIntent.Edit], so its branch is one
      * line and the family's own `when` is exhaustive over the members that belong to it.
      *
-     * Six families pass through: the three drag gestures, the Cut stage's tools at the playhead, the drag
-     * that rearranges one lane, and the viewport. The gestures are handed on whole — the four moments of
+     * Four gesture families pass through: the timeline's trim, the sliders, and the caption's two (the
+     * box drag and the style rows). The gestures are handed on whole — the four moments of
      * each, and the preview/commit pairing that makes them one edit, belong to the gesture lifecycle
      * rather than to this class, so they live in [GestureSession] and this class keeps one line each.
      * An import is not a family — one intent, one branch, one handler that was already named for it —
@@ -227,6 +227,7 @@ class EditorViewModel @Inject constructor(
             is EditorIntent.TrimGesture -> gestures.applyTrim(intent)
             is EditorIntent.AdjustGesture -> gestures.applyAdjust(intent)
             is EditorIntent.TextGesture -> gestures.applyTextDrag(intent)
+            is EditorIntent.TextStyleGesture -> gestures.applyTextStyle(intent)
 
             // The Cut stage's tools at the playhead, and the drag that rearranges one lane.
             is EditorIntent.ApplyCut -> applyCut(intent.tool)
@@ -388,6 +389,8 @@ class EditorViewModel @Inject constructor(
 
             is EditorIntent.SelectClip -> selectClip(intent.clipId)
 
+            is EditorIntent.SelectTextOverlay -> selectTextOverlay(intent.effectId)
+
             EditorIntent.ClearSelection ->
                 _state.value = _state.value.copy(selection = Selection.None)
 
@@ -522,6 +525,22 @@ class EditorViewModel @Inject constructor(
             _state.value = _state.value.copy(selection = Selection.Clip(clipId))
         } else {
             logger.d(TAG, "ignored a selection for $clipId: no such clip")
+        }
+    }
+
+    /**
+     * Selects [effectId] if the document actually holds that caption (FR-4.3, J-2).
+     *
+     * The same stale-id rule [selectClip] keeps, and for the same reason: the id comes from a hit test
+     * against a frame the user SAW, and a caption removed between that frame and the tap (an undo, a
+     * reopened project) must not leave the inspector editing an effect that is not there.
+     */
+    private fun selectTextOverlay(effectId: String) {
+        val exists = history.current.textOverlayById(effectId) != null
+        if (exists) {
+            _state.value = _state.value.copy(selection = Selection.Text(effectId))
+        } else {
+            logger.d(TAG, "ignored a selection for $effectId: no such caption")
         }
     }
 

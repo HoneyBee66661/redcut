@@ -322,7 +322,10 @@ internal fun ColumnScope.BottomToolbar(state: EditorUiState, onIntent: (EditorIn
             contentAlignment = Alignment.CenterStart,
         ) {
             when (state.stage) {
-                Stage.Cut -> CutTools(state = state, onIntent = onIntent)
+                // The Cut stage's body is chosen by WHAT IS SELECTED (WS E3): the lane selection gets the
+                // lane's tools, everything else the clip strip. One branch decides it so the two rows can
+                // never both be shown or both be missing.
+                Stage.Cut -> StageTools(state = state, onIntent = onIntent)
                 Stage.Edit -> Inspector(state = state, onIntent = onIntent)
                 // The Effect stage's body is its tools and, once a caption is selected, its inspector:
                 // the tool row is how a caption gets INTO the project, the rows under it are how its

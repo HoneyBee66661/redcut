@@ -186,6 +186,20 @@ sealed interface EditorIntent {
     data class ApplyCut(val tool: CutTool) : Edit
 
     /**
+     * Merge every fusable run of clips on the selected LANE (§WS E / Task E2-E3, FR-2.4).
+     *
+     * The lane selection's first real operation, and the reason it exists: [ApplyCut] acts on the clip at
+     * the playhead, and there was no way to say "do it to this whole lane". The lane id is carried rather
+     * than read off the selection here, for the same reason [ApplyCut] carries the tool: an intent that had
+     * to re-read the state could act on a selection that had moved since the tap.
+     *
+     * There is no tool parameter: `MergeTrackClips` is the only lane operation so far, and a
+     * `TrackTool` enum with one member would be a shape without a second case to justify it. It arrives
+     * when the second operation does.
+     */
+    data class MergeTrack(val trackId: String) : Edit
+
+    /**
      * Move the clip at the playhead to [toIndex] (FR-2.7).
      *
      * The index comes from the document's own arithmetic ([reorderTargetIndex]) rather than from the

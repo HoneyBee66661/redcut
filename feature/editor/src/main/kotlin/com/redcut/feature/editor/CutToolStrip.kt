@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.sp
 import com.redcut.domain.document.CutAvailability
 import com.redcut.domain.document.CutTool
 import com.redcut.domain.document.availabilityFor
+import com.redcut.domain.document.mergeTrackAvailability
 
 /**
  * The Cut tools (FR-2.2–2.6), drawn as a tool strip rather than a row of text buttons.
@@ -88,8 +89,10 @@ internal fun CutTools(state: EditorUiState, onIntent: (EditorIntent) -> Unit) {
                 .padding(horizontal = 8.dp, vertical = TOOL_STRIP_PADDING_V),
         ) {
             rows.forEach { (tool, availability) ->
-                CutToolButton(
-                    tool = tool,
+                ToolButton(
+                    icon = tool.icon(),
+                    contentDescription = tool.label(),
+                    label = tool.label(),
                     enabled = availability is CutAvailability.Available,
                     onClick = { onIntent(EditorIntent.ApplyCut(tool)) },
                 )
@@ -100,7 +103,67 @@ internal fun CutTools(state: EditorUiState, onIntent: (EditorIntent) -> Unit) {
 }
 
 /**
- * One tool of the strip: the icon-above-label column, disabled greyed.
+ * The stage's tool row, chosen by WHAT IS SELECTED (UI revision 2, §WS E / Task E3).
+ *
+ * The plan's E3, and the join between the lane selection and the operations it exists for: a track
+ * selected means the lane-level tools, anything else means the clip-level strip. One place decides that,
+ * so the two rows can never both be offered or both be missing — a screen that branched on the selection
+ * in two places would eventually disagree with itself about which row is showing.
+ *
+ * Only the Cut stage's body goes through here. Edit and Effect have their own bodies (the inspector, the
+ * text tools) and neither has a lane operation to offer yet; when one does, this is the function it joins.
+ */
+@Composable
+internal fun StageTools(state: EditorUiState, onIntent: (EditorIntent) -> Unit) {
+    if (state.selection is Selection.Track) {
+        TrackTools(state = state, onIntent = onIntent)
+    } else {
+        CutTools(state = state, onIntent = onIntent)
+    }
+}
+
+/**
+ * The LANE tools: what can be done to the whole track the user selected (§WS E / Tasks E2-E3).
+ *
+ * One button so far, and deliberately not a `TrackTool` enum with one member: `MergeTrackClips` is the
+ * single lane operation that exists, and the row's shape — same 60 dp column, same always-two-line reason
+ * slot as the clip strip — is what the second one will slot into. `mergeTrackAvailability` is the rule the
+ * button reads and `MergeTrackClips` is the command it dispatches, and both call `fuseRuns`, so the button
+ * cannot offer a merge the command then refuses: the same one-rule-two-readers property the clip strip has
+ * with `availabilityFor`, for the same reason.
+ *
+ * The reason row is drawn even when the button is enabled, for the reason [CutToolReason] gives: it is a
+ * SLOT of fixed height, and a row that appeared and vanished would move the preview above it.
+ */
+@Composable
+internal fun TrackTools(state: EditorUiState, onIntent: (EditorIntent) -> Unit) {
+    val trackId = state.selection.trackIdOrNull
+    val availability = remember(state.document, trackId) {
+        trackId?.let { state.document.mergeTrackAvailability(it) }
+            ?: CutAvailability.Unavailable(NO_LANE_SELECTED)
+    }
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 8.dp, vertical = TOOL_STRIP_PADDING_V),
+        ) {
+            ToolButton(
+                icon = Icons.AutoMirrored.Filled.MergeType,
+                contentDescription = MERGE_LANE_LABEL,
+                label = MERGE_LANE_LABEL,
+                enabled = availability is CutAvailability.Available,
+                onClick = { trackId?.let { onIntent(EditorIntent.MergeTrack(it)) } },
+            )
+        }
+        CutToolReason((availability as? CutAvailability.Unavailable)?.reason.orEmpty())
+    }
+}
+
+/**
+ * One tool of a strip: the icon-above-label column, disabled greyed.
  *
  * The dimensions are the reference build's toolbar button — a 60 dp-wide column, a 40 dp icon tile, an
  * 11 sp `sans-serif-medium` label 4 dp under it — because the restyle is a port of a layout the product
@@ -111,9 +174,19 @@ internal fun CutTools(state: EditorUiState, onIntent: (EditorIntent) -> Unit) {
  * The whole column is the target rather than the icon alone: at 60 dp it is comfortably wider than the
  * 48 dp touch floor, and a tap that lands on the label is a tap on the tool — the mistake a 40 dp icon
  * alone would invite.
+ *
+ * Takes the icon and the two words rather than a [CutTool], which is what lets the lane strip (WS E3)
+ * reuse it without pretending a lane operation is a Cut tool. The clip strip passes its tool's own pair,
+ * so nothing about its rendering changed when this became general.
  */
 @Composable
-private fun CutToolButton(tool: CutTool, enabled: Boolean, onClick: () -> Unit) {
+private fun ToolButton(
+    icon: ImageVector,
+    contentDescription: String,
+    label: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
     Column(
         modifier = Modifier
             .width(TOOL_WIDTH)
@@ -136,8 +209,8 @@ private fun CutToolButton(tool: CutTool, enabled: Boolean, onClick: () -> Unit) 
             contentAlignment = Alignment.Center,
         ) {
             Icon(
-                imageVector = tool.icon(),
-                contentDescription = tool.label(),
+                imageVector = icon,
+                contentDescription = contentDescription,
                 modifier = Modifier.size(TOOL_ICON),
                 tint = if (enabled) {
                     MaterialTheme.colorScheme.onSurface
@@ -147,7 +220,7 @@ private fun CutToolButton(tool: CutTool, enabled: Boolean, onClick: () -> Unit) 
             )
         }
         Text(
-            text = tool.label(),
+            text = label,
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.Medium,
             fontSize = TOOL_LABEL_SP,
@@ -280,3 +353,16 @@ private val TOOL_SHAPE = RoundedCornerShape(8.dp)
 
 /** Material's own disabled opacity — the value a disabled `TextButton`'s content draws at. */
 private const val DISABLED_OPACITY = 0.38f
+
+/** The lane strip's one button word (WS E3). A UI word here, like [CutTool.label] is. */
+private const val MERGE_LANE_LABEL = "Merge lane"
+
+/**
+ * What the lane strip says when the selection names no lane.
+ *
+ * Reachable rather than defensive: `StageTools` chooses the row from a `Selection.Track`, and the
+ * selection can be cleared between the frame that drew the row and the tap that reads it — the same
+ * stale-state window every other id in this screen has. The button is disabled and this is the sentence
+ * that says why, rather than a row that silently does nothing.
+ */
+private const val NO_LANE_SELECTED = "Tap a lane's background to select it, then merge its clips."

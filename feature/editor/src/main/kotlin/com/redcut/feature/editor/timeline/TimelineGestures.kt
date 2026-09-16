@@ -11,6 +11,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.AwaitPointerEventScope
 import androidx.compose.ui.input.pointer.PointerInputChange
+import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.pointerInput
 import com.redcut.core.common.timeline.ClipSpan
 import com.redcut.core.common.timeline.TimelineGeometry
@@ -347,7 +348,9 @@ internal fun Modifier.timelineGestures(
             }
         }
         .pointerInput(rulerHeightPx, textLane?.topPx) {
-            textLaneTrimPress(currentGeometry, rulerHeightPx, currentTextLane, currentTextTrim)
+            awaitEachGesture {
+                textLaneTrimPress(currentGeometry, rulerHeightPx, currentTextLane, currentTextTrim)
+            }
         }
         .pointerInput(rulerHeightPx) {
             reorderDragPress(currentGeometry, rulerHeightPx, currentActions)
@@ -386,20 +389,19 @@ private suspend fun AwaitPointerEventScope.textLaneTrimPress(
     textLane: TextLane?,
     textTrim: TextTrimGestures?,
 ) {
-    awaitEachGesture {
-        // The caption lane's edges, after the clips': a y can only be in one band, so the two trims
-        // never contend for the same press, and the order keeps the clips' behaviour bit-identical to
-        // what it was before the lane existed.
-        textLane?.let { lane ->
-            val trim = textTrim
-            if (trim != null) {
-                textTrimGesture(
-                    geometry = geometry,
-                    rulerHeightPx = rulerHeightPx,
-                    lane = lane,
-                    actions = trim,
-                )
-            }
+    // One gesture per [awaitEachGesture], which the CALL SITE opens — the same shape [trimGesture]
+    // keeps. The caption lane's edges come after the clips': a y can only be in one band, so the two
+    // trims never contend for the same press, and the order keeps the clips' behaviour bit-identical
+    // to what it was before the lane existed.
+    textLane?.let { lane ->
+        val trim = textTrim
+        if (trim != null) {
+            textTrimGesture(
+                geometry = geometry,
+                rulerHeightPx = rulerHeightPx,
+                lane = lane,
+                actions = trim,
+            )
         }
     }
 }
@@ -412,7 +414,7 @@ private suspend fun AwaitPointerEventScope.textLaneTrimPress(
  * its own hit-test rule (the y picks the lane, so a long press in lane 2 with lane 1's clips under the
  * same x must not pick one of those up).
  */
-private suspend fun AwaitPointerEventScope.reorderDragPress(
+private suspend fun PointerInputScope.reorderDragPress(
     geometry: TimelineGeometry,
     rulerHeightPx: Float,
     actions: TimelineGestures,

@@ -1,6 +1,7 @@
 package com.redcut.feature.editor.timeline
 
 import android.graphics.Paint
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -16,8 +17,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.redcut.core.common.timeline.TimelineGeometry
 import com.redcut.domain.document.ClipEdge
+import com.redcut.domain.document.EditDocument
 import com.redcut.feature.editor.EditorIntent
-import com.redcut.feature.editor.TimelineMarks
+import com.redcut.feature.editor.textLaneItems
 
 /**
  * The caption's lane on the timeline (FR-4.3's card 4): a band under the tracks, one item per caption,

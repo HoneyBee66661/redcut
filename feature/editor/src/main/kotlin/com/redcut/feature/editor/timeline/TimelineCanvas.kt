@@ -308,12 +308,15 @@ private fun rememberTimelineActions(
     onIntent: (EditorIntent) -> Unit,
     setZoomPxPerSecond: (Float) -> Unit,
 ): Pair<TimelineGestures, State<ReorderDrag?>> {
-    var reorderDrag by remember { mutableStateOf<ReorderDrag?>(null) }
+    // Held as the State OBJECT, not delegated with `by`: the pair this returns hands the caller the
+    // drag STATE (it reads `reorderDrag.value` when it draws the marker), so it must be the State and
+    // not the unwrapped value — otherwise the marker never recomposes as the drag moves.
+    val reorderDrag = remember { mutableStateOf<ReorderDrag?>(null) }
     val reorderGestures = buildReorderGestures(
         document = document,
         geometry = geometry,
-        current = { reorderDrag },
-        setDrag = { reorderDrag = it },
+        current = { reorderDrag.value },
+        setDrag = { reorderDrag.value = it },
         onIntent = onIntent,
     )
     val actions = timelineGestureHandlers(

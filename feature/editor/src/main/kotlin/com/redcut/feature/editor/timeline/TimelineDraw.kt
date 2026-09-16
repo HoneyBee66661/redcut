@@ -559,7 +559,7 @@ private const val PLAYHEAD_WIDTH_PX = 3f
 
 /** UI revision 1: the line reaches three track-heights down, so it reads over the filmstrip. */
 private const val PLAYHEAD_TRACK_MULTIPLE = 3f
-private const val TRIM_EDGE_PX = 4f
+internal const val TRIM_EDGE_PX = 4f
 private const val REORDER_MARKER_PX = 6f
 
 /**

@@ -2,23 +2,37 @@
 <!--
   :app manifest.
 
-  Deliberately minimal. No permissions yet: importing media goes through the
-  Storage Access Framework (FR-1.1), which needs a document picker, not
-  READ_MEDIA_VIDEO — and asking for a permission the app does not use is how a
-  video editor ends up looking like spyware on the Play listing.
-
-  Phase 0.5 adds the Hilt application class reference and the nav graph host;
-  Phase 4.1 adds the export foreground service with android:foregroundServiceType
-  ="mediaProcessing".
+  Phase 4.1 added the export foreground service (FR-5.10): a `mediaProcessing` service whose
+  whole point is to survive app backgrounding and screen-off while Media3 encodes, with the
+  permissions that type requires. It also carries the notification permission the progress
+  and completion notifications post under (FR-5.9, FR-5.12), and the legacy storage grant
+  MediaStore inserts need on the pre-Q half of minSdk 26 (FR-5.8). Media READS do not live
+  here: the import path goes through SAF (FR-1), which needs no permission at all.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- The export service runs as a foreground service (FR-5.10). The type permission below is
+         what API 34+ requires of `foregroundServiceType="mediaProcessing"`, and the service is
+         killed at start without it. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROCESSING" />
+
+    <!-- Progress and completion notifications (FR-5.9, FR-5.12). The manifest entry is the API 32-
+         declaration; on API 33+ the POST_NOTIFICATIONS grant is a runtime ask, and until it is
+         granted the notifications are silently dropped while the service itself keeps working. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- FR-5.8 on API 26-28 only: inserting a video into MediaStore is a legacy write. API 29+
+         needs nothing — the app owns the row it inserts, and the folder is part of the insert. -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
 
     <application
         android:name=".RedcutApp"
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/Theme.Redcut">
-
         <activity
             android:name=".MainActivity"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
@@ -26,9 +40,17 @@
             android:theme="@style/Theme.Redcut">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
+
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- The export (FR-5.10). exported=false: the only callers are this app — the export
+             controller starts it, and its own notification's Cancel action talks to it. -->
+        <service
+            android:name=".export.ExportService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProcessing" />
     </application>
 
 </manifest>

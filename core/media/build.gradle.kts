@@ -9,9 +9,11 @@
 //
 // Phase 1.11 added one thing that is not a question about a source file: the
 // PreviewRenderer INTERFACE (§8.4, §6.8 rule D6). It is here because the UI has to
-// hold it and a feature may not depend on an engine. It is only the interface —
-// which renders nothing either — and both implementations stay in :engine:media3,
-// so rule D1 is untouched: this module still names no Media3 type.
+// hold it and a feature may not depend on an engine. Phase 4.1 added the export
+// port on the same grounds (ExportController): the sheet starts an export and
+// watches its state, and the service that does the work is reachable from here
+// only as an interface — which is why rule D1 is still untouched: this module
+// names no Media3 type, and both implementations stay in :app and :engine:media3.
 //
 // SKELETON: Phase 0.2 created the module. Phase 1.3 added the probe and the SAF reader
 // (this file's dependencies); Phase 1.4 adds the MediaResourceBroker and thumbnails.

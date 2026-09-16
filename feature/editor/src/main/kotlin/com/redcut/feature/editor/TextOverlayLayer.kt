@@ -212,6 +212,11 @@ private suspend fun AwaitPointerEventScope.captionDragGesture(
         onIntent(EditorIntent.EndTextDrag)
     } else {
         onIntent(EditorIntent.CancelTextDrag)
+        // A tap on a caption is not an edit — but it IS a selection: the inspector's style rows (J-2)
+        // read from the selection, and the tap is how the user points at the caption they mean. Fired
+        // after the cancel so the tool state is closed before the selection moves; the handler refuses
+        // an id the document no longer holds, the stale-id rule the ViewModel keeps.
+        onIntent(EditorIntent.SelectTextOverlay(target.id))
     }
 }
 

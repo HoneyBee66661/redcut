@@ -14,6 +14,16 @@ sealed interface Selection {
 
     /** One clip is selected. Its edges show their trim handles (FR-2.1). */
     data class Clip(val clipId: String) : Selection
+
+    /**
+     * One caption is selected: the inspector's text rows read and write it (FR-4.3, J-2).
+     *
+     * Selected by EFFECT rather than by clip, like [ToolState.MovingText] is — a caption belongs to the
+     * document's effect stack, so there is no clip id to name. The tap that picks the caption up (on the
+     * preview or on its timeline lane) is what selects it, which is why this variant arrived with the
+     * caption features and not with the selection itself.
+     */
+    data class Text(val effectId: String) : Selection
 }
 
 /** The selected clip's id, or null when the selection is not a clip. */

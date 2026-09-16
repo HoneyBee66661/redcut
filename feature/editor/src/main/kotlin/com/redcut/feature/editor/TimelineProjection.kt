@@ -4,8 +4,8 @@ import com.redcut.core.common.timeline.ClipSpan
 import com.redcut.core.common.timeline.ClipTiming
 import com.redcut.core.common.timeline.LaneSpans
 import com.redcut.domain.document.AppliedEffect
-import com.redcut.domain.document.EffectScope
 import com.redcut.domain.document.EditDocument
+import com.redcut.domain.document.EffectScope
 import com.redcut.domain.document.positionedClips
 import com.redcut.feature.editor.timeline.TextLaneItem
 

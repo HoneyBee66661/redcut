@@ -335,19 +335,19 @@ class EditorTextOverlayTest {
     @Test
     fun `a caption selection survives an undo of an edit that is not the caption`() =
         runTest(dispatcher) {
-        val (model, captionId) = importedCaption()
-        // One more edit above the caption's, so the undo below rewinds THAT rather than the caption —
-        // the state the reconciler runs in with a caption selection held. The duplicate is a discrete
-        // command like the add is, so the stack now has an entry the caption does not care about.
-        model.onIntent(EditorIntent.SetPlayhead(1_000_000L))
-        model.onIntent(EditorIntent.ApplyCut(CutTool.DUPLICATE))
-        model.onIntent(EditorIntent.SelectTextOverlay(captionId))
+            val (model, captionId) = importedCaption()
+            // One more edit above the caption's, so the undo below rewinds THAT rather than the caption —
+            // the state the reconciler runs in with a caption selection held. The duplicate is a discrete
+            // command like the add is, so the stack now has an entry the caption does not care about.
+            model.onIntent(EditorIntent.SetPlayhead(1_000_000L))
+            model.onIntent(EditorIntent.ApplyCut(CutTool.DUPLICATE))
+            model.onIntent(EditorIntent.SelectTextOverlay(captionId))
 
-        model.onIntent(EditorIntent.Undo)
+            model.onIntent(EditorIntent.Undo)
 
-        assertThat(model.state.value.selection).isEqualTo(Selection.Text(captionId))
-        assertThat(model.caption().spec.content).isEqualTo("Text")
-    }
+            assertThat(model.state.value.selection).isEqualTo(Selection.Text(captionId))
+            assertThat(model.caption().spec.content).isEqualTo("Text")
+        }
 
     // --- The timeline's text lane (FR-4.3's card 4) -------------------------
 
@@ -402,14 +402,14 @@ class EditorTextOverlayTest {
     @Test
     fun `a text edge dragged past the other end collapses to the caption floor`() =
         runTest(dispatcher) {
-        val (model, captionId) = importedCaption()
+            val (model, captionId) = importedCaption()
 
-        model.onIntent(EditorIntent.BeginTextTrim(captionId, ClipEdge.OUT, 1_000_000L))
-        model.onIntent(EditorIntent.UpdateTextTrim(100_000L))
-        model.onIntent(EditorIntent.EndTextTrim)
+            model.onIntent(EditorIntent.BeginTextTrim(captionId, ClipEdge.OUT, 1_000_000L))
+            model.onIntent(EditorIntent.UpdateTextTrim(100_000L))
+            model.onIntent(EditorIntent.EndTextTrim)
 
-        assertThat(model.caption().timeRange.durationUs).isEqualTo(MIN_TEXT_DURATION_US)
-    }
+            assertThat(model.caption().timeRange.durationUs).isEqualTo(MIN_TEXT_DURATION_US)
+        }
 
     @Test
     fun `a cancelled text edge drag leaves the document and the history untouched`() =
@@ -429,17 +429,17 @@ class EditorTextOverlayTest {
     @Test
     fun `a text edge drag for a caption the document does not have is ignored`() =
         runTest(dispatcher) {
-        val (model, _) = importedCaption()
-        val before = model.state.value
+            val (model, _) = importedCaption()
+            val before = model.state.value
 
-        model.onIntent(EditorIntent.BeginTextTrim("text-999", ClipEdge.IN, 1_000_000L))
-        model.onIntent(EditorIntent.UpdateTextTrim(500_000L))
-        model.onIntent(EditorIntent.EndTextTrim)
+            model.onIntent(EditorIntent.BeginTextTrim("text-999", ClipEdge.IN, 1_000_000L))
+            model.onIntent(EditorIntent.UpdateTextTrim(500_000L))
+            model.onIntent(EditorIntent.EndTextTrim)
 
-        assertThat(model.state.value.document).isEqualTo(before.document)
-        assertThat(model.state.value.history).isEqualTo(before.history)
-        assertThat(model.state.value.tool).isEqualTo(ToolState.Idle)
-    }
+            assertThat(model.state.value.document).isEqualTo(before.document)
+            assertThat(model.state.value.history).isEqualTo(before.history)
+            assertThat(model.state.value.tool).isEqualTo(ToolState.Idle)
+        }
 
     private companion object {
         /** Room for the rounding of a float conversion, and nothing more. */

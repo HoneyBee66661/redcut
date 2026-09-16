@@ -207,11 +207,7 @@ private fun StrokeWidthRow(
  * colour it already had rather than resetting it — the same value a drag would have previewed.
  */
 @Composable
-private fun BackgroundRow(
-    spec: TextSpec,
-    effectId: String,
-    onIntent: (EditorIntent) -> Unit,
-) {
+private fun BackgroundRow(spec: TextSpec, effectId: String, onIntent: (EditorIntent) -> Unit) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -254,11 +250,7 @@ private fun BackgroundRow(
  * the preview draws each value differently, so this row is not decoration the export ignores.
  */
 @Composable
-private fun AlignmentRow(
-    spec: TextSpec,
-    effectId: String,
-    onIntent: (EditorIntent) -> Unit,
-) {
+private fun AlignmentRow(spec: TextSpec, effectId: String, onIntent: (EditorIntent) -> Unit) {
     Column(modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
         Text(text = "Alignment", style = MaterialTheme.typography.labelLarge)
         Row(
@@ -309,11 +301,7 @@ private fun AlignmentRow(
  * schema gains later appears in this row and nowhere else has to learn about it.
  */
 @Composable
-private fun FontRow(
-    spec: TextSpec,
-    effectId: String,
-    onIntent: (EditorIntent) -> Unit,
-) {
+private fun FontRow(spec: TextSpec, effectId: String, onIntent: (EditorIntent) -> Unit) {
     Column(modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
         Text(text = "Font", style = MaterialTheme.typography.labelLarge)
         Row(

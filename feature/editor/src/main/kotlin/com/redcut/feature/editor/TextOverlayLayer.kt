@@ -31,8 +31,8 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.redcut.domain.document.TextFontFace
 import com.redcut.domain.document.TextAlignment
+import com.redcut.domain.document.TextFontFace
 import com.redcut.domain.document.TextOverlayBox
 import com.redcut.domain.document.TextSpec
 import com.redcut.domain.document.TimeRange

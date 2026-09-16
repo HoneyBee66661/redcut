@@ -2,12 +2,16 @@ package com.redcut.engine.media3
 
 import androidx.annotation.OptIn
 import androidx.media3.common.C
+import androidx.media3.common.Effect
 import androidx.media3.common.MediaItem
 import androidx.media3.common.audio.SpeedProvider
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.effect.Presentation
 import androidx.media3.transformer.Composition
 import androidx.media3.transformer.EditedMediaItem
 import androidx.media3.transformer.EditedMediaItemSequence
+import androidx.media3.transformer.Effects
+import com.redcut.domain.render.OutputSpec
 import com.redcut.domain.render.RenderGraph
 import com.redcut.domain.render.RenderLayer
 
@@ -25,7 +29,9 @@ import com.redcut.domain.render.RenderLayer
  * Mapped, per video layer: the source file, the **source range** it reads (`sourceRange`, carried
  * exactly — Media3's clipping setters take microseconds, so a trim is not rounded to the platform's
  * millisecond unit), the **timeline duration** the layer occupies (`timeRange`), the clip's speed, and
- * audio removed for a layer the graph reports as silent.
+ * audio removed for a layer the graph reports as silent. Since Phase 4.2 the export path also maps the
+ * graph's *output geometry* ([outputVideoEffects]) — the one Media3 effect this file constructs, kept
+ * here because §8.2's mapping table puts `OutputSpec` on this side of the seam.
  *
  * Not mapped yet, and named here rather than discovered later: `RenderLayer.Video.transform`,
  * `.keyframes`, `.effects`, `.reverse`, `.fades`, the `Transition`s, and the `Text`/`Image` overlay
@@ -55,13 +61,39 @@ internal object RenderGraphMapper {
      *
      * One sequence: MVP is a single video track (FR-2), and the spec's own mapping table (§8.2) makes
      * "ordered clips" one `EditedMediaItemSequence`.
+     *
+     * [itemVideoEffects] is the per-item video effect list the export path fills in — today the
+     * output geometry ([outputVideoEffects]); the preview path passes nothing and renders at the
+     * graph's own geometry. Per ITEM rather than on the `Composition.Builder`, because the sequence
+     * is what the spec's mapping table (§8.2) puts effects against and because a composition-level
+     * effect would also touch the overlay sequences when those arrive.
      */
-    fun toComposition(graph: RenderGraph): Composition {
+    fun toComposition(
+        graph: RenderGraph,
+        itemVideoEffects: List<Effect> = emptyList(),
+    ): Composition {
         val video = EditedMediaItemSequence.withAudioAndVideoFrom(
-            graph.videoLayers.map { toEditedMediaItem(it) },
+            graph.videoLayers.map { toEditedMediaItem(it, itemVideoEffects) },
         )
         return Composition.Builder(video).build()
     }
+
+    /**
+     * The video effects that render the graph at [spec]'s geometry: one [Presentation] scaling every
+     * frame into the target frame with the aspect kept (letterboxed, never stretched — FR-5.7 makes
+     * the orientation follow the canvas, and a stretched frame would betray it).
+     *
+     * This is the `OutputSpec` row of the spec's own mapping table (§8.2): the export's target frame
+     * is a property of the compiled graph (`graph.output`), translated HERE and nowhere else, so the
+     * export's frames and the preview's come from the same mapping (§12.3).
+     */
+    fun outputVideoEffects(spec: OutputSpec): List<Effect> = listOf(
+        Presentation.createForWidthAndHeight(
+            spec.width,
+            spec.height,
+            Presentation.LAYOUT_SCALE_TO_FIT,
+        ),
+    )
 
     /**
      * One video layer as an `EditedMediaItem`.
@@ -71,7 +103,10 @@ internal object RenderGraphMapper {
      * spends on this clip, and that is the number Media3 needs. Deriving it here from the source range
      * divided by the speed would be a second implementation of arithmetic the graph has already done.
      */
-    private fun toEditedMediaItem(layer: RenderLayer.Video): EditedMediaItem {
+    private fun toEditedMediaItem(
+        layer: RenderLayer.Video,
+        itemVideoEffects: List<Effect>,
+    ): EditedMediaItem {
         val item = MediaItem.Builder()
             .setUri(layer.source.uri)
             .setClippingConfiguration(
@@ -82,11 +117,15 @@ internal object RenderGraphMapper {
             )
             .build()
 
-        return EditedMediaItem.Builder(item)
+        val builder = EditedMediaItem.Builder(item)
             .setDurationUs(layer.timeRange.durationUs)
             .setSpeed(speedProvider(layer.speed))
             .setRemoveAudio(layer.audio.isSilent)
-            .build()
+        // Unset rather than an EMPTY Effects: the builder's default IS the empty set, and
+        // writing it again would make "no effects" a distinction the item carries and the
+        // parity test would have to argue about.
+        if (itemVideoEffects.isNotEmpty()) builder.setEffects(Effects(emptyList(), itemVideoEffects))
+        return builder.build()
     }
 
     /**

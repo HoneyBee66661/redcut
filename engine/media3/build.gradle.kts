@@ -8,7 +8,9 @@
 // Phase 1.11 landed the preview half: RenderGraphMapper, CompositionPlayerRenderer and
 // the ExoPlayerRenderer fallback, behind the PreviewRenderer interface that :core:media
 // declares (the UI holds the interface and may not see this module — §6.8 rule D6, with
-// §4.1 rule 2 forbidding a feature -> engine edge). Transformer integration is Phase 4.2.
+// §4.1 rule 2 forbidding a feature -> engine edge). Phase 4.2 landed the export half:
+// Media3GraphExporter (Transformer, through the broker's encoder slot) and the output
+// geometry mapping in RenderGraphMapper.
 plugins {
     id("redcut.android.library")
 }
@@ -36,4 +38,12 @@ dependencies {
     implementation(libs.androidx.media3.effect)
     implementation(libs.androidx.media3.common)
     implementation(libs.androidx.media3.ui)
+
+    // The mapper's output is asserted as CONSTRUCTED Media3 values (the structural half of §12.3),
+    // and a MediaItem parses its Uri at construction — which needs the Android implementation
+    // Robolectric provides. JUnit 4 rather than JUnit 5 because that is what Robolectric's runner
+    // drives; the domain modules' JUnit 5 tier is untouched.
+    testImplementation(libs.junit)
+    testImplementation(libs.truth)
+    testImplementation(libs.robolectric)
 }

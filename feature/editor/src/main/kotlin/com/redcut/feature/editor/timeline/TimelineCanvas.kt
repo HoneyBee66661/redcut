@@ -155,16 +155,17 @@ internal fun TimelineCanvas(
         // screen: its 3× height crosses this band the same way it crosses the tracks, and a lane drawn
         // after it would cut the line in two (FR-4.3's card 4: one caption per item, edges draggable,
         // body tappable).
+        val marks = timelineMarks(document, playheadUs, selection, tool, reorderDrag)
         drawTextLane(
             lane = textLane,
             geometry = layer.geometry,
             paint = paint,
-            marks = timelineMarks(document, playheadUs, selection, tool, reorderDrag),
+            marks = marks,
         )
         drawTimeline(
             layer = layer,
             paint = paint,
-            marks = timelineMarks(document, playheadUs, selection, tool, reorderDrag),
+            marks = marks,
         )
     }
 }

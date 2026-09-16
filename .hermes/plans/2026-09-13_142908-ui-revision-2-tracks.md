@@ -278,8 +278,17 @@ lane's background), `TimelineCanvas.kt`.
 
 **Objective:** trimming, reorder and selection resolve to a (trackId, clipId) pair.
 
-**Files:** `TimelineGeometry.hitTest`, `TimelineGestures.kt`, `EditorIntent.kt` (`SelectClip(trackId, clipId)`,
-`ApplyCut(trackId, tool, clipId)`).
+**Files:** `TimelineGeometry.hitTest` (landed: the hit resolves the lane from `y` first, PR #45/#46),
+`TimelineGestures.kt`, `EditorIntent.kt`, `CutTools.kt` (the domain's lane-scoped reading), `CutToolStrip.kt`.
+
+**Landed API, which differs from this plan's sketch and the difference is deliberate:** the plan asked for
+`SelectClip(trackId, clipId)` and `ApplyCut(trackId, tool, clipId)`. `ApplyCut` shipped as
+`(tool, clipId)` and `SelectClip` is unchanged, because a clip is on exactly ONE lane and
+`EditDocument.trackIdOf` is the document's own answer to which — a `trackId` in the payload would be a
+second copy of a fact that already has one authority, and the two could disagree. What the lane DOES need
+is to be spent where the end-to-end reading used to leak in, and that is the domain: `clipAt(trackId, …)`,
+`offsetIntoClip(trackId, …)`, `availabilityFor(tool, trackId, clipId, …)` and
+`commandFor(tool, trackId, clipId, …)`, with the playhead-addressed versions kept as thin forwards.
 
 ---
 

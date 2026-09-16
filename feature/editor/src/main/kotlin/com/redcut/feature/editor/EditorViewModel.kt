@@ -12,7 +12,6 @@ import com.redcut.core.media.PreviewState
 import com.redcut.core.media.SourceReadResult
 import com.redcut.domain.document.Clip
 import com.redcut.domain.document.CompoundCommand
-import com.redcut.domain.document.CutTool
 import com.redcut.domain.document.EditDocument
 import com.redcut.domain.document.FrameStep
 import com.redcut.domain.document.ImportRejection
@@ -245,7 +244,7 @@ class EditorViewModel @Inject constructor(
             is EditorIntent.TextTrimGesture -> textGestures.applyTextTrim(intent)
 
             // The Cut stage's tools at the playhead, and the drag that rearranges one lane.
-            is EditorIntent.ApplyCut -> applyCut(intent.tool)
+            is EditorIntent.ApplyCut -> applyCut(intent)
             // The lane merge (§WS E / Task E2-E3), and the one arm here written as a block rather than a
             // call: it is the fourth `execute`-then-`autosave`-then-`publish` tail in this class, and
             // detekt counts members against a limit the class is already at — a private `applyMergeTrack`
@@ -527,26 +526,41 @@ class EditorViewModel @Inject constructor(
     }
 
     /**
-     * Runs a Cut tool at the playhead (FR-2.2–2.6).
+     * Runs a Cut tool on the clip the strip named (FR-2.2–2.6, WS C6).
      *
      * The document decides everything: `commandFor` returns null exactly when the tool is not
      * available, so this handler has no rules of its own to keep in step with the domain — and the UI
      * asks `availabilityFor` the same question to decide whether to enable the button. One rule, two
      * readers.
      *
-     * A discrete command rather than a preview: unlike a trim drag, a cut happens once and is either
-     * wanted or undone, so it goes straight onto the stack as one entry (§7.3's "Undo Split").
+     * The command is built from the CARRIED clip rather than from the playhead alone: the playhead is one
+     * number while the timeline has more than one lane, so a command built from it can land on a clip of
+     * another lane that merely sits at the same place in the end-to-end reading (the music bed under the
+     * picture). The LANE is not in the payload — a clip is on exactly one lane, and `trackIdOf` is the
+     * document's own answer to which — so this is the one lookup that turns the payload into the pair the
+     * command needs. The playhead is still read: it says WHERE inside the clip a split lands.
      */
-    private fun applyCut(tool: CutTool) {
-        val command = history.current.commandFor(tool, _state.value.playheadUs) { ids.next() }
+    private fun applyCut(intent: EditorIntent.ApplyCut) {
+        val trackId = history.current.trackIdOf(intent.clipId)
+        if (trackId == null) {
+            logger.d(TAG, "ignored a cut for ${intent.clipId}: it is on no lane")
+            return
+        }
+        val command = history.current.commandFor(
+            tool = intent.tool,
+            trackId = trackId,
+            clipId = intent.clipId,
+            playheadUs = _state.value.playheadUs,
+        ) { ids.next() }
         if (command == null) {
             logger.d(
                 TAG,
-                "cut ${tool.name.lowercase()} is not available at ${_state.value.playheadUs}",
+                "cut ${intent.tool.name.lowercase()} is not available " +
+                    "at ${_state.value.playheadUs}",
             )
             return
         }
-        logger.d(TAG, "cut ${tool.name.lowercase()}")
+        logger.d(TAG, "cut ${intent.tool.name.lowercase()}")
         history.execute(command)
         autosave()
         publish()

@@ -227,4 +227,117 @@ class CutToolsTest {
     }
 
     private fun EditDocument.timelineDurationOfClips(): Long = clips.sumOf { it.timelineDurationUs }
+
+    // --- The lane-scoped reading (WS C6's remaining half) --------------------
+
+    /**
+     * A project with a VIDEO lane 0-6 s and an AUDIO lane 0-10 s.
+     *
+     * The two lanes overlap in time, which is the whole reason this section exists: the audio lane is a
+     * music bed that plays UNDER the picture (FR-1.6), so the end-to-end reading of [EditDocument.timeline]
+     * puts its clips at 6-16 s — positions no user ever sees.
+     */
+    private fun twoLanes() = EditDocument(
+        id = "doc",
+        name = "Doc",
+        sources = listOf(source()),
+        tracks = listOf(
+            videoTrack(
+                clip("v1", 0L, 4 * oneSecond),
+                clip("v2", 4 * oneSecond, 6 * oneSecond),
+            ),
+            Track(
+                id = Track.AUDIO_ID,
+                kind = TrackKind.AUDIO,
+                items = listOf(clip("a1", 0L, 10 * oneSecond)),
+            ),
+        ),
+    )
+
+    @Test
+    fun `the flat reading attributes a playhead past the video lane to the audio clip`() {
+        // The defect this half of C6 closes, stated as an assertion so nobody has to rediscover it:
+        // 7 s is past the video lane's end and inside nothing the user sees — but the flat reading lays
+        // the audio lane after the video one, so it answers the music bed. A cut offered from here would
+        // act on a lane the user is not looking at.
+        assertThat(twoLanes().clipAt(7 * oneSecond)?.id).isEqualTo("a1")
+    }
+
+    @Test
+    fun `the lane-scoped reading says there is no clip there on the video lane`() {
+        val doc = twoLanes()
+
+        assertThat(doc.clipAt(VIDEO, 7 * oneSecond)).isNull()
+        // And the other lane answers for itself, at the position it actually occupies.
+        assertThat(doc.clipAt(Track.AUDIO_ID, 7 * oneSecond)?.id).isEqualTo("a1")
+        assertThat(doc.clipAt(VIDEO, 5 * oneSecond)?.id).isEqualTo("v2")
+    }
+
+    @Test
+    fun `a cut on the video lane refuses where the flat reading would have allowed it`() {
+        // The user-visible consequence: with the playhead at 7 s the strip must not offer a split of the
+        // audio clip, because the tap came from the video lane.
+        val command = twoLanes().commandFor(
+            tool = CutTool.CUT_LEFT,
+            trackId = VIDEO,
+            clipId = "v2",
+            playheadUs = 7 * oneSecond,
+        ) { "unused" }
+
+        // v2 ends at 6 s, so the playhead is past it: the honest answer is the boundary refusal, not a
+        // command that cuts a clip the finger never touched.
+        assertThat(command).isNull()
+        assertThat(twoLanes().availabilityFor(CutTool.CUT_LEFT, VIDEO, "v2", 7 * oneSecond))
+            .isInstanceOf(CutAvailability.Unavailable::class.java)
+    }
+
+    @Test
+    fun `the lane-scoped offset is measured on the lane, not on the end-to-end sum`() {
+        // The arithmetic half of the fix: the flat offset for a clip on the second lane carries the first
+        // lane's whole length, so the two readings disagree by exactly the video lane's 6 s here.
+        val doc = twoLanes()
+
+        assertThat(doc.offsetIntoClip(Track.AUDIO_ID, "a1", 7 * oneSecond)).isEqualTo(7 * oneSecond)
+        assertThat(doc.offsetIntoClip("a1", 7 * oneSecond)).isEqualTo(oneSecond)
+    }
+
+    @Test
+    fun `a lane-scoped command is built from the pair, and its split mints one id`() {
+        var minted = 0
+        val command = twoLanes().commandFor(
+            tool = CutTool.SPLIT,
+            trackId = VIDEO,
+            clipId = "v2",
+            playheadUs = 5 * oneSecond,
+        ) {
+            minted++
+            "v2-second-half"
+        }
+
+        assertThat(command).isEqualTo(
+            SplitClip(
+                trackId = VIDEO,
+                clipId = "v2",
+                // v2 covers 4-6 s of the SOURCE, and the playhead is 1 s into it: the split point is 5 s
+                // of the source, not 1 s — the offset is timeline time and the command takes source time,
+                // which is the clip's own mapping and stays in one place.
+                atSourceUs = 5 * oneSecond,
+                newClipId = "v2-second-half",
+            ),
+        )
+        assertThat(minted).isEqualTo(1)
+    }
+
+    @Test
+    fun `delete on a named lane does not need the playhead to be on the clip`() {
+        // Deliberate, and different from the flat reading's PLAYHEAD_PAST_END: the clip is NAMED here, so
+        // "delete this one" is a complete instruction. The playhead's position is what the playhead-based
+        // reading needs to discover the clip; a lane-scoped caller has already said which clip it means.
+        val doc = twoLanes()
+
+        assertThat(doc.availabilityFor(CutTool.DELETE, VIDEO, "v1", 9 * oneSecond))
+            .isEqualTo(CutAvailability.Available)
+        assertThat(doc.commandFor(CutTool.DELETE, VIDEO, "v1", 9 * oneSecond) { "unused" })
+            .isEqualTo(DeleteClip(VIDEO, "v1"))
+    }
 }

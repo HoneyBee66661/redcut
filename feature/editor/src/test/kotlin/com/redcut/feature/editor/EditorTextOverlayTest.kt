@@ -340,7 +340,7 @@ class EditorTextOverlayTest {
             // the state the reconciler runs in with a caption selection held. The duplicate is a discrete
             // command like the add is, so the stack now has an entry the caption does not care about.
             model.onIntent(EditorIntent.SetPlayhead(1_000_000L))
-            model.onIntent(EditorIntent.ApplyCut(CutTool.DUPLICATE))
+            model.onIntent(model.cutIntent(CutTool.DUPLICATE))
             model.onIntent(EditorIntent.SelectTextOverlay(captionId))
 
             model.onIntent(EditorIntent.Undo)

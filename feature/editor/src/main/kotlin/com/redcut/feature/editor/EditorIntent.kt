@@ -176,14 +176,21 @@ sealed interface EditorIntent {
     data object CancelTrim : TrimGesture
 
     /**
-     * Run a Cut tool at the playhead (FR-2.2–2.6).
+     * Run a Cut tool at the playhead, on the clip the user is working with (FR-2.2–2.6, WS C6).
      *
      * One intent for six tools, because they differ only in which command the document produces: the
      * availability rules and the command construction both live in the domain, next to the commands
      * they guard. A screen that decided what a tool meant would be a second place for those rules to
      * drift.
+     *
+     * It carries the CLIP the strip resolved rather than leaving the command to be built from the playhead
+     * alone. The playhead is one number while the timeline has more than one lane, so a command built from
+     * it can land on a clip of another lane that merely sits at the same place in the end-to-end reading —
+     * the music bed under the picture is exactly that case. The LANE is deliberately NOT in the payload: a
+     * clip is on exactly one lane and `trackIdOf` is the document's answer to which, so carrying it here
+     * would be a second copy of a fact that has one authority.
      */
-    data class ApplyCut(val tool: CutTool) : Edit
+    data class ApplyCut(val tool: CutTool, val clipId: String) : Edit
 
     /**
      * Merge every fusable run of clips on the selected LANE (§WS E / Task E2-E3, FR-2.4).

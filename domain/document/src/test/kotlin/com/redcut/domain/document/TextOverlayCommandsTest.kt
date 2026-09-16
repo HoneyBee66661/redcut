@@ -203,7 +203,7 @@ class TextOverlayCommandsTest {
     }
 
     @Test
-    fun `a move or a retime addressed to an effect that is not a caption is refused`() {
+    fun `a move a retime or a restyle addressed to an effect that is not a caption is refused`() {
         val doc = sampleDocument().copy(
             effects = listOf(
                 AppliedEffect.Lut("l1", EffectScope.Document, TimeRange(0L, SEC), LutRef("x")),
@@ -213,6 +213,7 @@ class TextOverlayCommandsTest {
         assertThat(SetTextTransform("l1", TextOverlayBox.DEFAULT.toTransform()).apply(doc))
             .isEqualTo(doc)
         assertThat(SetTextRange("l1", 0L, SEC).apply(doc)).isEqualTo(doc)
+        assertThat(SetTextStyle("l1", TextSpec("word")).apply(doc)).isEqualTo(doc)
     }
 
     // --- Retiming (FR-4.3's start and end) ---------------------------------
@@ -279,6 +280,77 @@ class TextOverlayCommandsTest {
         stack.execute(SetTextRange("t1", 0L, 2 * SEC))
 
         assertThat(stack.canUndo).isFalse()
+    }
+
+    // --- Styling (FR-4.3's font, size, colour, stroke, background, alignment) ---
+
+    @Test
+    fun `the style fields default so a caption written before them keeps its meaning`() {
+        // The additive rule, read from the value side: every style field reconstructs the caption the
+        // preview drew before the field existed — no stroke, no background, the default face — so an old
+        // project decodes to the same pixels it was saved with.
+        val spec = TextSpec("a caption")
+
+        assertThat(spec.strokeWidthSp).isEqualTo(0f)
+        assertThat(spec.backgroundArgb).isNull()
+        assertThat(spec.font).isEqualTo(TextFontFace.DEFAULT)
+    }
+
+    @Test
+    fun `a zero stroke width is legal and a negative one is not a spec at all`() {
+        // 0 is "no stroke" — the default — and the one value below it is a typo, not a drawing
+        // instruction. The boundary is where the field's meaning turns over, so it is the boundary
+        // asserted here.
+        assertThat(TextSpec("a caption", strokeWidthSp = 0f).strokeWidthSp).isEqualTo(0f)
+
+        org.junit.jupiter.api.assertThrows<IllegalArgumentException> {
+            TextSpec("a caption", strokeWidthSp = -1f)
+        }
+    }
+
+    @Test
+    fun `styling a caption replaces its spec and nothing else about it`() {
+        val doc = documentWithCaption()
+        val before = doc.captionAt("t1")
+        val styled = TextSpec(
+            content = "a caption",
+            fontSizeSp = 64f,
+            colorArgb = 0xFFFFEB3B.toInt(),
+            strokeWidthSp = 2f,
+            strokeColorArgb = 0xFF000000.toInt(),
+            backgroundArgb = 0x99000000.toInt(),
+            font = TextFontFace.SERIF,
+        )
+
+        val after = SetTextStyle("t1", styled).apply(doc).captionAt("t1")
+
+        assertThat(after.spec).isEqualTo(styled)
+        // The style is the words' presentation, not the words' identity or placement: a restyle must not
+        // be a move or a retime by accident.
+        assertThat(after.id).isEqualTo("t1")
+        assertThat(after.transform).isEqualTo(before.transform)
+        assertThat(after.timeRange).isEqualTo(before.timeRange)
+        assertThat(after.scope).isEqualTo(before.scope)
+        assertThat(after.enabled).isTrue()
+    }
+
+    @Test
+    fun `a style that asks for the style the caption holds records nothing`() {
+        // The last frames of a slider drag send the same value repeatedly; each of them changing nothing
+        // is what keeps one gesture to one undo entry — the same rule the move and retime commands keep.
+        val stack = UndoStack(documentWithCaption())
+        val current = stack.current.captionAt("t1").spec
+
+        stack.execute(SetTextStyle("t1", current))
+
+        assertThat(stack.canUndo).isFalse()
+    }
+
+    @Test
+    fun `styling an unknown caption is a no-op rather than an error`() {
+        val doc = documentWithCaption()
+
+        assertThat(SetTextStyle("missing", TextSpec("word")).apply(doc)).isEqualTo(doc)
     }
 
     // --- What the preview draws (FR-4.3) -----------------------------------

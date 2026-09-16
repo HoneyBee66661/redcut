@@ -74,16 +74,17 @@ class CommandTargetsTest {
         // a no-op — so there is no lane whose CONTENTS it could disturb, and contents are the only
         // thing the lock protects. It is the same answer AddSource gives, for the same shape of reason.
         //
-        // The three caption commands are the same claim about a different thing: the effect stack is not
+        // The caption commands are the same claim about a different thing: the effect stack is not
         // a lane either (FR-4.3). A caption lives on the document, so there is no lane whose contents a
-        // move or a retime could disturb — and reporting one would claim an address these commands never
-        // write to.
+        // move, a retime or a restyle could disturb — and reporting one would claim an address these
+        // commands never write to.
         assertEquals(
             listOf(
                 "AddSource",
                 "AddTextOverlay",
                 "AddTrack",
                 "RenameDocument",
+                "SetTextStyle",
                 "SetTextRange",
                 "SetTextTransform",
             ),
@@ -180,10 +181,10 @@ class CommandTargetsTest {
          *
          * The caption is added with the command that adds one rather than written into `sampleDocument()`,
          * because that fixture is shared with every other suite in this module and a caption in it would
-         * be a caption in all of them. It is here because two rows below CHANGE a caption — move it,
-         * retime it — and `a lock on a lane a command does not touch does not stop it` requires every
-         * lane-free command to actually change the sample. A command that no-ops on it would pass that
-         * check by not being a command at all.
+         * be a caption in all of them. It is here because the rows below CHANGE a caption — move it,
+         * retime it, restyle it — and `a lock on a lane a command does not touch does not stop it`
+         * requires every lane-free command to actually change the sample. A command that no-ops on it
+         * would pass that check by not being a command at all.
          */
         val SAMPLE: EditDocument = AddTextOverlay(
             effectId = TEXT_ID,
@@ -274,6 +275,7 @@ class CommandTargetsTest {
             "SetReverse" to Expectation(SetReverse(VIDEO, "c1", true), ON_VIDEO),
             "SetSpeed" to Expectation(SetSpeed(VIDEO, "c1", ClipRanges.SPEED_MAX), ON_VIDEO),
             "SetTextRange" to Expectation(SetTextRange(TEXT_ID, 0L, 2 * SEC), NO_LANES),
+            "SetTextStyle" to Expectation(SetTextStyle(TEXT_ID, TextSpec("caption", 64f)), NO_LANES),
             "SetTextTransform" to Expectation(
                 SetTextTransform(TEXT_ID, MOVED_CAPTION_BOX),
                 NO_LANES,

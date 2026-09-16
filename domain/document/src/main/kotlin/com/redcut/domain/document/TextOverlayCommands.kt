@@ -1,7 +1,7 @@
 package com.redcut.domain.document
 
 /**
- * The caption commands (FR-4.3, spec task 3.6): add a text overlay, move it, retime it.
+ * The caption commands (FR-4.3, spec task 3.6): add a text overlay, move it, retime it, restyle it.
  *
  * ### Why a caption is a command at all
  *
@@ -10,13 +10,13 @@ package com.redcut.domain.document
  * reaches for `EditDocument.copy(effects = …)` at a call site, and the internal writer the commands share
  * is the only thing that touches the stack.
  *
- * ### Three commands rather than one "edit the caption"
+ * ### Four commands rather than one "edit the caption"
  *
- * Because the three edits have three different gestures behind them — a button, a drag on the preview, and
- * (the inspector's card) a pair of timing fields — and one command per gesture is what makes each history
- * entry say what the user did: "Undo Add text", "Undo Move text", "Undo Text timing". A single command
- * carrying every field would label all three the same and make an undo of a drag look like an undo of the
- * caption.
+ * Because the four edits have four different gestures behind them — a button, a drag on the preview, a
+ * drag on the timeline's edges, and the inspector's style rows — and one command per gesture is what
+ * makes each history entry say what the user did: "Undo Add text", "Undo Move text", "Undo Text timing",
+ * "Undo Text style". A single command carrying every field would label all four the same and make an
+ * undo of a drag look like an undo of the caption.
  *
  * ### Document-scoped, always, and therefore no lane
  *
@@ -26,10 +26,10 @@ package com.redcut.domain.document
  * times itself against that shot; that is a different feature and it will arrive as its own command with
  * its own scope rather than as a flag on this one.
  *
- * So all three report [EditCommand.touchedTrackIds] EMPTY, and that is a claim rather than a default: the
+ * So all of them report [EditCommand.touchedTrackIds] EMPTY, and that is a claim rather than a default: the
  * effect stack is not a lane, so there is no lane whose CONTENTS these commands could disturb — and
  * contents are the only thing a lock protects. It is the same answer [AddTrack] gives for the same shape
- * of reason, and `CommandTargetsTest` names the three of them among the lane-free commands on purpose.
+ * of reason, and `CommandTargetsTest` names them among the lane-free commands on purpose.
  */
 
 /**
@@ -150,6 +150,35 @@ data class SetTextRange(val effectId: String, val startUs: Long, val endUs: Long
         return doc.withEffect(caption.copy(timeRange = range))
     }
 
+    override fun touchedTrackIds(document: EditDocument): Set<String> = emptySet()
+}
+
+/**
+ * Restyles a caption (FR-4.3): font, size, colour, stroke, background, alignment — the inspector card's
+ * rows, each of which lands here as the whole new [TextSpec].
+ *
+ * ### The whole spec arrives, and that is why it is comparable
+ *
+ * A row carries ONE field of the spec, but the command takes the WHOLE thing — the row copies the caption's
+ * current spec and changes its own field — rather than a field-and-value pair. The reason is the one
+ * [SetTextTransform] documents for carrying the whole box: a command that meant "set size to 64" could
+ * not be compared, replayed or asserted on without knowing which field of a five-field spec it touched,
+ * and a replay of two overlapping row edits would apply them in an order the user never made. Whole
+ * values compose by replacement, which is what the preview/commit gesture pipeline needs.
+ *
+ * A spec the caption already holds is refused, so the last frames of a slider drag against the same value
+ * record nothing rather than a "Text style" entry that changed no pixels.
+ */
+data class SetTextStyle(val effectId: String, val spec: TextSpec) : EditCommand {
+    override val label: String get() = "Text style"
+
+    override fun apply(doc: EditDocument): EditDocument {
+        val caption = doc.textOverlayById(effectId) ?: return doc
+        if (caption.spec == spec) return doc
+        return doc.withEffect(caption.copy(spec = spec))
+    }
+
+    /** No lane: a caption lives on the effect stack. See the file's KDoc. */
     override fun touchedTrackIds(document: EditDocument): Set<String> = emptySet()
 }
 

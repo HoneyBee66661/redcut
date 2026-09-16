@@ -167,9 +167,11 @@ reachable, and the ruler must never crowd below `MIN_TICK_SPACING_PX`. So `MINIM
 `MAXIMUM = 480f` (a frame at 8 px), `DEFAULT = 60f`, and `rulerIntervalUs()` grows the ladder
 `frame → 100 ms → 500 ms → 1 s → 2 s → 5 s → 10 s → 30 s → 1 min → …` as the zoom coarsens.
 
-**Step 1:** failing tests — `the coarsest zoom still separates seconds` (`MINIMUM.pixelsPerSecond >= 24f`),
-`the finest zoom makes a frame easier to see than a pixel` (`MINIMUM` of a frame `> 4f`), and
-`the range is at least a factor of 16`.
+**Step 1:** failing tests — `the zoom reaches from an hour down to a frame` (an HOUR at `MINIMUM` fits a
+360 px viewport, and a 60 fps frame at `MAXIMUM` is at least 4 px wide), `the ruler's ladder includes
+every granularity the user named` (`FRAME_INTERVAL_US`, 100 ms, 500 ms and 1 s are all in
+`TICK_INTERVALS_US`, and the list is in strict order), and `the zoom reports when it is at an end of its
+range` (`MINIMUM.isAtMinimum`, `MAXIMUM.isAtMaximum`, `DEFAULT` at neither).
 **Steps 2–4:** implement; run.
 **Step 5:** commit.
 

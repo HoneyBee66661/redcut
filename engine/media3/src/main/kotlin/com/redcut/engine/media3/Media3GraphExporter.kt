@@ -6,6 +6,7 @@ import androidx.annotation.OptIn
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.transformer.AudioEncoderSettings
+import androidx.media3.transformer.Composition
 import androidx.media3.transformer.DefaultEncoderFactory
 import androidx.media3.transformer.ExportException
 import androidx.media3.transformer.ProgressHolder
@@ -16,6 +17,8 @@ import com.redcut.core.common.logging.RedcutLogger
 import com.redcut.core.media.MediaResourceBroker
 import com.redcut.domain.render.OutputSpec
 import com.redcut.domain.render.RenderGraph
+import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.delay

@@ -86,8 +86,6 @@ internal class TimelineGestures(
     val tap: (screenX: Float, screenY: Float) -> Unit,
     val trim: TrimGestures,
     val reorder: ReorderGestures,
-    /** The caption lane's edge drag (FR-4.3's card 4). The band's body tap rides [tap]. */
-    val textTrim: TextTrimGestures,
 )
 
 /**
@@ -293,14 +291,6 @@ internal fun timelineGestureHandlers(
             cancel = { onIntent(EditorIntent.CancelTrim) },
         ),
         reorder = reorder,
-        textTrim = TextTrimGestures(
-            begin = { effectId, edge, us ->
-                onIntent(EditorIntent.BeginTextTrim(effectId, edge, us))
-            },
-            update = { us -> onIntent(EditorIntent.UpdateTextTrim(us)) },
-            end = { onIntent(EditorIntent.EndTextTrim) },
-            cancel = { onIntent(EditorIntent.CancelTextTrim) },
-        ),
     )
 }
 
@@ -325,10 +315,12 @@ internal fun Modifier.timelineGestures(
     rulerHeightPx: Float,
     actions: TimelineGestures,
     textLane: TextLane? = null,
+    textTrim: TextTrimGestures? = null,
 ): Modifier {
     val currentGeometry by rememberUpdatedState(geometry)
     val currentActions by rememberUpdatedState(actions)
     val currentTextLane by rememberUpdatedState(textLane)
+    val currentTextTrim by rememberUpdatedState(textTrim)
 
     return this
         .pointerInput(rulerHeightPx) {
@@ -355,19 +347,7 @@ internal fun Modifier.timelineGestures(
             }
         }
         .pointerInput(rulerHeightPx, textLane?.topPx) {
-            awaitEachGesture {
-                // The caption lane's edges (FR-4.3's card 4), after the clips': a y can only be in one
-                // band, so the two trims never contend for the same press, and the order keeps the
-                // clips' behaviour bit-identical to what it was before the lane existed.
-                currentTextLane?.let { lane ->
-                    textTrimGesture(
-                        geometry = currentGeometry,
-                        rulerHeightPx = rulerHeightPx,
-                        lane = lane,
-                        actions = currentActions.textTrim,
-                    )
-                }
-            }
+            textLaneTrimPress(currentGeometry, rulerHeightPx, currentTextLane, currentTextTrim)
         }
         .pointerInput(rulerHeightPx) {
             detectDragGesturesAfterLongPress(
@@ -404,6 +384,38 @@ internal fun Modifier.timelineGestures(
                 }
             }
         }
+}
+
+/**
+ * The caption lane's edge press (FR-4.3's card 4), in its own pointer scope.
+ *
+ * Extracted from [timelineGestures] because the chained detector pushed that composable over
+ * detekt's LongMethod limit — and the extraction is a responsibility, not a line count: the lane is
+ * the ONE detector that needs the text trim's geometry, so it reads the live lane and trim through
+ * the same [rememberUpdatedState] snapshot the other detectors read the actions through.
+ */
+private suspend fun AwaitPointerEventScope.textLaneTrimPress(
+    geometry: TimelineGeometry,
+    rulerHeightPx: Float,
+    textLane: TextLane?,
+    textTrim: TextTrimGestures?,
+) {
+    awaitEachGesture {
+        // The caption lane's edges, after the clips': a y can only be in one band, so the two trims
+        // never contend for the same press, and the order keeps the clips' behaviour bit-identical to
+        // what it was before the lane existed.
+        textLane?.let { lane ->
+            val trim = textTrim
+            if (trim != null) {
+                textTrimGesture(
+                    geometry = geometry,
+                    rulerHeightPx = rulerHeightPx,
+                    lane = lane,
+                    actions = trim,
+                )
+            }
+        }
+    }
 }
 
 /**

@@ -108,12 +108,7 @@ internal fun TimelineCanvas(
     // the document's captions. The band's top is the tracks' own layout (one track height each, from the
     // ruler down), read off the geometry's lane rects rather than counted here — the lane stack is the
     // geometry's answer, and a second count is how a band drifts out of the stack it belongs to.
-    val textItems = remember(document) { document.textLaneItems() }
-    val textLane = TextLane(
-        topPx = rulerHeightPx + (layer.geometry.laneRects().lastOrNull()?.bottomPx ?: 0f),
-        heightPx = layer.geometry.trackHeightPx,
-        items = textItems,
-    )
+    val textLane = remember(document) { textLaneFor(document, layer.geometry, rulerHeightPx) }
     // The reorder drag's state lives HERE rather than in `EditorUiState`: until the finger lifts the
     // document has not changed at all, and the marker is a drawing of where it would land. That is the
     // same reasoning as the viewport below, from the other direction — a drag in flight is not an edit
@@ -142,12 +137,23 @@ internal fun TimelineCanvas(
         selectedTextId = (selection as? Selection.Text)?.effectId,
     )
 
+    // The caption lane's edge-drag callbacks (FR-4.3's card 4). Built here, next to `onIntent`,
+    // rather than inside the gesture-handler bundle: they are the TEXT lane's own gestures, not a
+    // timeline-wide behaviour, and the handler bundle stays one value for the clip gestures.
+    val textTrim = TextTrimGestures(
+        begin = { effectId, edge, us -> onIntent(EditorIntent.BeginTextTrim(effectId, edge, us)) },
+        update = { us -> onIntent(EditorIntent.UpdateTextTrim(us)) },
+        end = { onIntent(EditorIntent.EndTextTrim) },
+        cancel = { onIntent(EditorIntent.CancelTextTrim) },
+    )
+
     Canvas(
         modifier = modifier.timelineSurface(
             geometry = layer.geometry,
             rulerHeightPx = rulerHeightPx,
             actions = actions,
             textLane = textLane,
+            textTrim = textTrim,
             onViewportWidthPx = { viewportWidthPx = it },
         ),
     ) {
@@ -292,6 +298,7 @@ private fun Modifier.timelineSurface(
     rulerHeightPx: Float,
     actions: TimelineGestures,
     textLane: TextLane?,
+    textTrim: TextTrimGestures?,
     onViewportWidthPx: (Float) -> Unit,
 ): Modifier = this
     .fillMaxSize()
@@ -301,6 +308,7 @@ private fun Modifier.timelineSurface(
         rulerHeightPx = rulerHeightPx,
         actions = actions,
         textLane = textLane,
+        textTrim = textTrim,
     )
 
 /**

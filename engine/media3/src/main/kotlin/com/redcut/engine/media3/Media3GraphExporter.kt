@@ -3,13 +3,11 @@ package com.redcut.engine.media3
 import android.content.Context
 import android.media.MediaCodecInfo.CodecProfileLevel
 import androidx.annotation.OptIn
-import androidx.media3.common.Effect
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.transformer.AudioEncoderSettings
 import androidx.media3.transformer.DefaultEncoderFactory
 import androidx.media3.transformer.ExportException
-import androidx.media3.transformer.ExportResult as MediaExportResult
 import androidx.media3.transformer.ProgressHolder
 import androidx.media3.transformer.Transformer
 import androidx.media3.transformer.VideoEncoderSettings
@@ -25,6 +23,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
+import androidx.media3.transformer.ExportResult as MediaExportResult
 
 /**
  * How the export ends. The shape is LibreCuts' `RenderResult` kept and its FFmpeg half dropped: a

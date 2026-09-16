@@ -406,14 +406,17 @@ class EditorViewModel @Inject constructor(
             // stale-id rule [selectClip] keeps, and for the same reason: the id comes from a hit test
             // against a frame the user SAW, and a caption removed between that frame and the tap (an
             // undo, a reopened project) must not leave the inspector editing an effect that is not there.
-            is EditorIntent.SelectTextOverlay -> {
-                val exists = history.current.textOverlayById(intent.effectId) != null
-                if (exists) {
-                    _state.value = _state.value.copy(selection = Selection.Text(intent.effectId))
-                } else {
-                    logger.d(TAG, "ignored a selection for ${intent.effectId}: no such caption")
-                }
-            }
+            // The whole branch is one call to a file-level function so updateView's `when` stays a flat
+            // dispatch — the stale-id guard is the ONE branch this arm owns, and counting it here pushed
+            // the function over detekt's CyclomaticComplexMethod limit.
+            is EditorIntent.SelectTextOverlay ->
+                applyTextSelection(
+                    effectId = intent.effectId,
+                    document = history.current,
+                    state = _state.value,
+                    setState = { _state.value = it },
+                    onIgnored = { logger.d(TAG, it) },
+                )
 
             EditorIntent.ClearSelection ->
                 _state.value = _state.value.copy(selection = Selection.None)
@@ -738,6 +741,31 @@ internal data class KeyframeTransport(
     val clipStartUs: Long,
     val localUs: Long,
 )
+
+/**
+ * Selects [effectId] when the document actually holds that caption, and reports ignored otherwise.
+ *
+ * File-level (rather than a ViewModel member) so [updateView]'s `when` stays a flat dispatch: the
+ * stale-id guard is this function's one branch, and counting it in the `when`'s own cyclomatic total
+ * pushed the dispatcher over detekt's limit. The same stale-id rule [selectClip] keeps, for the same
+ * reason: the id comes from a hit test against a frame the user SAW, and a caption removed between
+ * that frame and the tap (an undo, a reopened project) must not leave the inspector editing an effect
+ * that is not there.
+ */
+private fun applyTextSelection(
+    effectId: String,
+    document: EditDocument,
+    state: EditorUiState,
+    setState: (EditorUiState) -> Unit,
+    onIgnored: (String) -> Unit,
+) {
+    val exists = document.textOverlayById(effectId) != null
+    if (exists) {
+        setState(state.copy(selection = Selection.Text(effectId)))
+    } else {
+        onIgnored("ignored a selection for $effectId: no such caption")
+    }
+}
 
 /**
  * The selected clip's active keyframable property and the playhead's position within it, or null when

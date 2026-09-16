@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -30,7 +31,6 @@ import com.redcut.feature.editor.Selection
 import com.redcut.feature.editor.ToolState
 import com.redcut.feature.editor.clipIdOrNull
 import com.redcut.feature.editor.laneSpans
-import com.redcut.feature.editor.textLaneItems
 
 /**
  * The timeline surface (spec §7.1): a custom Compose `Canvas`, not a row of composables.
@@ -104,48 +104,25 @@ internal fun TimelineCanvas(
     val paint = rememberTimelinePaint()
     val rulerHeightPx = RULER_HEIGHT_DP * density
 
-    // The caption's lane (FR-4.3's card 4): the band sits under the LAST media lane, and its items are
-    // the document's captions. The band's top is the tracks' own layout (one track height each, from the
-    // ruler down), read off the geometry's lane rects rather than counted here — the lane stack is the
-    // geometry's answer, and a second count is how a band drifts out of the stack it belongs to.
+    // The caption's lane (FR-4.3's card 4) under the last media lane; textLaneFor carries the "where"
+    // rule, so only the reading is here.
     val textLane = remember(document) { textLaneFor(document, layer.geometry, rulerHeightPx) }
     // The reorder drag's state lives HERE rather than in `EditorUiState`: until the finger lifts the
-    // document has not changed at all, and the marker is a drawing of where it would land. That is the
-    // same reasoning as the viewport below, from the other direction — a drag in flight is not an edit
-    // yet, so it must not be state the whole editor recomposes for or history can see.
-    var reorderDrag by remember { mutableStateOf<ReorderDrag?>(null) }
-    val reorderGestures = buildReorderGestures(
+    // document has not changed at all, and the marker is a drawing of where it would land. A drag in
+    // flight is not an edit yet, so it must not be state the whole editor recomposes for.
+    val (actions, reorderDrag) = rememberTimelineActions(
         document = document,
+        selection = selection,
         geometry = layer.geometry,
-        current = { reorderDrag },
-        setDrag = { reorderDrag = it },
-        onIntent = onIntent,
-    )
-    val actions = timelineGestureHandlers(
-        geometry = layer.geometry,
-        onIntent = onIntent,
-        clipsById = layer.clipsById,
-        spansByClip = layer.spansByClip,
         playheadUs = playheadUs,
+        reorderTextLane = textLane,
+        layer = layer,
+        onIntent = onIntent,
         setZoomPxPerSecond = { zoomPxPerSecond = it },
-        reorder = reorderGestures,
-        textLane = textLane,
-        // The tap rule is stateful: the first tap on a clip selects it, and a tap on the already
-        // selected clip seeks (device pass, second round). The text lane's body has its own toggle,
-        // routed by the same tap callback.
-        selectedClipId = (selection as? Selection.Clip)?.clipId,
-        selectedTextId = (selection as? Selection.Text)?.effectId,
     )
 
-    // The caption lane's edge-drag callbacks (FR-4.3's card 4). Built here, next to `onIntent`,
-    // rather than inside the gesture-handler bundle: they are the TEXT lane's own gestures, not a
-    // timeline-wide behaviour, and the handler bundle stays one value for the clip gestures.
-    val textTrim = TextTrimGestures(
-        begin = { effectId, edge, us -> onIntent(EditorIntent.BeginTextTrim(effectId, edge, us)) },
-        update = { us -> onIntent(EditorIntent.UpdateTextTrim(us)) },
-        end = { onIntent(EditorIntent.EndTextTrim) },
-        cancel = { onIntent(EditorIntent.CancelTextTrim) },
-    )
+    // The caption lane's edge-drag callbacks (FR-4.3's card 4), mapped by [textTrimFor].
+    val textTrim = textTrimFor(onIntent)
 
     Canvas(
         modifier = modifier.timelineSurface(
@@ -161,7 +138,7 @@ internal fun TimelineCanvas(
         // screen: its 3× height crosses this band the same way it crosses the tracks, and a lane drawn
         // after it would cut the line in two (FR-4.3's card 4: one caption per item, edges draggable,
         // body tappable).
-        val marks = timelineMarks(document, playheadUs, selection, tool, reorderDrag)
+        val marks = timelineMarks(document, playheadUs, selection, tool, reorderDrag.value)
         drawTextLane(
             lane = textLane,
             geometry = layer.geometry,
@@ -310,6 +287,49 @@ private fun Modifier.timelineSurface(
         textLane = textLane,
         textTrim = textTrim,
     )
+
+/**
+ * The gesture handlers plus the reorder drag's in-flight state, as one remembered value.
+ *
+ * Extracted from [TimelineCanvas] because the composable crossed detekt's LongMethod limit once the
+ * lane work joined it — the reorder drag's state must live next to the handlers that read and write
+ * it (a drag in flight is not an edit yet, so it is not `EditorUiState`), and the pair is one thing
+ * the canvas mounts. Returns the handlers and the drag together so the draw pass keeps reading the
+ * same drag the gestures write.
+ */
+@Composable
+private fun rememberTimelineActions(
+    document: EditDocument,
+    selection: Selection,
+    geometry: TimelineGeometry,
+    playheadUs: Long,
+    reorderTextLane: TextLane,
+    layer: TimelineLayer,
+    onIntent: (EditorIntent) -> Unit,
+    setZoomPxPerSecond: (Float) -> Unit,
+): Pair<TimelineGestures, State<ReorderDrag?>> {
+    var reorderDrag by remember { mutableStateOf<ReorderDrag?>(null) }
+    val reorderGestures = buildReorderGestures(
+        document = document,
+        geometry = geometry,
+        current = { reorderDrag },
+        setDrag = { reorderDrag = it },
+        onIntent = onIntent,
+    )
+    val actions = timelineGestureHandlers(
+        geometry = geometry,
+        onIntent = onIntent,
+        clipsById = layer.clipsById,
+        spansByClip = layer.spansByClip,
+        playheadUs = playheadUs,
+        setZoomPxPerSecond = setZoomPxPerSecond,
+        reorder = reorderGestures,
+        textLane = reorderTextLane,
+        selectedClipId = (selection as? Selection.Clip)?.clipId,
+        selectedTextId = (selection as? Selection.Text)?.effectId,
+    )
+    return actions to reorderDrag
+}
 
 /**
  * Turns finger positions into a slot, using the document's own arithmetic.
@@ -466,6 +486,20 @@ private fun rememberThumbnails(
 
 /** The ruler strip's height. 24 dp is a finger's worth of target above the clips. */
 internal const val RULER_HEIGHT_DP = 24f
+
+/**
+ * The caption lane's edge-drag callbacks (FR-4.3's card 4): the four moments, mapped to intents.
+ *
+ * Extracted from [TimelineCanvas] so the composable reads its gestures as one line — the inlined
+ * construction pushed the composable over detekt's LongMethod limit, and the four mappings are the
+ * lane's own contract, not the canvas's layout.
+ */
+private fun textTrimFor(onIntent: (EditorIntent) -> Unit): TextTrimGestures = TextTrimGestures(
+    begin = { effectId, edge, us -> onIntent(EditorIntent.BeginTextTrim(effectId, edge, us)) },
+    update = { us -> onIntent(EditorIntent.UpdateTextTrim(us)) },
+    end = { onIntent(EditorIntent.EndTextTrim) },
+    cancel = { onIntent(EditorIntent.CancelTextTrim) },
+)
 
 /**
  * The playhead's red (UI revision 1, asked for by name).

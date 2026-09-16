@@ -1,6 +1,7 @@
 package com.redcut.feature.editor
 
 import android.graphics.Paint
+import android.graphics.Typeface
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -18,7 +19,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.AwaitPointerEventScope
@@ -26,24 +31,25 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.redcut.domain.document.AppliedEffect
+import com.redcut.domain.document.TextFontFace
 import com.redcut.domain.document.TextAlignment
 import com.redcut.domain.document.TextOverlayBox
 import com.redcut.domain.document.TextSpec
 import com.redcut.domain.document.TimeRange
-import com.redcut.domain.document.textOverlaysAt
-import com.redcut.domain.document.toOverlayBox
+import com.redcut.domain.render.CaptionFrame
+import com.redcut.domain.render.captionFramesAt
 import com.redcut.feature.editor.timeline.nextPointer
 
 /**
- * The captions on the preview (FR-4.3): drawn where they sit, and draggable to somewhere else.
+ * The captions on the preview (FR-4.3): drawn where they sit — in the style the inspector edits — and
+ * draggable to somewhere else.
  *
  * ### What is drawn, and when
  *
- * The captions whose range covers the playhead, in stack order — the list is the DOCUMENT's answer
- * ([com.redcut.domain.document.textOverlaysAt]) rather than this file's, so the preview and any later
- * reader of "what is on screen at this moment" ask one question. A caption outside its range is not drawn
- * at all; the user moves the playhead to it.
+ * The captions whose range covers the playhead, in stack order — the list is the RESOLVER's answer
+ * ([com.redcut.domain.render.captionFramesAt]) rather than this file's, because a caption is composited
+ * output: the same value the export burn-in paints into the encode, resolved by the same function in
+ * `:domain:render`. A caption outside its range is not drawn at all; the user moves the playhead to it.
  *
  * ### Why the text goes through the native canvas
  *
@@ -51,23 +57,24 @@ import com.redcut.feature.editor.timeline.nextPointer
  * a platform [Paint] and `nativeCanvas.drawText`, which is also where the sp-to-px conversion and the
  * alignment have to happen anyway. The paint is REMEMBERED and mutated per caption rather than built per
  * caption per frame, and the same instance is handed to the drag so the two readers of "how big is this
- * text" cannot disagree.
+ * text" cannot disagree. The typefaces are a remembered map for the same reason — [Typeface.create]
+ * would allocate per caption per frame, and the bundled faces are singletons the platform already holds.
  *
- * ### Why there is a drop shadow and no background box
+ * ### The style fields, and the order the passes run in
  *
- * A caption is drawn on the user's footage, not on the app's surface: a fixed light fill over a dark
- * shadow is what keeps it legible over a bright frame without inventing a background colour the model
- * does not carry. FR-4.3 lists "background" among its Musts, and the field for it belongs to the
- * inspector's card (J-2) along with the font, stroke and spacing controls that share its panel — an
- * additive `TextSpec` field with a default, not a guess made here. The shadow is a paint call and no
- * model change at all.
+ * The background band (when the spec carries one) is drawn first so the ink lands on it, then the shadow,
+ * then the fill, then the stroke outline — the order a caption reads in from the outside in, and the
+ * only order in which each pass stays visible under the next. The shadow predates the background field:
+ * it is what kept captions legible before a band was available, and it stays even with a band on, because
+ * the band hugs the text's bounds and the shadow covers the anti-aliased fringe between the two.
  *
  * ### Where the coordinates come from
  *
  * Canvas fractions, mapped onto the preview's own box — the same convention [ViewportOverlay] uses for the
  * crop rect, and for the same reason: the stage is a `SurfaceView` the renderer draws, so the composables
  * over it are an overlay on the frame rather than the frame itself. A caption's box agreeing with the
- * export's pixel geometry is §12.3's business (the preview/export parity harness), not this layer's.
+ * export's pixel geometry is the resolver's business (see above): both paths read the same
+ * [CaptionFrame], so the fractions leave the domain identical even though the pixels they land on differ.
  *
  * ### The gesture, and who loses
  *
@@ -78,7 +85,8 @@ import com.redcut.feature.editor.timeline.nextPointer
  *
  * The four moments go through [EditorIntent.TextGesture] to the same [GestureSession] the trim and slider
  * drags use — the preview follows the finger as a PREVIEW and the lift records ONE history entry (§7.3).
- * Building the command per frame here instead would put thirty "Move text" entries behind one drag.
+ * Building the command per frame here instead would put thirty "Move text" entries behind one drag. A
+ * press that never moves selects the caption for the inspector (J-2) — see the gesture's end.
  */
 
 /** A press this far outside a caption's text still picks it up, in dp. */
@@ -87,6 +95,10 @@ private const val CAPTION_TOUCH_PAD_DP = 8f
 /** The dark offset copy under every glyph, which is what keeps light text readable over bright footage. */
 private const val SHADOW_COLOR = 0xB3000000.toInt()
 private const val SHADOW_OFFSET_DP = 1.5f
+
+/** How far the background band extends past the text bounds, and how round its corners are. */
+private const val BACKGROUND_PAD_DP = 6f
+private const val BACKGROUND_CORNER_DP = 4f
 
 /** The start and end readout's own colour, and the gap between it and the box it belongs to. */
 private const val READOUT_COLOR = 0xE6FFFFFF.toInt()
@@ -109,14 +121,28 @@ internal fun TextOverlayLayer(
     onIntent: (EditorIntent) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val captions = state.document.textOverlaysAt(state.playheadUs)
-    // ONE paint, remembered: the draw mutates its size and colour per caption, an allocation per caption
-    // per frame is churn in the frame path, and the drag measures with the same object.
+    val captions = state.document.captionFramesAt(state.playheadUs)
+    // ONE paint, remembered: the draw mutates its size, colours and typeface per caption, an allocation
+    // per caption per frame is churn in the frame path, and the drag measures with the same object.
     val paint = remember { Paint(Paint.ANTI_ALIAS_FLAG) }
+    // The bundled faces, resolved once: see the file KDoc for why these are not created per caption.
+    val typefaces = remember {
+        mapOf(
+            TextFontFace.DEFAULT to Typeface.DEFAULT,
+            TextFontFace.SERIF to Typeface.SERIF,
+            TextFontFace.MONOSPACE to Typeface.MONOSPACE,
+        )
+    }
 
-    Box(modifier = modifier.captionDrag(captions = captions, paint = paint, onIntent = onIntent)) {
+    Box(
+        modifier = modifier.captionDrag(
+            captions = captions,
+            paint = paint,
+            onIntent = onIntent,
+        ),
+    ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
-            captions.forEach { caption -> drawCaption(caption, paint) }
+            captions.forEach { caption -> drawCaption(caption, paint, typefaces) }
         }
     }
 }
@@ -134,7 +160,7 @@ internal fun TextOverlayLayer(
  */
 @Composable
 private fun Modifier.captionDrag(
-    captions: List<AppliedEffect.Text>,
+    captions: List<CaptionFrame>,
     paint: Paint,
     onIntent: (EditorIntent) -> Unit,
 ): Modifier {
@@ -156,14 +182,14 @@ private fun Modifier.captionDrag(
  *
  * The shape is [com.redcut.feature.editor.timeline.trimGesture]'s, deliberately: a press that does not
  * move past the platform's touch slop is NOT a drag, so it rolls the preview back rather than committing a
- * "Move text" entry that changed nothing — a tap on a caption is not an edit.
+ * "Move text" entry that changed nothing — a tap on a caption selects it instead.
  *
  * The caption the press landed on is looked up at that moment and its box read THEN: that box is the
  * anchor the drag moves away from, and re-reading it per frame would make the caption chase its own
  * preview.
  */
 private suspend fun AwaitPointerEventScope.captionDragGesture(
-    captions: List<AppliedEffect.Text>,
+    captions: List<CaptionFrame>,
     paint: Paint,
     onIntent: (EditorIntent) -> Unit,
 ) {
@@ -173,7 +199,7 @@ private suspend fun AwaitPointerEventScope.captionDragGesture(
     val target = captions.firstOrNull { caption ->
         captionTextBoundsPx(
             spec = caption.spec,
-            box = caption.transform.toOverlayBox(),
+            box = caption.box,
             frameWidthPx = size.width.toFloat(),
             frameHeightPx = size.height.toFloat(),
             paint = paint,
@@ -182,10 +208,10 @@ private suspend fun AwaitPointerEventScope.captionDragGesture(
     // Not on a caption: the press belongs to whatever is underneath, and consuming it here would take the
     // viewport's own gesture away from the rest of the preview.
     if (target == null) return
-    val anchor = target.transform.toOverlayBox()
+    val anchor = target.box
 
     down.consume()
-    onIntent(EditorIntent.BeginTextDrag(target.id))
+    onIntent(EditorIntent.BeginTextDrag(target.effectId))
 
     var moved = false
     var pointer = nextPointer(down)
@@ -216,30 +242,56 @@ private suspend fun AwaitPointerEventScope.captionDragGesture(
         // read from the selection, and the tap is how the user points at the caption they mean. Fired
         // after the cancel so the tool state is closed before the selection moves; the handler refuses
         // an id the document no longer holds, the stale-id rule the ViewModel keeps.
-        onIntent(EditorIntent.SelectTextOverlay(target.id))
+        onIntent(EditorIntent.SelectTextOverlay(target.effectId))
     }
 }
 
 /**
- * Draws one caption: its words, and the start and end they are visible for.
+ * Draws one caption: its words — banded, shadowed, stroked — and the start and end they are visible for.
  *
  * The readout is FR-4.3's "start/end time" made visible at the moment the user is working on the caption —
  * it follows the box, so a caption dragged to the bottom of the frame carries its timing with it. The
  * editable pair of fields is the inspector's card; what this owes the requirement is that the range is
  * readable while the caption is on screen, and it is clamped so it cannot fall off the bottom.
  */
-private fun DrawScope.drawCaption(caption: AppliedEffect.Text, paint: Paint) {
+private fun DrawScope.drawCaption(
+    caption: CaptionFrame,
+    paint: Paint,
+    typefaces: Map<TextFontFace, Typeface>,
+) {
     val bounds = captionTextBoundsPx(
         spec = caption.spec,
-        box = caption.transform.toOverlayBox(),
+        box = caption.box,
         frameWidthPx = size.width,
         frameHeightPx = size.height,
         paint = paint,
     )
+    paint.typeface = typefaces[caption.spec.font] ?: Typeface.DEFAULT
+
+    // The band first, so every later pass lands on it rather than under it. See the file KDoc for the
+    // order the passes run in, and TextSpec for why the field is nullable.
+    caption.spec.backgroundArgb?.let { argb ->
+        drawBackgroundBand(bounds, argb)
+    }
+
     // `ascent` and `descent` rather than a `FontMetrics` object: this runs per caption per frame, and the
     // metrics accessor that returns an object would allocate one each time.
     val baseline = bounds.center.y - (paint.ascent() + paint.descent()) / HALF_DIVISOR
     drawShadowedText(caption.spec.content, bounds.left, baseline, paint, caption.spec.colorArgb)
+
+    // The stroke is a second pass over the same glyphs, not a paint style on the fill pass: STROKE would
+    // hollow the fill out entirely, and an outline OVER the fill is the look the user asked for.
+    if (caption.spec.strokeWidthSp > 0f) {
+        val canvas = drawContext.canvas.nativeCanvas
+        val fillStyle = paint.style
+        val fillColor = paint.color
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = caption.spec.strokeWidthSp.sp.toPx()
+        paint.color = caption.spec.strokeColorArgb
+        canvas.drawText(caption.spec.content, bounds.left, baseline, paint)
+        paint.style = fillStyle
+        paint.color = fillColor
+    }
 
     paint.textSize = READOUT_TEXT_SIZE_SP.sp.toPx()
     val gapPx = READOUT_GAP_DP.dp.toPx()
@@ -251,6 +303,29 @@ private fun DrawScope.drawCaption(caption: AppliedEffect.Text, paint: Paint) {
         y = readoutBaseline,
         paint = paint,
         color = READOUT_COLOR,
+    )
+}
+
+/** The band behind the words: the text's bounds grown by a pad, with rounded corners. */
+private fun DrawScope.drawBackgroundBand(bounds: Rect, argb: Int) {
+    val padPx = BACKGROUND_PAD_DP.dp.toPx()
+    val radiusPx = BACKGROUND_CORNER_DP.dp.toPx()
+    val band = bounds.inflate(padPx)
+    drawPath(
+        path = Path().apply {
+            addRoundRect(
+                RoundRect(
+                    rect = Rect(
+                        left = band.left,
+                        top = band.top,
+                        right = band.right,
+                        bottom = band.bottom,
+                    ),
+                    cornerRadius = CornerRadius(radiusPx, radiusPx),
+                ),
+            )
+        },
+        color = Color(argb),
     )
 }
 

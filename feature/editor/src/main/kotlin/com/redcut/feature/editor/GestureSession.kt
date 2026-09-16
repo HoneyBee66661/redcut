@@ -5,8 +5,8 @@ import com.redcut.domain.document.AppliedEffect
 import com.redcut.domain.document.Clip
 import com.redcut.domain.document.ClipAdjustment
 import com.redcut.domain.document.ClipEdge
-import com.redcut.domain.document.SetTextStyle
 import com.redcut.domain.document.SetTextRange
+import com.redcut.domain.document.SetTextStyle
 import com.redcut.domain.document.SetTextTransform
 import com.redcut.domain.document.TextSpec
 import com.redcut.domain.document.TrimClip

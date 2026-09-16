@@ -15,5 +15,11 @@ dependencies {
     // `project.document.clips` in :feature:editor.
     api(project(":domain:document"))
 
+    // test-only, and deliberately so: the migration test reads the DERIVED timebase off a SourceRef,
+    // which is a :core:common type. Production code in this module never names it — the file format
+    // stores the pair and nothing else — so this stays on the test classpath instead of widening the
+    // module's API surface for a test's sake.
+    testImplementation(project(":core:common"))
+
     implementation(libs.kotlinx.serialization.json)
 }

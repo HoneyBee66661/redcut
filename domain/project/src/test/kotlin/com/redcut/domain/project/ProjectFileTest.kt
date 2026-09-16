@@ -1,6 +1,7 @@
 package com.redcut.domain.project
 
 import com.google.common.truth.Truth.assertThat
+import com.redcut.core.common.timeline.Timebase
 import com.redcut.domain.document.CanvasSpec
 import com.redcut.domain.document.Clip
 import com.redcut.domain.document.EditDocument
@@ -330,5 +331,27 @@ class ProjectFileTest {
         assertThat(ProjectCodec.decode("")).isNull()
         assertThat(ProjectCodec.decode("not json at all")).isNull()
         assertThat(ProjectCodec.decode("""{"id":"p1"}""")).isNull()
+    }
+
+    @Test
+    fun `a v2 file written before the frame-rate fields existed decodes on their defaults`() {
+        // The direction the committed fixture cannot exercise on its own: it was emitted by the CURRENT
+        // v2 serializer, so it carries the numerator/denominator pair WS T added. A user's existing
+        // project predates the field, so the two fragments are stripped here and the file must still
+        // open — with the pair at its defaults, and the 29.97 Float still resolving to the exact NTSC
+        // grid (30000/1001) rather than to a rate no frame boundary is ever on.
+        val text = v2Fixture().replace(""","frameRateNumerator":0,"frameRateDenominator":1""", "")
+        assertThat(text).doesNotContain("frameRateNumerator")
+
+        val opened = ProjectCodec.decode(text)!!
+
+        val plain = opened.document.sources.single { it.id == "src-plain" }
+        assertThat(plain.frameRateNumerator).isEqualTo(0)
+        assertThat(plain.frameRateDenominator).isEqualTo(1)
+        assertThat(plain.timebase).isEqualTo(Timebase(30, 1))
+
+        val rotated = opened.document.sources.single { it.id == "src-rotated" }
+        assertThat(rotated.frameRateNumerator).isEqualTo(0)
+        assertThat(rotated.timebase).isEqualTo(Timebase.NTSC_29_97)
     }
 }

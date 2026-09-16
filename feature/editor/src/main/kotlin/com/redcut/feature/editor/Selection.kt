@@ -24,11 +24,31 @@ sealed interface Selection {
      * caption features and not with the selection itself.
      */
     data class Text(val effectId: String) : Selection
+
+    /**
+     * One LANE is selected — the track, not a clip in it (UI revision 2, §WS E / Task E1).
+     *
+     * Selected by TRACK ID rather than by anything in the selection's own terms because a lane is the
+     * document's own object: the id is the one `TimelineHit.Track` carries and the one every command's
+     * `trackId` names, so a selection made by a tap is already in the shape the commands that act on a
+     * lane will need (E2's merge, and the toolbar's track tools).
+     *
+     * The rule it exists for, stated the way the tap implements it: tapping a CLIP selects the clip;
+     * tapping the lane that clip sits in — anywhere the lane's background shows — selects the TRACK;
+     * tapping whichever is already selected deselects. Clip and track selection are two answers to one
+     * question, so they replace each other rather than stacking: the inspector and the toolbar each show
+     * one thing, and a state holding both would have to pick a winner at every read anyway.
+     */
+    data class Track(val trackId: String) : Selection
 }
 
 /** The selected clip's id, or null when the selection is not a clip. */
 val Selection.clipIdOrNull: String?
     get() = (this as? Selection.Clip)?.clipId
+
+/** The selected lane's id, or null when the selection is not a track (§WS E / Task E1). */
+val Selection.trackIdOrNull: String?
+    get() = (this as? Selection.Track)?.trackId
 
 /**
  * This selection, made consistent with [clipIds].
@@ -37,6 +57,13 @@ val Selection.clipIdOrNull: String?
  * selection that still names the deleted id would leave the timeline highlighting nothing while
  * the inspector edits a clip that no longer exists. Clearing it here means no command has to
  * remember to.
+ *
+ * [trackIds] is the same rule for the lane selection: a track the document no longer holds — the only
+ * way a `Selection.Track` can go stale, since no command removes a lane yet — must not leave the
+ * toolbar showing track tools for a lane that is not there.
  */
-fun Selection.reconciledWith(clipIds: List<String>): Selection =
-    if (this is Selection.Clip && clipId !in clipIds) Selection.None else this
+fun Selection.reconciledWith(clipIds: List<String>, trackIds: List<String>): Selection = when {
+    this is Selection.Clip && clipId !in clipIds -> Selection.None
+    this is Selection.Track && trackId !in trackIds -> Selection.None
+    else -> this
+}

@@ -31,6 +31,7 @@ import com.redcut.feature.editor.Selection
 import com.redcut.feature.editor.ToolState
 import com.redcut.feature.editor.clipIdOrNull
 import com.redcut.feature.editor.laneSpans
+import com.redcut.feature.editor.trackIdOrNull
 
 /**
  * The timeline surface (spec §7.1): a custom Compose `Canvas`, not a row of composables.
@@ -174,6 +175,9 @@ private fun timelineMarks(
 ): TimelineMarks = TimelineMarks(
     playheadUs = playheadUs,
     selectedClipId = selection.clipIdOrNull,
+    // The lane the user is working with (§WS E / Task E1). Beside the clip's, not instead of it: the two
+    // selections are mutually exclusive by construction, and each is read by the marks that draw it.
+    selectedTrackId = selection.trackIdOrNull,
     trimmedClipId = (tool as? ToolState.Trimming)?.clipId,
     draggedEdge = (tool as? ToolState.Trimming)?.edge,
     draggedClipId = reorderDrag?.clipId,
@@ -329,6 +333,7 @@ private fun rememberTimelineActions(
         reorder = reorderGestures,
         textLane = reorderTextLane,
         selectedClipId = (selection as? Selection.Clip)?.clipId,
+        selectedTrackId = selection.trackIdOrNull,
         selectedTextId = (selection as? Selection.Text)?.effectId,
     )
     return actions to reorderDrag

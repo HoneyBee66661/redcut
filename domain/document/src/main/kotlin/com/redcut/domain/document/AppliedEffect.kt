@@ -69,10 +69,42 @@ data class ColorAdjustSpec(
 enum class TextAlignment { START, CENTER, END }
 
 /**
+ * The face a caption draws with (FR-4.3's "font").
+ *
+ * A closed set of the platform's generic families rather than a file path or an opaque id, and that is
+ * the MVP rather than a limitation to apologise for: a font IMPORT (LibreCuts' FontManager loads user
+ * files) needs a resolver the render tier does not have yet, and a name the render path cannot resolve
+ * is a caption that silently draws in the wrong face. Every value here resolves on any device, so the
+ * caption the preview draws is the caption the export burns — the property the resolver seam is about.
+ *
+ * Adding a bundled font later is an enum entry plus one mapping on the render side; adding a user font
+ * is a different feature with its own schema conversation.
+ */
+@Serializable
+enum class TextFontFace {
+    /** The platform's default face — the face every caption drew with before this field existed. */
+    DEFAULT,
+
+    /** A serif face, for titles that want one. */
+    SERIF,
+
+    /** A monospace face, for captions that count things. */
+    MONOSPACE,
+}
+
+/**
  * A static text overlay (spec §5, FR-4.3). No keyframes in MVP (§1.3).
  *
  * [colorArgb] is an Int rather than a Compose `Color` on purpose: Compose is an
  * Android/UI dependency and this module must stay on the JVM.
+ *
+ * ### The style fields are additive, and every one is defaulted (FR-4.3's Musts, J-2)
+ *
+ * [strokeWidthSp], [strokeColorArgb], [backgroundArgb] and [font] arrived after the first captions were
+ * on disk, so each carries a default that reproduces the behaviour captions had before it existed: no
+ * stroke (width 0), no background (null), the default face. An old project decodes to the caption it
+ * always drew, and every constructor site that predates the fields keeps compiling — the additive rule
+ * this module lands schema by. New fields go LAST for the same reason.
  */
 @Serializable
 data class TextSpec(
@@ -80,9 +112,26 @@ data class TextSpec(
     val fontSizeSp: Float = 48f,
     val colorArgb: Int = 0xFFFFFFFF.toInt(),
     val alignment: TextAlignment = TextAlignment.CENTER,
+    /**
+     * The outline's weight around each glyph, in sp. 0f means no stroke — the default, because an
+     * outline is a legibility choice the user makes per caption, and a stroke nobody asked for is a
+     * caption that draws different from the one they typed.
+     */
+    val strokeWidthSp: Float = 0f,
+    /** The outline's colour. Ignored while [strokeWidthSp] is 0, and defaulted so it is one less thing. */
+    val strokeColorArgb: Int = 0xFF000000.toInt(),
+    /**
+     * The band drawn behind the words, or null for none — the default, because the preview's drop shadow
+     * is what kept captions legible before this field existed, and a background the user did not ask for
+     * would cover the footage they added the caption over.
+     */
+    val backgroundArgb: Int? = null,
+    /** The face the words draw with. See [TextFontFace] for why the set is closed. */
+    val font: TextFontFace = TextFontFace.DEFAULT,
 ) {
     init {
         require(fontSizeSp > 0f) { "fontSizeSp must be > 0, was $fontSizeSp" }
+        require(strokeWidthSp >= 0f) { "strokeWidthSp must be >= 0, was $strokeWidthSp" }
     }
 }
 

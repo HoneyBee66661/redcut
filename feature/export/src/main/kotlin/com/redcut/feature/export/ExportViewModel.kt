@@ -10,7 +10,6 @@ import com.redcut.domain.document.timelineDurationUs
 import com.redcut.domain.project.ProjectStore
 import com.redcut.domain.render.TimelineCompiler
 import dagger.hilt.android.lifecycle.HiltViewModel
-import javax.inject.Inject
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -19,6 +18,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import javax.inject.Inject
 
 /**
  * The export sheet's state holder: one compile, one hand-off, one observed state.

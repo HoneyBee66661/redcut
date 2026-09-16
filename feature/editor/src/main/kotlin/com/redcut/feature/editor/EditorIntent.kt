@@ -243,8 +243,8 @@ sealed interface EditorIntent {
      *
      * The WHOLE [spec] arrives on every moment of this family rather than one field at a time: the row
      * that started the gesture copies the caption's current spec, changes its own field, and sends the
-     * result — so the command the gesture previews is the same whole-value [com.redcut.domain.document
-     * .SetTextStyle] a single tap produces, and the two cannot disagree about what a style edit means.
+     * result — so the command the gesture previews is the same whole-value `SetTextStyle` a single tap
+     * produces, and the two cannot disagree about what a style edit means.
      *
      * Like [BeginAdjust], this also selects the caption: a row and its selection are one thought, and
      * the inspector draws from the selection.
@@ -268,7 +268,11 @@ sealed interface EditorIntent {
      * finger's position IS the value the command needs. The command clamps it, exactly as it clamps the
      * inspector's fields.
      */
-    data class BeginTextTrim(val effectId: String, val edge: ClipEdge, val us: Long) : TextTrimGesture
+    data class BeginTextTrim(
+        val effectId: String,
+        val edge: ClipEdge,
+        val us: Long,
+    ) : TextTrimGesture
 
     /** The drag moved: the edge is now at [us] on the timeline. */
     data class UpdateTextTrim(val us: Long) : TextTrimGesture

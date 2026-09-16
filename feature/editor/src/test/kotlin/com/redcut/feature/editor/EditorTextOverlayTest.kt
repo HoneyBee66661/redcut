@@ -257,7 +257,12 @@ class EditorTextOverlayTest {
     fun `a whole style drag is one undo entry labelled Text style`() = runTest(dispatcher) {
         val (model, captionId) = importedCaption()
 
-        model.onIntent(EditorIntent.BeginTextStyle(captionId, TextSpec(content = "Text", fontSizeSp = 60f)))
+        model.onIntent(
+            EditorIntent.BeginTextStyle(
+                captionId,
+                TextSpec(content = "Text", fontSizeSp = 60f),
+            ),
+        )
         model.onIntent(EditorIntent.UpdateTextStyle(TextSpec(content = "Text", fontSizeSp = 72f)))
         model.onIntent(EditorIntent.UpdateTextStyle(TextSpec(content = "Text", fontSizeSp = 64f)))
         model.onIntent(EditorIntent.EndTextStyle)
@@ -278,7 +283,12 @@ class EditorTextOverlayTest {
         // The row and its selection are one thought, the rule BeginAdjust keeps for a slider and its
         // clip: the inspector draws from the selection, so a row that did not select would style a
         // caption the inspector is not showing.
-        model.onIntent(EditorIntent.BeginTextStyle(captionId, TextSpec(content = "Text", fontSizeSp = 60f)))
+        model.onIntent(
+            EditorIntent.BeginTextStyle(
+                captionId,
+                TextSpec(content = "Text", fontSizeSp = 60f),
+            ),
+        )
         model.onIntent(EditorIntent.EndTextStyle)
 
         assertThat(model.state.value.selection).isEqualTo(Selection.Text(captionId))
@@ -323,7 +333,8 @@ class EditorTextOverlayTest {
     }
 
     @Test
-    fun `a caption selection survives an undo of an edit that is not the caption`() = runTest(dispatcher) {
+    fun `a caption selection survives an undo of an edit that is not the caption`() =
+        runTest(dispatcher) {
         val (model, captionId) = importedCaption()
         // One more edit above the caption's, so the undo below rewinds THAT rather than the caption —
         // the state the reconciler runs in with a caption selection held. The duplicate is a discrete
@@ -369,7 +380,9 @@ class EditorTextOverlayTest {
 
         assertThat(model.caption().timeRange).isEqualTo(TimeRange(0L, 2_000_000L))
         assertThat(model.state.value.history)
-            .isEqualTo(HistoryState.Ready(canUndo = true, canRedo = false, topLabel = "Text timing"))
+            .isEqualTo(
+                HistoryState.Ready(canUndo = true, canRedo = false, topLabel = "Text timing"),
+            )
         assertThat(model.state.value.tool).isEqualTo(ToolState.Idle)
     }
 
@@ -387,7 +400,8 @@ class EditorTextOverlayTest {
     }
 
     @Test
-    fun `a text edge dragged past the other end collapses to the caption floor`() = runTest(dispatcher) {
+    fun `a text edge dragged past the other end collapses to the caption floor`() =
+        runTest(dispatcher) {
         val (model, captionId) = importedCaption()
 
         model.onIntent(EditorIntent.BeginTextTrim(captionId, ClipEdge.OUT, 1_000_000L))
@@ -413,7 +427,8 @@ class EditorTextOverlayTest {
         }
 
     @Test
-    fun `a text edge drag for a caption the document does not have is ignored`() = runTest(dispatcher) {
+    fun `a text edge drag for a caption the document does not have is ignored`() =
+        runTest(dispatcher) {
         val (model, _) = importedCaption()
         val before = model.state.value
 

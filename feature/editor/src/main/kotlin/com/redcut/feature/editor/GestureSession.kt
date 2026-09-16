@@ -286,12 +286,15 @@ internal class GestureSession(
     }
 
     /** The command a caption edge drag means: the dragged edge moves, the other end holds. */
-    private fun textRangeCommand(caption: AppliedEffect.Text, edge: ClipEdge, us: Long): SetTextRange =
-        if (edge == ClipEdge.IN) {
-            SetTextRange(effectId = caption.id, startUs = us, endUs = caption.timeRange.endUs)
-        } else {
-            SetTextRange(effectId = caption.id, startUs = caption.timeRange.startUs, endUs = us)
-        }
+    private fun textRangeCommand(
+        caption: AppliedEffect.Text,
+        edge: ClipEdge,
+        us: Long,
+    ): SetTextRange = if (edge == ClipEdge.IN) {
+        SetTextRange(effectId = caption.id, startUs = us, endUs = caption.timeRange.endUs)
+    } else {
+        SetTextRange(effectId = caption.id, startUs = caption.timeRange.startUs, endUs = us)
+    }
 
     /**
      * Ends whichever gesture is open, committing it as ONE entry. One function for both because the

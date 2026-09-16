@@ -74,7 +74,7 @@ class ServiceExportController @Inject constructor(
             // startService, not the foreground variant: the service is already up (the state above
             // says so), and the cancel is a message to it, not a reason to start it.
             context.startService(intent)
-        } catch (refused: IllegalStateException) {
+        } catch (@Suppress("SwallowedException") refused: IllegalStateException) {
             // The state and the service can race — a terminal state published between the check and
             // this send means the service already stopped itself. There is then nothing to cancel,
             // which is the outcome the user wanted anyway.

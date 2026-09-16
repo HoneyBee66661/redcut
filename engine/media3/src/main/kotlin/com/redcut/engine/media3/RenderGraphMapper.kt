@@ -124,7 +124,9 @@ internal object RenderGraphMapper {
         // Unset rather than an EMPTY Effects: the builder's default IS the empty set, and
         // writing it again would make "no effects" a distinction the item carries and the
         // parity test would have to argue about.
-        if (itemVideoEffects.isNotEmpty()) builder.setEffects(Effects(emptyList(), itemVideoEffects))
+        if (itemVideoEffects.isNotEmpty()) {
+            builder.setEffects(Effects(emptyList(), itemVideoEffects))
+        }
         return builder.build()
     }
 

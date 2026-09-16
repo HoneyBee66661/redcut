@@ -350,21 +350,7 @@ internal fun Modifier.timelineGestures(
             textLaneTrimPress(currentGeometry, rulerHeightPx, currentTextLane, currentTextTrim)
         }
         .pointerInput(rulerHeightPx) {
-            detectDragGesturesAfterLongPress(
-                onDragStart = { offset ->
-                    val geometryNow = currentGeometry
-                    if (offset.y <= rulerHeightPx) return@detectDragGesturesAfterLongPress
-                    // With y, so the clip picked up is one in THIS lane: a long press in lane 2 with lane
-                    // 1's clips under the same x must not pick one of those up.
-                    val hit = geometryNow.hitTest(offset.x, offset.y - rulerHeightPx)
-                    val clipId = (hit as? TimelineHit.Body)?.clipId
-                        ?: return@detectDragGesturesAfterLongPress
-                    currentActions.reorder.start(clipId, offset.x)
-                },
-                onDrag = { change, _ -> currentActions.reorder.update(change.position.x) },
-                onDragEnd = { currentActions.reorder.end() },
-                onDragCancel = { currentActions.reorder.cancel() },
-            )
+            reorderDragPress(currentGeometry, rulerHeightPx, currentActions)
         }
         .pointerInput(Unit) {
             detectTransformGestures { _, pan, gestureZoom, _ ->
@@ -416,6 +402,34 @@ private suspend fun AwaitPointerEventScope.textLaneTrimPress(
             }
         }
     }
+}
+
+/**
+ * The reorder drag's long-press detector, in its own pointer scope.
+ *
+ * Extracted from [timelineGestures] for the same reason as [textLaneTrimPress]: the composable's
+ * detector chain crossed detekt's LongMethod limit, and the reorder press is the one detector with
+ * its own hit-test rule (the y picks the lane, so a long press in lane 2 with lane 1's clips under the
+ * same x must not pick one of those up).
+ */
+private suspend fun AwaitPointerEventScope.reorderDragPress(
+    geometry: TimelineGeometry,
+    rulerHeightPx: Float,
+    actions: TimelineGestures,
+) {
+    detectDragGesturesAfterLongPress(
+        onDragStart = { offset ->
+            val geometryNow = geometry
+            if (offset.y <= rulerHeightPx) return@detectDragGesturesAfterLongPress
+            val hit = geometryNow.hitTest(offset.x, offset.y - rulerHeightPx)
+            val clipId = (hit as? TimelineHit.Body)?.clipId
+                ?: return@detectDragGesturesAfterLongPress
+            actions.reorder.start(clipId, offset.x)
+        },
+        onDrag = { change, _ -> actions.reorder.update(change.position.x) },
+        onDragEnd = { actions.reorder.end() },
+        onDragCancel = { actions.reorder.cancel() },
+    )
 }
 
 /**

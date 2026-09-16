@@ -18,7 +18,7 @@ import org.junit.jupiter.api.Test
  * test pins the delegation rather than a re-derivation) and WHAT a visible caption resolves to (the box
  * and the spec carried verbatim, because the burn-in composites the same ink the preview does).
  */
-class CaptionFramesTest {
+class CaptionFrameTest {
 
     private fun caption(
         id: String,
@@ -86,8 +86,9 @@ class CaptionFramesTest {
         )
 
         // Render order IS stack order; a burn-in that drew them in any other order would composite two
-        // overlapping captions the wrong way round.
-        assertThat(doc.captionFramesAt(SEC).map { it.effectId })
+        // overlapping captions the wrong way round. Queried mid-range: the default caption spans (0, SEC)
+        // and the range is HALF-OPEN, so SEC is the first instant it is over (see the half-open test).
+        assertThat(doc.captionFramesAt(SEC / 2).map { it.effectId })
             .containsExactly("under", "over")
             .inOrder()
     }
@@ -96,7 +97,7 @@ class CaptionFramesTest {
     fun `the box is the transform's crop rect read as an overlay box`() {
         // The box a DRAG wrote (SetTextTransform) is the box the renderer reads: pinned through the same
         // toOverlayBox conversion the preview's hit test uses, so a moved caption burns where it was
-        // dragged.
+        // dragged. Mid-range query, for the half-open reason above.
         val moved = TextOverlayBox.DEFAULT.movedToCentre(0.5f, 0.2f).toTransform()
         val doc = document(
             clips = emptyList(),
@@ -111,6 +112,6 @@ class CaptionFramesTest {
             ),
         )
 
-        assertThat(doc.captionFramesAt(SEC).single().box).isEqualTo(moved.toOverlayBox())
+        assertThat(doc.captionFramesAt(SEC / 2).single().box).isEqualTo(moved.toOverlayBox())
     }
 }

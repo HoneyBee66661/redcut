@@ -36,8 +36,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.redcut.domain.document.CutAvailability
 import com.redcut.domain.document.CutTool
+import com.redcut.domain.document.EditDocument
 import com.redcut.domain.document.availabilityFor
+import com.redcut.domain.document.clipAt
 import com.redcut.domain.document.mergeTrackAvailability
+import com.redcut.domain.document.trackIdOf
 
 /**
  * The Cut tools (FR-2.2–2.6), drawn as a tool strip rather than a row of text buttons.
@@ -68,8 +71,18 @@ import com.redcut.domain.document.mergeTrackAvailability
  */
 @Composable
 internal fun CutTools(state: EditorUiState, onIntent: (EditorIntent) -> Unit) {
-    val rows = remember(state.document, state.playheadUs) {
-        CUT_TOOLS.map { tool -> tool to state.document.availabilityFor(tool, state.playheadUs) }
+    // The (lane, clip) the tools act on, resolved ONCE and used by BOTH halves below — the enablement rule
+    // and the command a tap builds. That is not tidiness: the playhead is ONE number while the timeline has
+    // more than one lane, so a button enabled from the end-to-end reading could offer a cut the lane-scoped
+    // command then refuses, which is the failure FR-2's "disable the button and explain why" exists to
+    // prevent (WS C6).
+    val target = remember(state.document, state.selection, state.playheadUs) {
+        cutTargetIn(state.document, state.selection, state.playheadUs)
+    }
+    val rows = remember(state.document, state.selection, state.playheadUs) {
+        CUT_TOOLS.map { tool ->
+            tool to cutAvailabilityIn(state.document, target, tool, state.playheadUs)
+        }
     }
     val reason = cutToolsReason(rows.map { (_, availability) -> availability })
 
@@ -94,12 +107,60 @@ internal fun CutTools(state: EditorUiState, onIntent: (EditorIntent) -> Unit) {
                     contentDescription = tool.label(),
                     label = tool.label(),
                     enabled = availability is CutAvailability.Available,
-                    onClick = { onIntent(EditorIntent.ApplyCut(tool)) },
+                    onClick = {
+                        target?.let { onIntent(EditorIntent.ApplyCut(tool, it.clipId)) }
+                    },
                 )
             }
         }
         CutToolReason(reason)
     }
+}
+
+/** The lane and clip a Cut tool acts on, as the strip resolved them. */
+private data class CutTarget(val trackId: String, val clipId: String)
+
+/**
+ * Which (lane, clip) the Cut tools act on, or null when there is nothing on the timeline to act on.
+ *
+ * The SELECTED clip wins, and its lane comes from the document — that is the C6 reading, and it is what
+ * makes the tools act on what the user is working with rather than on whatever the end-to-end walk finds at
+ * the playhead. With nothing selected the playhead decides, which is the behaviour the strip has always
+ * had: the strip has to answer *something* before the user has tapped a clip, and "a tool at the playhead"
+ * is a question the flat reading can still answer while the timeline's lanes are what the tap clarifies.
+ *
+ * Its own function rather than three lines inside the composable so the resolution can be read on its own:
+ * it is the one place that decides which lane a tool means, and the two callers below are the reason it
+ * must be decided once.
+ */
+private fun cutTargetIn(
+    document: EditDocument,
+    selection: Selection,
+    playheadUs: Long,
+): CutTarget? {
+    val selected = (selection as? Selection.Clip)?.clipId
+        ?.takeIf { document.clipById(it) != null }
+    val clipId = selected ?: document.clipAt(playheadUs)?.id ?: return null
+    val trackId = document.trackIdOf(clipId) ?: return null
+    return CutTarget(trackId, clipId)
+}
+
+/**
+ * The availability rule the strip's row reads, in the lane-scoped reading whenever a target exists.
+ *
+ * [target] absent is not a case to fold away: with nothing on the timeline, `availabilityFor`'s flat reading
+ * is what produces the SENTENCE the user reads ("Import a video to start cutting."), and the buttons are
+ * all disabled, so there is no rule to disagree with.
+ */
+private fun cutAvailabilityIn(
+    document: EditDocument,
+    target: CutTarget?,
+    tool: CutTool,
+    playheadUs: Long,
+): CutAvailability = if (target != null) {
+    document.availabilityFor(tool, target.trackId, target.clipId, playheadUs)
+} else {
+    document.availabilityFor(tool, playheadUs)
 }
 
 /**

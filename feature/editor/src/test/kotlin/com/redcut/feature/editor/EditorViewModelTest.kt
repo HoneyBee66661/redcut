@@ -571,7 +571,7 @@ class EditorViewModelTest {
         val (model, clipIds) = importedClips(video())
         model.onIntent(EditorIntent.SetPlayhead(2_000_000L))
 
-        model.onIntent(EditorIntent.ApplyCut(CutTool.SPLIT))
+        model.onIntent(model.cutIntent(CutTool.SPLIT))
 
         // One entry, labelled with what the tool was: §7.3's "Undo Split". A cut is a discrete
         // decision, so unlike a trim drag it goes straight onto the stack.
@@ -594,7 +594,7 @@ class EditorViewModelTest {
         )
         model.onIntent(EditorIntent.SetPlayhead(6_000_000L))
 
-        model.onIntent(EditorIntent.ApplyCut(CutTool.CUT_LEFT))
+        model.onIntent(model.cutIntent(CutTool.CUT_LEFT))
 
         val first = model.state.value.document.clips[0]
         val second = model.state.value.document.clips[1]
@@ -613,7 +613,7 @@ class EditorViewModelTest {
         )
         model.onIntent(EditorIntent.SetPlayhead(1_000_000L))
 
-        model.onIntent(EditorIntent.ApplyCut(CutTool.DELETE))
+        model.onIntent(model.cutIntent(CutTool.DELETE))
 
         assertThat(model.state.value.document.clips.map { it.id }).containsExactly(clipIds[1])
     }
@@ -626,8 +626,8 @@ class EditorViewModelTest {
         model.onIntent(EditorIntent.SetPlayhead(9_000_000L))
         val before = model.state.value
 
-        model.onIntent(EditorIntent.ApplyCut(CutTool.SPLIT))
-        model.onIntent(EditorIntent.ApplyCut(CutTool.DELETE))
+        model.onIntent(model.cutIntent(CutTool.SPLIT))
+        model.onIntent(model.cutIntent(CutTool.DELETE))
 
         assertThat(model.state.value).isEqualTo(before)
     }
@@ -639,11 +639,11 @@ class EditorViewModelTest {
         // FR-2.4's precondition. Merging them back must be the inverse of the split.
         val (model, _) = importedClips(video())
         model.onIntent(EditorIntent.SetPlayhead(2_000_000L))
-        model.onIntent(EditorIntent.ApplyCut(CutTool.SPLIT))
+        model.onIntent(model.cutIntent(CutTool.SPLIT))
         assertThat(model.state.value.document.clips).hasSize(2)
 
         model.onIntent(EditorIntent.SetPlayhead(0L))
-        model.onIntent(EditorIntent.ApplyCut(CutTool.MERGE))
+        model.onIntent(model.cutIntent(CutTool.MERGE))
 
         assertThat(model.state.value.document.clips).hasSize(1)
         assertThat(model.state.value.document.clips.single().sourceOutUs).isEqualTo(4_000_000L)
@@ -664,7 +664,7 @@ class EditorViewModelTest {
         model.onIntent(EditorIntent.SetPlayhead(0L))
         val before = model.state.value
 
-        model.onIntent(EditorIntent.ApplyCut(CutTool.MERGE))
+        model.onIntent(model.cutIntent(CutTool.MERGE))
 
         // Two separately imported videos are not source-adjacent, so the toolbar's Merge is disabled
         // and the handler must refuse too — `MergeClips` returns the document unchanged, which would
@@ -677,7 +677,7 @@ class EditorViewModelTest {
         val (model, clipIds) = importedClips(video())
         model.onIntent(EditorIntent.SetPlayhead(1_000_000L))
 
-        model.onIntent(EditorIntent.ApplyCut(CutTool.DUPLICATE))
+        model.onIntent(model.cutIntent(CutTool.DUPLICATE))
 
         val clips = model.state.value.document.clips
         assertThat(clips).hasSize(2)
@@ -886,7 +886,7 @@ class EditorViewModelTest {
         val afterImport = projects.saved.size
 
         model.onIntent(EditorIntent.SetPlayhead(1_000_000L))
-        model.onIntent(EditorIntent.ApplyCut(CutTool.SPLIT))
+        model.onIntent(model.cutIntent(CutTool.SPLIT))
         advanceUntilIdle()
 
         // A split is a document change, so it is written; the playhead move is not, so it is not.

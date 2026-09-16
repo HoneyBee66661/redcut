@@ -11,9 +11,11 @@ import com.redcut.core.media.PreviewState
 import com.redcut.core.media.SourceReadResult
 import com.redcut.core.media.ThumbnailSource
 import com.redcut.core.media.ThumbnailStore
+import com.redcut.domain.document.CutTool
 import com.redcut.domain.document.ImportRejection
 import com.redcut.domain.document.ProbedSource
 import com.redcut.domain.document.SourceProbe
+import com.redcut.domain.document.clipAt
 import com.redcut.domain.project.ProjectStore
 import com.redcut.domain.project.ProjectSummary
 import com.redcut.domain.project.SavedProject
@@ -227,4 +229,26 @@ internal class RecordingReader(
         requested = uris
         return results
     }
+}
+
+/**
+ * The intent the Cut strip sends for [tool]: the tool, on the clip at the playhead (WS C6).
+ *
+ * A helper rather than a literal at every call site because the payload GAINED a clip, and the tests that
+ * tap a Cut tool are about what the tool does — not about how the strip resolved its target. Spelling the
+ * resolution out thirteen times would put that logic in the tests instead of in the one place that owns it
+ * (`cutTargetIn` in CutToolStrip.kt), and the two would then be free to disagree.
+ *
+ * It resolves the way the strip does — the SELECTED clip, else the playhead — so a test that cannot find a
+ * clip here would fail for the strip too.
+ */
+internal fun EditorViewModel.cutIntent(tool: CutTool): EditorIntent.ApplyCut {
+    val state = state.value
+    val clipId = (state.selection as? Selection.Clip)?.clipId
+        ?.takeIf { state.document.clipById(it) != null }
+        ?: state.document.clipAt(state.playheadUs)?.id
+    return EditorIntent.ApplyCut(
+        tool = tool,
+        clipId = requireNotNull(clipId) { "no clip to cut: neither selected nor at the playhead" },
+    )
 }

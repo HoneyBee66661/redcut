@@ -48,7 +48,7 @@ class TrackToolsTest {
         model.onIntent(EditorIntent.ImportMedia(listOf("content://media/1")))
         advanceUntilIdle()
         model.onIntent(EditorIntent.SetPlayhead(2_000_000L))
-        model.onIntent(EditorIntent.ApplyCut(CutTool.SPLIT))
+        model.onIntent(model.cutIntent(CutTool.SPLIT))
         val trackId = model.state.value.document.tracks.single().id
         assertThat(model.state.value.document.clips).hasSize(2)
 
@@ -72,7 +72,7 @@ class TrackToolsTest {
         model.onIntent(EditorIntent.ImportMedia(listOf("content://media/1")))
         advanceUntilIdle()
         model.onIntent(EditorIntent.SetPlayhead(2_000_000L))
-        model.onIntent(EditorIntent.ApplyCut(CutTool.SPLIT))
+        model.onIntent(model.cutIntent(CutTool.SPLIT))
         val trackId = model.state.value.document.tracks.single().id
         model.onIntent(EditorIntent.SelectTrack(trackId))
 

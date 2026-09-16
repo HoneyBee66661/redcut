@@ -99,8 +99,11 @@ class ExportViewModel @Inject constructor(
      * export, and the refusal the user needs is the disabled button, not a state change.
      */
     fun startExport() {
-        val current = document ?: return
         viewModelScope.launch(defaultDispatcher) {
+            // Read the document INSIDE the coroutine: init loads it asynchronously, and the FIFO
+            // launch order (init first, this second) is what lets a tap on a just-opened sheet
+            // still export. A synchronous read here would see null and swallow the tap.
+            val current = document ?: return@launch
             controller.start(
                 TimelineCompiler.compile(current, resolution.value.preset(current.canvas)),
             )

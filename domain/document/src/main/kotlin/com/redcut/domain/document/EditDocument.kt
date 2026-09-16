@@ -238,9 +238,24 @@ data class EditDocument(
  * What it writes is the lane's ITEMS, so a lane that held a [Gap] comes back with it gone: the clip list
  * a command hands over is the whole lane. Nothing builds a gap yet — the commands that insert and honour
  * them are the next workstream — and when one does, this is the function that has to learn about them.
+ *
+ * A caller that DOES know about gaps should hand over items instead (see [withTrackItems]); this overload
+ * stays because "the lane is exactly these clips" is what the clip commands mean, and rewriting them to
+ * carry items would make every one of them responsible for a hole none of them can create.
  */
 internal fun EditDocument.withTrackClips(trackId: String, clips: List<Clip>): EditDocument =
-    copy(tracks = tracks.map { if (it.id == trackId) it.copy(items = clips) else it })
+    withTrackItems(trackId, clips)
+
+/**
+ * Replaces the lane's whole item list — clips AND gaps.
+ *
+ * The gap-aware twin of [withTrackClips], for the commands whose subject IS the lane's item list rather
+ * than a set of clips in it: `MergeTrackClips` walks the items and ends a run at a gap, so writing the
+ * result back through the clip-only overload would delete exactly the hole it went to the trouble of
+ * respecting.
+ */
+internal fun EditDocument.withTrackItems(trackId: String, items: List<TrackItem>): EditDocument =
+    copy(tracks = tracks.map { if (it.id == trackId) it.copy(items = items) else it })
 
 /**
  * Replaces the effect with the same id as [effect], in place, or leaves the document alone.

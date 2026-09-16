@@ -336,9 +336,12 @@ selects the TRACK; tapping a selected item deselects (UI revision 1's toggle rul
 
 ### Task E2: Cross-clip operations
 
-**Files:** a new `domain/document/.../TrackCommands.kt`: `MergeTrackClips(trackId)` (concatenate adjacent
-clips of one source, preserving order, refusing when a non-adjacent source is involved) + tests. This is what
-the user said the track selection is FOR.
+**Files:** a new `domain/document/.../MergeTrackClips.kt`: `MergeTrackClips(trackId)` (concatenate adjacent
+clips of one source, preserving order, refusing when a non-adjacent source is involved) + tests. Named
+after the command rather than the `TrackCommands.kt` this plan first suggested, because detekt's
+`MatchingDeclarationName` fails a file whose single public declaration has another name — and there is one
+public declaration here, with two helpers that exist only for it. This is the operation the user said the
+track selection is FOR.
 
 ### Task E3: The toolbar shows track-scoped tools when a track is selected
 

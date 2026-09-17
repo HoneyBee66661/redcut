@@ -287,6 +287,7 @@ class CommandTargetsTest {
                 SetTextTransform(TEXT_ID, MOVED_CAPTION_BOX),
                 NO_LANES,
             ),
+            "SetTrackLocked" to Expectation(SetTrackLocked(VIDEO, true), ON_VIDEO),
             "SetTransform" to Expectation(SetTransform(VIDEO, "c1", FIXTURE_TRANSFORM), ON_VIDEO),
             "SetVolume" to Expectation(SetVolume(VIDEO, "c1", ClipRanges.VOLUME_MAX), ON_VIDEO),
             "SplitClip" to Expectation(SplitClip(VIDEO, "c2", MID_C2, "c3"), ON_VIDEO),

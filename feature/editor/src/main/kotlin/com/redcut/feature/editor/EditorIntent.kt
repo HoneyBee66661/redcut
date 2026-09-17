@@ -207,6 +207,17 @@ sealed interface EditorIntent {
     data class MergeTrack(val trackId: String) : Edit
 
     /**
+     * Lock or unlock the selected LANE (card t_aedc8ea2).
+     *
+     * The lane id is carried rather than read off the selection, for the same reason [MergeTrack]
+     * carries it: an intent that had to re-read the state could act on a selection that had moved
+     * since the tap. The target state is carried too — the toolbar knows whether the lane is locked
+     * and sends the OPPOSITE of what the button shows, and a command with an explicit target state
+     * is testable without consulting the document.
+     */
+    data class SetTrackLock(val trackId: String, val locked: Boolean) : Edit
+
+    /**
      * Move the clip at the playhead to [toIndex] (FR-2.7).
      *
      * The index comes from the document's own arithmetic ([reorderTargetIndex]) rather than from the

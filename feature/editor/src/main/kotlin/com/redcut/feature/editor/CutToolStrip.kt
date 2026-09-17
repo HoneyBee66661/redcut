@@ -20,6 +20,8 @@ import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -217,6 +219,14 @@ internal fun TrackTools(state: EditorUiState, onIntent: (EditorIntent) -> Unit) 
                 .horizontalScroll(rememberScrollState())
                 .padding(horizontal = 8.dp, vertical = TOOL_STRIP_PADDING_V),
         ) {
+            val isLocked = trackId?.let { state.document.trackById(it)?.isLocked == true } == true
+            ToolButton(
+                icon = if (isLocked) Icons.Filled.LockOpen else Icons.Filled.Lock,
+                contentDescription = if (isLocked) UNLOCK_LANE_LABEL else LOCK_LANE_LABEL,
+                label = if (isLocked) UNLOCK_LANE_LABEL else LOCK_LANE_LABEL,
+                enabled = trackId != null,
+                onClick = { trackId?.let { onIntent(EditorIntent.SetTrackLock(it, !isLocked)) } },
+            )
             ToolButton(
                 icon = Icons.AutoMirrored.Filled.MergeType,
                 contentDescription = MERGE_LANE_LABEL,
@@ -423,6 +433,10 @@ private const val DISABLED_OPACITY = 0.38f
 
 /** The lane strip's one button word (WS E3). A UI word here, like [CutTool.label] is. */
 private const val MERGE_LANE_LABEL = "Merge lane"
+
+/** The lane strip's lock button words (card t_aedc8ea2). */
+private const val LOCK_LANE_LABEL = "Lock lane"
+private const val UNLOCK_LANE_LABEL = "Unlock lane"
 
 /**
  * What the lane strip says when the selection names no lane.

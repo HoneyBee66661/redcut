@@ -21,6 +21,7 @@ import com.redcut.domain.document.MergeTrackClips
 import com.redcut.domain.document.RenameDocument
 import com.redcut.domain.document.ReorderClip
 import com.redcut.domain.document.SetKeyframes
+import com.redcut.domain.document.SetTrackLocked
 import com.redcut.domain.document.SetTransform
 import com.redcut.domain.document.TransformSpec
 import com.redcut.domain.document.UndoStack
@@ -257,6 +258,12 @@ class EditorViewModel @Inject constructor(
             is EditorIntent.MergeTrack -> {
                 logger.d(TAG, "merge lane ${intent.trackId}")
                 history.execute(MergeTrackClips(intent.trackId))
+                autosave()
+                publish()
+            }
+            is EditorIntent.SetTrackLock -> {
+                logger.d(TAG, "set lock ${intent.trackId} -> ${intent.locked}")
+                history.execute(SetTrackLocked(intent.trackId, intent.locked))
                 autosave()
                 publish()
             }

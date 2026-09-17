@@ -99,4 +99,51 @@ class TrackToolsTest {
 
         assertThat(model.state.value.document).isSameInstanceAs(before)
     }
+
+    @Test
+    fun `locking the selected lane refuses a cut until unlocked`() = runTest(dispatcher) {
+        // The lock trap the card exists for, through the exact path a tap takes: the toggle sends
+        // SetTrackLock(true) → the gate stops every other command on that lane → the toggle can still
+        // send SetTrackLock(false) because the gate exempts the command that owns the flag.
+        val model = viewModel(RecordingReader(listOf(video(durationUs = 4_000_000L))))
+        model.onIntent(EditorIntent.ImportMedia(listOf("content://media/1")))
+        advanceUntilIdle()
+        val trackId = model.state.value.document.tracks.single().id
+        model.onIntent(EditorIntent.SelectTrack(trackId))
+
+        // Lock the lane through the toolbar's intent.
+        model.onIntent(EditorIntent.SetTrackLock(trackId, locked = true))
+        assertThat(model.state.value.document.trackById(trackId)!!.isLocked).isTrue()
+
+        // A split at the playhead is refused: still one clip, and the last edit is still the lock.
+        model.onIntent(EditorIntent.SetPlayhead(2_000_000L))
+        model.onIntent(model.cutIntent(CutTool.SPLIT))
+        assertThat(model.state.value.document.clips).hasSize(1)
+        assertThat(model.state.value.document.trackById(trackId)!!.isLocked).isTrue()
+
+        // Unlock through the same toggle: the gate does NOT refuse it.
+        model.onIntent(EditorIntent.SetTrackLock(trackId, locked = false))
+        assertThat(model.state.value.document.trackById(trackId)!!.isLocked).isFalse()
+
+        // And now the cut works again.
+        model.onIntent(model.cutIntent(CutTool.SPLIT))
+        assertThat(model.state.value.document.clips).hasSize(2)
+    }
+
+    @Test
+    fun `locking a lane is one undo entry and undo unlocks it`() = runTest(dispatcher) {
+        val model = viewModel(RecordingReader(listOf(video(durationUs = 4_000_000L))))
+        model.onIntent(EditorIntent.ImportMedia(listOf("content://media/1")))
+        advanceUntilIdle()
+        val trackId = model.state.value.document.tracks.single().id
+        model.onIntent(EditorIntent.SelectTrack(trackId))
+
+        model.onIntent(EditorIntent.SetTrackLock(trackId, locked = true))
+        assertThat(model.state.value.document.trackById(trackId)!!.isLocked).isTrue()
+
+        model.onIntent(EditorIntent.Undo)
+
+        assertThat(model.state.value.document.trackById(trackId)!!.isLocked).isFalse()
+        assertThat(model.state.value.selection).isEqualTo(Selection.Track(trackId))
+    }
 }

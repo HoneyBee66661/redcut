@@ -82,6 +82,14 @@ sealed interface EditCommand {
  * that skipped the check. A command added later inherits the guard by existing: it answers
  * [EditCommand.touchedTrackIds] because the compiler makes it, and this function is what reads it.
  *
+ * The one exception is [SetTrackLocked] itself — the command that owns the flag the gate reads. It is
+ * exempted HERE rather than by lying in [SetTrackLocked.touchedTrackIds]: the gate refuses a
+ * `SetTrackLocked(trackId, locked = false)` on a locked lane, unlocking becomes impossible by
+ * construction, and the exemption is safe because the command can only change [Track.isLocked] — there
+ * is no way for a different edit to ride along on it. Every other command, compound parts included, is
+ * still refused the moment one of its touched lanes is locked; the exception is one command, not a
+ * kind of command.
+ *
  * A refusal is a plain no-op, in the same shape as a failed precondition — identical document, no
  * movement of [EditDocument.revision], no history entry. That last one is a decision rather than a side
  * effect: a refused command is not an edit, and an entry for something that never happened costs the
@@ -90,12 +98,11 @@ sealed interface EditCommand {
  * A lock on a lane the command does not touch is none of its business, which is what keeps the guarantee
  * from turning into a freeze.
  */
-fun EditDocument.after(command: EditCommand): EditDocument =
-    if (command.touchedTrackIds(this).any { trackById(it)?.isLocked == true }) {
-        this
-    } else {
-        command.apply(this)
-    }
+fun EditDocument.after(command: EditCommand): EditDocument = when {
+    command is SetTrackLocked -> command.apply(this)
+    command.touchedTrackIds(this).any { trackById(it)?.isLocked == true } -> this
+    else -> command.apply(this)
+}
 
 // ---------------------------------------------------------------------------
 // Composition
@@ -131,6 +138,35 @@ data class CompoundCommand(
      */
     override fun touchedTrackIds(document: EditDocument): Set<String> =
         commands.flatMapTo(mutableSetOf()) { it.touchedTrackIds(document) }
+}
+
+/**
+ * Lock or unlock a lane (card t_aedc8ea2).
+ *
+ * The one command the lock gate does NOT refuse: it sets the very flag the gate reads, so a
+ * `SetTrackLocked(trackId, locked = false)` on a locked lane would refuse itself by construction —
+ * unlocking would be impossible. The exemption is in [EditDocument.after], NOT here:
+ * [touchedTrackIds] still reports the lane honestly (that is what keeps the row in
+ * [CommandTargetsTest] and the gate's own reading true), and the gate still refuses every OTHER
+ * command that touches a locked lane. The lock command is the only one that travels this path, and
+ * it can only ever change [Track.isLocked] — there is no hole for a different edit to slip through.
+ *
+ * What [apply] changes is the lane's flag, nothing else: a locked lane's clips are untouched, and an
+ * unlocked lane stays as open to other commands as it was before the lock existed.
+ */
+data class SetTrackLocked(
+    val trackId: String,
+    val locked: Boolean,
+) : EditCommand {
+    override val label: String get() = if (locked) "Lock lane" else "Unlock lane"
+
+    override fun apply(doc: EditDocument): EditDocument = doc.copy(
+        tracks = doc.tracks.map { track ->
+            if (track.id == trackId) track.copy(isLocked = locked) else track
+        },
+    )
+
+    override fun touchedTrackIds(document: EditDocument): Set<String> = setOf(trackId)
 }
 
 // ---------------------------------------------------------------------------
